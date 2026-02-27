@@ -69,7 +69,10 @@ async function checkTrial(res) {
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
-
+app.get('/api/genhash', async (req, res) => {
+  const hash = bcrypt.hashSync('123456', 10);
+  res.json({ hash });
+});
 // ─── Auth Routes ──────────────────────────────────────────────────────────────
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
