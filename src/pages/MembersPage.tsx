@@ -1,0 +1,320 @@
+import { useState, useMemo } from 'react';
+import { Search, SortAsc, Filter, Plus, Edit, UserX, KeyRound, MessageSquare, Loader2 } from 'lucide-react';
+import { Card, Button, Modal, Badge, Input, Select } from '../components/ui';
+import { useApi } from '../hooks/useApi';
+import api from '../utils/api';
+import type { AuthUser, Member, Department, Ministry } from '../types';
+import { isAdmin, isLeader } from '../utils/permissions';
+
+interface Props { user: AuthUser; }
+
+const CULT_TYPES = [
+  { id: 1, label: 'Domingo Manhã' },
+  { id: 2, label: 'Domingo Noite' },
+  { id: 3, label: 'Terça (EDP)' },
+  { id: 4, label: 'Quarta Manhã' },
+  { id: 5, label: 'Quarta Noite' },
+  { id: 6, label: 'Quinta' },
+  { id: 7, label: 'Segunda Noite' },
+];
+
+export default function MembersPage({ user }: Props) {
+  const { data: members, loading, refetch } = useApi<Member[]>('/members');
+  const { data: departments } = useApi<Department[]>('/departments');
+  const { data: ministries } = useApi<Ministry[]>('/ministries');
+
+  const [search, setSearch] = useState('');
+  const [sortAlpha, setSortAlpha] = useState(false);
+  const [filterDept, setFilterDept] = useState<number[]>([]);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [editMember, setEditMember] = useState<Partial<Member> | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [pwModal, setPwModal] = useState<number | null>(null);
+  const [newPw, setNewPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const filtered = useMemo(() => {
+    let list = members || [];
+    if (search) list = list.filter(m => m.name.toLowerCase().includes(search.toLowerCase()) || m.email?.toLowerCase().includes(search.toLowerCase()));
+    if (filterDept.length > 0) list = list.filter(m => m.department_id && filterDept.includes(m.department_id));
+    // Leader: only their dept
+    if (isLeader(user.role) && !isAdmin(user.role) && user.member_id) {
+      const myDept = members?.find(m => m.id === user.member_id)?.department_id;
+      if (myDept) list = list.filter(m => m.department_id === myDept);
+    }
+    if (sortAlpha) list = [...list].sort((a, b) => a.name.localeCompare(b.name));
+    return list;
+  }, [members, search, filterDept, sortAlpha, user]);
+
+  function openNew() {
+    setEditMember({ role: 'Membro', status: 'Ativo', availability: {}, is_active: 1 });
+    setModalOpen(true);
+  }
+
+  function openEdit(m: Member) {
+    setEditMember({ ...m });
+    setModalOpen(true);
+  }
+
+  async function saveMember() {
+    if (!editMember?.name) return;
+    setSaving(true); setError('');
+    try {
+      if (editMember.id) {
+        await api.put(`/members/${editMember.id}`, editMember);
+      } else {
+        await api.post('/members', editMember);
+      }
+      setModalOpen(false);
+      refetch();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao salvar');
+    } finally { setSaving(false); }
+  }
+
+  async function toggleActive(m: Member) {
+    await api.put(`/members/${m.id}`, { ...m, is_active: m.is_active ? 0 : 1 });
+    refetch();
+  }
+
+  async function changePassword() {
+    if (newPw !== confirmPw) { setError('Senhas não coincidem'); return; }
+    if (newPw.length < 8) { setError('Mínimo 8 caracteres'); return; }
+    setSaving(true); setError('');
+    try {
+      await api.put(`/users/${pwModal}/password`, { password: newPw });
+      setPwModal(null); setNewPw(''); setConfirmPw('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro');
+    } finally { setSaving(false); }
+  }
+
+  function sendWhatsApp(m: Member) {
+    if (!m.whatsapp) return;
+    const phone = m.whatsapp.replace(/\D/g, '');
+    const msg = encodeURIComponent(`Olá ${m.name}! Você foi escalado. Confirme sua presença no sistema EcclesiaScale.`);
+    window.open(`https://api.whatsapp.com/send?phone=55${phone}&text=${msg}`, '_blank');
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <h1 className="text-xl font-bold text-stone-100">Voluntários</h1>
+        {(isAdmin(user.role) || isLeader(user.role)) && (
+          <Button onClick={openNew} size="sm"><Plus size={16} />Novo Voluntário</Button>
+        )}
+      </div>
+
+      {/* Controls */}
+      <div className="flex flex-wrap gap-3">
+        <div className="relative flex-1 min-w-48">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" size={16} />
+          <input
+            type="text" placeholder="Buscar voluntário..." value={search} onChange={e => setSearch(e.target.value)}
+            className="w-full bg-stone-800 border border-stone-700 rounded-lg pl-9 pr-4 py-2 text-stone-200 text-sm focus:outline-none focus:border-amber-500"
+          />
+        </div>
+        <button
+          onClick={() => setSortAlpha(!sortAlpha)}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all ${sortAlpha ? 'bg-amber-600/20 border-amber-600/40 text-amber-300' : 'bg-stone-800 border-stone-700 text-stone-400'}`}
+        >
+          <SortAsc size={15} /> A-Z
+        </button>
+        <button
+          onClick={() => setFilterOpen(true)}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all ${filterDept.length > 0 ? 'bg-amber-600/20 border-amber-600/40 text-amber-300' : 'bg-stone-800 border-stone-700 text-stone-400'}`}
+        >
+          <Filter size={15} /> Filtros {filterDept.length > 0 && `(${filterDept.length})`}
+        </button>
+      </div>
+
+      {/* Table */}
+      <Card className="overflow-hidden">
+        {loading ? (
+          <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-amber-500" size={24} /></div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-stone-700 bg-stone-800/50">
+                  <th className="text-left p-3 text-stone-400 font-medium text-xs">#</th>
+                  <th className="text-left p-3 text-stone-400 font-medium text-xs">Nome</th>
+                  <th className="text-left p-3 text-stone-400 font-medium text-xs">E-mail</th>
+                  <th className="text-left p-3 text-stone-400 font-medium text-xs hidden md:table-cell">WhatsApp</th>
+                  <th className="text-left p-3 text-stone-400 font-medium text-xs hidden lg:table-cell">Departamento</th>
+                  <th className="text-left p-3 text-stone-400 font-medium text-xs">Nível</th>
+                  <th className="text-left p-3 text-stone-400 font-medium text-xs">Status</th>
+                  {isAdmin(user.role) && <th className="text-left p-3 text-stone-400 font-medium text-xs">Cadastro</th>}
+                  <th className="text-right p-3 text-stone-400 font-medium text-xs">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((m, i) => (
+                  <tr key={m.id} className="border-b border-stone-800 hover:bg-stone-800/30 transition-colors">
+                    <td className="p-3 text-stone-500 text-xs">{i + 1}</td>
+                    <td className="p-3 text-stone-200 font-medium">{m.name}</td>
+                    <td className="p-3 text-stone-400 text-xs">{m.email || '—'}</td>
+                    <td className="p-3 text-stone-400 text-xs hidden md:table-cell">{m.whatsapp || '—'}</td>
+                    <td className="p-3 text-stone-400 text-xs hidden lg:table-cell">{m.department_name || '—'}</td>
+                    <td className="p-3">
+                      <Badge label={m.role} color={m.role === 'Admin' || m.role === 'SuperAdmin' ? 'red' : m.role === 'Líder' ? 'blue' : 'gray'} />
+                    </td>
+                    <td className="p-3">
+                      <Badge label={m.status} color={m.status === 'Ativo' ? 'green' : 'gray'} />
+                    </td>
+                    {isAdmin(user.role) && (
+                      <td className="p-3 text-stone-500 text-xs">{m.created_at?.slice(0, 10) || '—'}</td>
+                    )}
+                    <td className="p-3">
+                      <div className="flex items-center justify-end gap-1">
+                        {m.whatsapp && (
+                          <button onClick={() => sendWhatsApp(m)} title="Notificar via WhatsApp" className="text-emerald-500 hover:text-emerald-400 p-1 transition-colors">
+                            <MessageSquare size={15} />
+                          </button>
+                        )}
+                        {(isAdmin(user.role) || isLeader(user.role)) && (
+                          <>
+                            <button onClick={() => openEdit(m)} className="text-amber-400 hover:text-amber-300 p-1 transition-colors"><Edit size={15} /></button>
+                            <button onClick={() => toggleActive(m)} title={m.is_active ? 'Desativar' : 'Ativar'} className="text-stone-400 hover:text-stone-200 p-1 transition-colors"><UserX size={15} /></button>
+                          </>
+                        )}
+                        {isAdmin(user.role) && (
+                          <button onClick={() => { setPwModal(m.id); setError(''); }} className="text-blue-400 hover:text-blue-300 p-1 transition-colors"><KeyRound size={15} /></button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {filtered.length === 0 && (
+              <p className="text-center text-stone-500 text-sm py-10">Nenhum voluntário encontrado</p>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {/* Filter Modal */}
+      <Modal open={filterOpen} onClose={() => setFilterOpen(false)} title="Filtrar por Departamento" size="sm">
+        <div className="space-y-2">
+          {(departments || []).map(d => (
+            <label key={d.id} className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-stone-800 transition-colors">
+              <input
+                type="checkbox"
+                checked={filterDept.includes(d.id)}
+                onChange={e => setFilterDept(prev => e.target.checked ? [...prev, d.id] : prev.filter(id => id !== d.id))}
+                className="w-4 h-4 accent-amber-500"
+              />
+              <span className="text-stone-200 text-sm">{d.name}</span>
+            </label>
+          ))}
+          <div className="flex gap-2 pt-3">
+            <Button variant="outline" size="sm" onClick={() => setFilterDept([])}>Limpar</Button>
+            <Button size="sm" onClick={() => setFilterOpen(false)}>Aplicar</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Edit/Create Modal */}
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editMember?.id ? 'Editar Voluntário' : 'Novo Voluntário'} size="lg">
+        {editMember && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input label="Nome *" value={editMember.name || ''} onChange={e => setEditMember(m => ({ ...m!, name: e.target.value }))} />
+              <Input label="E-mail" type="email" value={editMember.email || ''} onChange={e => setEditMember(m => ({ ...m!, email: e.target.value }))} />
+              <Input label="WhatsApp" value={editMember.whatsapp || ''} onChange={e => setEditMember(m => ({ ...m!, whatsapp: e.target.value }))} placeholder="(11) 99999-0000" />
+              <Select
+                label="Nível de Acesso"
+                value={editMember.role || 'Membro'}
+                onChange={e => setEditMember(m => ({ ...m!, role: e.target.value as any }))}
+                options={[
+                  { value: 'Membro', label: 'Membro' },
+                  { value: 'Líder', label: 'Líder' },
+                  ...(isAdmin(user.role) ? [{ value: 'Admin', label: 'Admin' }] : []),
+                ]}
+              />
+              <Select
+                label="Departamento"
+                value={editMember.department_id || ''}
+                onChange={e => setEditMember(m => ({ ...m!, department_id: Number(e.target.value) }))}
+                placeholder="Selecionar..."
+                options={(departments || []).map(d => ({ value: d.id, label: d.name }))}
+              />
+              <Select
+                label="Status"
+                value={editMember.status || 'Ativo'}
+                onChange={e => setEditMember(m => ({ ...m!, status: e.target.value as any }))}
+                options={[{ value: 'Ativo', label: 'Ativo' }, { value: 'Inativo', label: 'Inativo' }]}
+              />
+            </div>
+
+            {/* Availability */}
+            <div>
+              <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Disponibilidade</label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                {CULT_TYPES.map(ct => (
+                  <label key={ct.id} className="flex items-center gap-2 cursor-pointer bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 hover:border-amber-600 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={!!(editMember.availability?.[ct.id])}
+                      onChange={e => setEditMember(m => ({ ...m!, availability: { ...m!.availability, [ct.id]: e.target.checked } }))}
+                      className="w-3.5 h-3.5 accent-amber-500"
+                    />
+                    <span className="text-stone-300 text-xs leading-tight">{ct.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Ministries */}
+            <div>
+              <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Ministérios</label>
+              <div className="flex flex-wrap gap-2">
+                {(ministries || []).map(min => {
+                  const selected = editMember.ministries?.some(mm => mm.id === min.id);
+                  return (
+                    <button
+                      key={min.id}
+                      type="button"
+                      onClick={() => {
+                        const curr = editMember.ministries || [];
+                        setEditMember(m => ({
+                          ...m!,
+                          ministries: selected ? curr.filter(mm => mm.id !== min.id) : [...curr, min]
+                        }));
+                      }}
+                      className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${selected ? 'bg-amber-600/20 border-amber-500 text-amber-300' : 'bg-stone-800 border-stone-600 text-stone-400 hover:border-stone-500'}`}
+                    >
+                      {min.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {error && <p className="text-red-400 text-xs">{error}</p>}
+            <div className="flex gap-3 pt-2">
+              <Button variant="outline" onClick={() => setModalOpen(false)}>Cancelar</Button>
+              <Button onClick={saveMember} loading={saving}>Salvar</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Change Password Modal */}
+      <Modal open={!!pwModal} onClose={() => { setPwModal(null); setError(''); }} title="Alterar Senha" size="sm">
+        <div className="space-y-4">
+          <Input label="Nova Senha" type="password" value={newPw} onChange={e => setNewPw(e.target.value)} />
+          <Input label="Confirmar Senha" type="password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} />
+          {error && <p className="text-red-400 text-xs">{error}</p>}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setPwModal(null)}>Cancelar</Button>
+            <Button onClick={changePassword} loading={saving}>Confirmar</Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
