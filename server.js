@@ -1,10 +1,9 @@
-// ─── EcclesiaScale API Server ─────────────────────────────────────────────────
+// ─── EcclesiaScale API Server (Supabase Edition) ─────────────────────────────
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import Database from 'better-sqlite3';
+import { createClient } from '@supabase/supabase-js';
 import { randomBytes } from 'crypto';
-import nodemailer from 'nodemailer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -12,187 +11,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(express.json());
 
-// ─── DB Setup ─────────────────────────────────────────────────────────────────
-const DB_PATH = process.env.DATABASE_PATH || './church.db';
-const db = new Database(DB_PATH);
-db.pragma('foreign_keys = ON');
-db.pragma('journal_mode = WAL');
+// ─── Supabase Setup ───────────────────────────────────────────────────────────
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY; // use service_role key (bypasses RLS)
+if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+  console.error('❌ SUPABASE_URL e SUPABASE_SERVICE_KEY são obrigatórios');
+  process.exit(1);
+}
+const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 const PORT = process.env.PORT || 3000;
-
-// ─── Migrations ───────────────────────────────────────────────────────────────
-db.exec(`
-  CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
-
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    role TEXT NOT NULL CHECK(role IN ('SuperAdmin','Admin','Líder','Membro')),
-    member_id INTEGER,
-    two_factor_code TEXT,
-    two_factor_expires DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    last_login DATETIME,
-    is_active INTEGER DEFAULT 1
-  );
-
-  CREATE TABLE IF NOT EXISTS ministries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
-    icon TEXT,
-    is_active INTEGER DEFAULT 1
-  );
-
-  CREATE TABLE IF NOT EXISTS departments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
-    icon TEXT,
-    is_active INTEGER DEFAULT 1
-  );
-
-  CREATE TABLE IF NOT EXISTS sectors (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
-    is_active INTEGER DEFAULT 1
-  );
-
-  CREATE TABLE IF NOT EXISTS members (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    email TEXT UNIQUE,
-    whatsapp TEXT,
-    availability TEXT DEFAULT '{}',
-    role TEXT NOT NULL CHECK(role IN ('SuperAdmin','Admin','Líder','Membro')),
-    department_id INTEGER,
-    entry_date DATE DEFAULT (date('now')),
-    status TEXT DEFAULT 'Ativo',
-    is_active INTEGER DEFAULT 1,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(department_id) REFERENCES departments(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS member_ministries (
-    member_id INTEGER,
-    ministry_id INTEGER,
-    PRIMARY KEY(member_id, ministry_id),
-    FOREIGN KEY(member_id) REFERENCES members(id),
-    FOREIGN KEY(ministry_id) REFERENCES ministries(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS cult_types (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
-    default_time TEXT,
-    default_day INTEGER
-  );
-
-  CREATE TABLE IF NOT EXISTS cults (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    type_id INTEGER,
-    name TEXT,
-    date DATE NOT NULL,
-    time TEXT NOT NULL,
-    status TEXT DEFAULT 'Agendado',
-    FOREIGN KEY(type_id) REFERENCES cult_types(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS scales (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    cult_id INTEGER NOT NULL,
-    member_id INTEGER NOT NULL,
-    sector_id INTEGER NOT NULL,
-    status TEXT DEFAULT 'Pendente',
-    confirmed_at DATETIME,
-    FOREIGN KEY(cult_id) REFERENCES cults(id),
-    FOREIGN KEY(member_id) REFERENCES members(id),
-    FOREIGN KEY(sector_id) REFERENCES sectors(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS swaps (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    scale_id INTEGER NOT NULL,
-    requester_id INTEGER NOT NULL,
-    suggested_member_id INTEGER,
-    department_id INTEGER,
-    member_status TEXT DEFAULT 'Pendente',
-    status TEXT DEFAULT 'Pendente',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(scale_id) REFERENCES scales(id),
-    FOREIGN KEY(requester_id) REFERENCES members(id),
-    FOREIGN KEY(suggested_member_id) REFERENCES members(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS notifications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    title TEXT NOT NULL,
-    message TEXT NOT NULL,
-    is_read INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS activation_codes (
-    code TEXT PRIMARY KEY,
-    institution TEXT,
-    expires_at DATETIME,
-    is_used INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entity_type TEXT NOT NULL,
-    entity_id INTEGER NOT NULL,
-    action TEXT NOT NULL,
-    details TEXT,
-    user_id INTEGER,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-`);
-
-// ─── Seed ─────────────────────────────────────────────────────────────────────
-const { count: seedCount } = db.prepare('SELECT count(*) as count FROM cult_types').get();
-if (seedCount === 0) {
-  const insertCT = db.prepare('INSERT OR IGNORE INTO cult_types (name, default_time, default_day) VALUES (?,?,?)');
-  [
-    ['Domingo Manhã', '09:00', 0],
-    ['Domingo Noite (Celebração)', '18:00', 0],
-    ['Terça-feira (EDP)', '19:30', 2],
-    ['Quarta-feira Manhã (Manhã de Milagres)', '09:00', 3],
-    ['Quarta-feira Noite (Quarta D)', '19:30', 3],
-    ['Quinta-Feira (Culto da Vitória)', '19:30', 4],
-    ['Segunda-feira Noite (Culto de Empreendedores)', '19:30', 1],
-  ].forEach(([n, t, d]) => insertCT.run(n, t, d));
-
-  const insertSec = db.prepare('INSERT OR IGNORE INTO sectors (name) VALUES (?)');
-  ['Setor 1','Setor 2','Setor 3','Setor 4','Recepção','Externo','Máquinas de Cartão','Foto','Filmagem','Som','Iluminação']
-    .forEach(s => insertSec.run(s));
-
-  const insertMin = db.prepare('INSERT OR IGNORE INTO ministries (name, icon) VALUES (?,?)');
-  [['Louvor','Music'],['Homens','Users'],['Mulheres','Users'],['Família','Home'],['Ação Social','Heart'],['Mídia','Monitor']]
-    .forEach(([n, i]) => insertMin.run(n, i));
-
-  const insertDept = db.prepare('INSERT OR IGNORE INTO departments (name, icon) VALUES (?,?)');
-  [['Família','Users'],['Som','Volume2'],['Infantil','Baby'],['Adolescentes','Users'],['Jovens','Zap'],['Terceira Idade','Heart'],['Obreiros / Diáconos','Shield']]
-    .forEach(([n, i]) => insertDept.run(n, i));
-
-  // SuperAdmin
-  const superPw = bcrypt.hashSync('SuperAdmin@2024!', 10);
-  db.prepare('INSERT OR IGNORE INTO users (email, password, role) VALUES (?,?,?)').run('super@ecclesia.com', superPw, 'SuperAdmin');
-
-  // Admin
-  const adminPw = bcrypt.hashSync('Admin@2024!', 10);
-  db.prepare('INSERT OR IGNORE INTO users (email, password, role) VALUES (?,?,?)').run('admin@ecclesia.com', adminPw, 'Admin');
-
-  // Trial: 7 days
-  const trialEnd = new Date();
-  trialEnd.setDate(trialEnd.getDate() + 7);
-  db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?,?)').run('initialized_at', new Date().toISOString());
-  db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?,?)').run('trial_expires', trialEnd.toISOString());
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function auth(req, res, next) {
@@ -212,106 +41,108 @@ function requireRole(...roles) {
 }
 
 function isAdmin(role) { return ['SuperAdmin', 'Admin'].includes(role); }
-function isLeader(role) { return ['SuperAdmin', 'Admin', 'Líder'].includes(role); }
 
-function notify(userId, title, message) {
+async function notify(userId, title, message) {
   if (!userId) return;
-  try {
-    db.prepare('INSERT INTO notifications (user_id, title, message) VALUES (?,?,?)').run(userId, title, message);
-  } catch {}
+  await db.from('notifications').insert({ user_id: userId, title, message });
 }
 
 function generateActivationKey() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-  let key = '';
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   const bytes = randomBytes(32);
+  let key = '';
   for (let i = 0; i < 32; i++) key += chars[bytes[i] % chars.length];
-  return `EC-${key.slice(0, 8)}-${key.slice(8, 16)}-${key.slice(16, 24)}-${key.slice(24, 32)}`.toUpperCase();
+  return `EC-${key.slice(0, 8)}-${key.slice(8, 16)}-${key.slice(16, 24)}-${key.slice(24, 32)}`;
 }
 
-function checkTrial(res) {
-  const trial = db.prepare('SELECT value FROM settings WHERE key=?').get('trial_expires');
-  const activation = db.prepare('SELECT value FROM settings WHERE key=?').get('activated');
+async function checkTrial(res) {
+  const { data: activation } = await db.from('settings').select('value').eq('key', 'activated').single();
   if (activation?.value === '1') return true;
+  const { data: trial } = await db.from('settings').select('value').eq('key', 'trial_expires').single();
   if (!trial) return true;
-  const expires = new Date(trial.value);
-  if (new Date() > expires) {
+  if (new Date() > new Date(trial.value)) {
     res.status(403).json({ message: 'Período de teste expirado. Insira uma chave de ativação.' });
     return false;
   }
   return true;
 }
 
+// ─── Health ───────────────────────────────────────────────────────────────────
+app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
+
 // ─── Auth Routes ──────────────────────────────────────────────────────────────
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ message: 'Dados incompletos' });
 
-  const user = db.prepare('SELECT * FROM users WHERE email=? AND is_active=1').get(email);
+  const { data: user } = await db.from('users').select('*').eq('email', email).eq('is_active', true).single();
   if (!user || !bcrypt.compareSync(password, user.password))
     return res.status(401).json({ message: 'Credenciais inválidas' });
 
-  db.prepare('UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=?').run(user.id);
+  await db.from('users').update({ last_login: new Date().toISOString() }).eq('id', user.id);
 
-  const member = user.member_id ? db.prepare('SELECT name FROM members WHERE id=?').get(user.member_id) : null;
+  let memberName = email;
+  if (user.member_id) {
+    const { data: member } = await db.from('members').select('name').eq('id', user.member_id).single();
+    memberName = member?.name || email;
+  }
 
   const token = jwt.sign({ id: user.id, email: user.email, role: user.role, member_id: user.member_id }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ id: user.id, email: user.email, role: user.role, member_id: user.member_id, name: member?.name || email, token });
+  res.json({ id: user.id, email: user.email, role: user.role, member_id: user.member_id, name: memberName, token });
 });
 
-app.post('/api/register', (req, res) => {
+app.post('/api/register', async (req, res) => {
   const { name, email, password } = req.body;
   if (!email || !password || !name) return res.status(400).json({ message: 'Dados obrigatórios' });
   if (password.length < 8) return res.status(400).json({ message: 'Senha deve ter mínimo 8 caracteres' });
 
-  try {
-    const hash = bcrypt.hashSync(password, 10);
-    const memberResult = db.prepare('INSERT INTO members (name, email, role, is_active) VALUES (?,?,?,1)').run(name, email, 'Membro');
-    db.prepare('INSERT INTO users (email, password, role, member_id) VALUES (?,?,?,?)').run(email, hash, 'Membro', memberResult.lastInsertRowid);
-    res.json({ message: 'Conta criada com sucesso' });
-  } catch (e) {
-    if (e.message?.includes('UNIQUE')) return res.status(409).json({ message: 'E-mail já cadastrado' });
-    res.status(500).json({ message: 'Erro ao criar conta' });
+  const hash = bcrypt.hashSync(password, 10);
+  const { data: member, error: memberError } = await db.from('members').insert({ name, email, role: 'Membro', is_active: true }).select().single();
+  if (memberError) {
+    if (memberError.code === '23505') return res.status(409).json({ message: 'E-mail já cadastrado' });
+    return res.status(500).json({ message: 'Erro ao criar conta' });
   }
+
+  const { error: userError } = await db.from('users').insert({ email, password: hash, role: 'Membro', member_id: member.id });
+  if (userError) {
+    if (userError.code === '23505') return res.status(409).json({ message: 'E-mail já cadastrado' });
+    return res.status(500).json({ message: 'Erro ao criar conta' });
+  }
+
+  res.json({ message: 'Conta criada com sucesso' });
 });
 
-app.post('/api/forgot-password', (req, res) => {
+app.post('/api/forgot-password', async (req, res) => {
   const { email } = req.body;
-  const user = db.prepare('SELECT id FROM users WHERE email=?').get(email);
-  // Always return 200 to avoid user enumeration
+  const { data: user } = await db.from('users').select('id').eq('email', email).single();
   if (!user) return res.json({ message: 'Se o e-mail existir, você receberá as instruções.' });
 
   const code = randomBytes(4).toString('hex').toUpperCase();
   const expires = new Date(Date.now() + 3600000).toISOString();
-  db.prepare('UPDATE users SET two_factor_code=?, two_factor_expires=? WHERE id=?').run(code, expires, user.id);
-  // In production: send email with code/link
+  await db.from('users').update({ two_factor_code: code, two_factor_expires: expires }).eq('id', user.id);
   res.json({ message: 'Se o e-mail existir, você receberá as instruções.' });
 });
 
-app.post('/api/verify-2fa', (req, res) => {
+app.post('/api/verify-2fa', async (req, res) => {
   const { code, tempToken } = req.body;
   try {
     const payload = jwt.verify(tempToken, JWT_SECRET + '_2fa');
-    const user = db.prepare('SELECT * FROM users WHERE id=? AND two_factor_code=?').get(payload.id, code);
+    const { data: user } = await db.from('users').select('*').eq('id', payload.id).eq('two_factor_code', code).single();
     if (!user) return res.status(401).json({ message: 'Código inválido' });
     if (new Date(user.two_factor_expires) < new Date()) return res.status(401).json({ message: 'Código expirado' });
 
-    db.prepare('UPDATE users SET two_factor_code=NULL, two_factor_expires=NULL WHERE id=?').run(user.id);
+    await db.from('users').update({ two_factor_code: null, two_factor_expires: null }).eq('id', user.id);
     const token = jwt.sign({ id: user.id, email: user.email, role: user.role, member_id: user.member_id }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ id: user.id, email: user.email, role: user.role, member_id: user.member_id, token });
   } catch { res.status(401).json({ message: 'Token inválido' }); }
 });
 
-// ─── Health ───────────────────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
-
 // ─── Settings / Trial ─────────────────────────────────────────────────────────
-app.get('/api/settings/trial', (req, res) => {
-  const trial = db.prepare('SELECT value FROM settings WHERE key=?').get('trial_expires');
-  const activated = db.prepare('SELECT value FROM settings WHERE key=?').get('activated');
-
+app.get('/api/settings/trial', async (req, res) => {
+  const { data: activated } = await db.from('settings').select('value').eq('key', 'activated').single();
   if (activated?.value === '1') return res.json({ isActive: true, isTrial: false, daysLeft: 999, isExpired: false, message: 'Ativo' });
 
+  const { data: trial } = await db.from('settings').select('value').eq('key', 'trial_expires').single();
   if (!trial) return res.json({ isActive: true, isTrial: false, daysLeft: 999, isExpired: false, message: '' });
 
   const expires = new Date(trial.value);
@@ -323,83 +154,101 @@ app.get('/api/settings/trial', (req, res) => {
 });
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
-app.get('/api/dashboard/stats', auth, (req, res) => {
-  const futureEvents = db.prepare("SELECT count(*) as c FROM cults WHERE date >= date('now') AND status!='Cancelado'").get().c;
-  const activeVolunteers = db.prepare("SELECT count(*) as c FROM members WHERE is_active=1").get().c;
-  const filledSlots = db.prepare("SELECT count(*) as c FROM scales WHERE status='Confirmado'").get().c;
-  const pendingConfirmations = db.prepare("SELECT count(*) as c FROM scales WHERE status='Pendente'").get().c;
-  const swapRequests = db.prepare("SELECT count(*) as c FROM swaps WHERE status='Pendente'").get().c;
+app.get('/api/dashboard/stats', auth, async (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+
+  const [{ count: futureEvents }, { count: activeVolunteers }, { count: filledSlots }, { count: pendingConfirmations }, { count: swapRequests }] = await Promise.all([
+    db.from('cults').select('*', { count: 'exact', head: true }).gte('date', today).neq('status', 'Cancelado'),
+    db.from('members').select('*', { count: 'exact', head: true }).eq('is_active', true),
+    db.from('scales').select('*', { count: 'exact', head: true }).eq('status', 'Confirmado'),
+    db.from('scales').select('*', { count: 'exact', head: true }).eq('status', 'Pendente'),
+    db.from('swaps').select('*', { count: 'exact', head: true }).eq('status', 'Pendente'),
+  ]);
+
   res.json({ futureEvents, activeVolunteers, filledSlots, pendingConfirmations, swapRequests });
 });
 
 // ─── Members ──────────────────────────────────────────────────────────────────
-app.get('/api/members', auth, (req, res) => {
+app.get('/api/members', auth, async (req, res) => {
   const { is_active, department_id } = req.query;
-  let query = `SELECT m.*, d.name as department_name FROM members m LEFT JOIN departments d ON m.department_id=d.id WHERE 1=1`;
-  const params = [];
-  if (is_active !== undefined) { query += ' AND m.is_active=?'; params.push(Number(is_active)); }
-  if (department_id) { query += ' AND m.department_id=?'; params.push(Number(department_id)); }
 
-  // Leader sees only their dept
+  let query = db.from('members').select('*, departments(name)').order('name');
+  if (is_active !== undefined) query = query.eq('is_active', is_active === '1' || is_active === 'true');
+  if (department_id) query = query.eq('department_id', Number(department_id));
+
   if (req.user.role === 'Líder' && req.user.member_id) {
-    const leaderMember = db.prepare('SELECT department_id FROM members WHERE id=?').get(req.user.member_id);
-    if (leaderMember?.department_id) { query += ' AND m.department_id=?'; params.push(leaderMember.department_id); }
+    const { data: leaderMember } = await db.from('members').select('department_id').eq('id', req.user.member_id).single();
+    if (leaderMember?.department_id) query = query.eq('department_id', leaderMember.department_id);
   }
 
-  query += ' ORDER BY m.name';
-  const members = db.prepare(query).all(...params);
+  const { data: members, error } = await query;
+  if (error) return res.status(500).json({ message: error.message });
 
   // Attach ministries
-  const getMin = db.prepare('SELECT min.* FROM ministries min JOIN member_ministries mm ON min.id=mm.ministry_id WHERE mm.member_id=?');
+  const memberIds = members.map(m => m.id);
+  const { data: mmRows } = await db.from('member_ministries').select('member_id, ministries(*)').in('member_id', memberIds);
+
   members.forEach(m => {
-    m.availability = JSON.parse(m.availability || '{}');
-    m.ministries = getMin.all(m.id);
+    if (typeof m.availability === 'string') m.availability = JSON.parse(m.availability || '{}');
+    m.department_name = m.departments?.name || null;
+    delete m.departments;
+    m.ministries = mmRows?.filter(r => r.member_id === m.id).map(r => r.ministries) || [];
   });
 
   res.json(members);
 });
 
-app.get('/api/members/:id', auth, (req, res) => {
-  const m = db.prepare('SELECT m.*, d.name as department_name FROM members m LEFT JOIN departments d ON m.department_id=d.id WHERE m.id=?').get(req.params.id);
-  if (!m) return res.status(404).json({ message: 'Membro não encontrado' });
-  m.availability = JSON.parse(m.availability || '{}');
-  m.ministries = db.prepare('SELECT min.* FROM ministries min JOIN member_ministries mm ON min.id=mm.ministry_id WHERE mm.member_id=?').all(m.id);
+app.get('/api/members/:id', auth, async (req, res) => {
+  const { data: m, error } = await db.from('members').select('*, departments(name)').eq('id', req.params.id).single();
+  if (!m || error) return res.status(404).json({ message: 'Membro não encontrado' });
+
+  if (typeof m.availability === 'string') m.availability = JSON.parse(m.availability || '{}');
+  m.department_name = m.departments?.name || null;
+  delete m.departments;
+
+  const { data: mmRows } = await db.from('member_ministries').select('ministries(*)').eq('member_id', m.id);
+  m.ministries = mmRows?.map(r => r.ministries) || [];
+
   res.json(m);
 });
 
-app.post('/api/members', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), (req, res) => {
+app.post('/api/members', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { name, email, whatsapp, availability, role, department_id, status, ministries } = req.body;
   if (!name) return res.status(400).json({ message: 'Nome obrigatório' });
 
-  const availStr = JSON.stringify(availability || {});
-  const result = db.prepare('INSERT INTO members (name, email, whatsapp, availability, role, department_id, status) VALUES (?,?,?,?,?,?,?)').run(name, email || null, whatsapp || null, availStr, role || 'Membro', department_id || null, status || 'Ativo');
-  const memberId = result.lastInsertRowid;
+  const { data: member, error } = await db.from('members').insert({
+    name, email: email || null, whatsapp: whatsapp || null,
+    availability: availability || {},
+    role: role || 'Membro', department_id: department_id || null, status: status || 'Ativo'
+  }).select().single();
+
+  if (error) return res.status(500).json({ message: error.message });
 
   if (email) {
-    const hash = bcrypt.hashSync('EcclesiaScale@' + memberId, 10);
-    db.prepare('INSERT OR IGNORE INTO users (email, password, role, member_id) VALUES (?,?,?,?)').run(email, hash, role || 'Membro', memberId);
+    const hash = bcrypt.hashSync('EcclesiaScale@' + member.id, 10);
+    await db.from('users').upsert({ email, password: hash, role: role || 'Membro', member_id: member.id }, { onConflict: 'email', ignoreDuplicates: true });
   }
 
   if (ministries?.length) {
-    const insertMM = db.prepare('INSERT OR IGNORE INTO member_ministries (member_id, ministry_id) VALUES (?,?)');
-    ministries.forEach(min => insertMM.run(memberId, min.id));
+    await db.from('member_ministries').upsert(ministries.map(min => ({ member_id: member.id, ministry_id: min.id })), { ignoreDuplicates: true });
   }
 
-  res.json({ id: memberId, message: 'Membro criado' });
+  res.json({ id: member.id, message: 'Membro criado' });
 });
 
-app.put('/api/members/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), (req, res) => {
+app.put('/api/members/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { name, email, whatsapp, availability, role, department_id, status, is_active, ministries } = req.body;
-  const availStr = JSON.stringify(availability || {});
 
-  db.prepare('UPDATE members SET name=?, email=?, whatsapp=?, availability=?, role=?, department_id=?, status=?, is_active=? WHERE id=?')
-    .run(name, email || null, whatsapp || null, availStr, role, department_id || null, status, is_active ?? 1, req.params.id);
+  await db.from('members').update({
+    name, email: email || null, whatsapp: whatsapp || null,
+    availability: availability || {},
+    role, department_id: department_id || null, status, is_active: is_active ?? true
+  }).eq('id', req.params.id);
 
   if (ministries !== undefined) {
-    db.prepare('DELETE FROM member_ministries WHERE member_id=?').run(req.params.id);
+    await db.from('member_ministries').delete().eq('member_id', req.params.id);
     if (ministries.length) {
-      const insertMM = db.prepare('INSERT OR IGNORE INTO member_ministries (member_id, ministry_id) VALUES (?,?)');
-      ministries.forEach(min => insertMM.run(req.params.id, min.id));
+      await db.from('member_ministries').insert(ministries.map(min => ({ member_id: Number(req.params.id), ministry_id: min.id })));
     }
   }
 
@@ -407,100 +256,106 @@ app.put('/api/members/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), 
 });
 
 // ─── Users ────────────────────────────────────────────────────────────────────
-app.put('/api/users/:id/password', auth, requireRole('SuperAdmin', 'Admin'), (req, res) => {
+app.put('/api/users/:id/password', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const { password } = req.body;
   if (!password || password.length < 8) return res.status(400).json({ message: 'Senha deve ter mínimo 8 caracteres' });
   const hash = bcrypt.hashSync(password, 10);
-  db.prepare('UPDATE users SET password=? WHERE id=?').run(hash, req.params.id);
+  await db.from('users').update({ password: hash }).eq('id', req.params.id);
   res.json({ message: 'Senha alterada' });
 });
 
-app.post('/api/users/reset-password', auth, requireRole('SuperAdmin', 'Admin'), (req, res) => {
+app.post('/api/users/reset-password', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const { email, new_password } = req.body;
   if (!email || !new_password) return res.status(400).json({ message: 'Dados obrigatórios' });
-  const user = db.prepare('SELECT id FROM users WHERE email=?').get(email);
+  const { data: user } = await db.from('users').select('id').eq('email', email).single();
   if (!user) return res.status(404).json({ message: 'Usuário não encontrado' });
   const hash = bcrypt.hashSync(new_password, 10);
-  db.prepare('UPDATE users SET password=? WHERE id=?').run(hash, user.id);
+  await db.from('users').update({ password: hash }).eq('id', user.id);
   res.json({ message: 'Senha redefinida' });
 });
 
-// ─── Ministries / Departments / Sectors / CultTypes ──────────────────────────
-['ministries', 'departments', 'sectors', 'cult_types'].forEach(table => {
-  app.get(`/api/${table}`, auth, (req, res) => res.json(db.prepare(`SELECT * FROM ${table} ORDER BY name`).all()));
+// ─── Generic CRUD: ministries / departments / sectors / cult_types ────────────
+const SIMPLE_TABLES = ['ministries', 'departments', 'sectors', 'cult_types'];
 
-  app.post(`/api/${table}`, auth, requireRole('SuperAdmin', 'Admin'), (req, res) => {
-    const { name, icon, is_active, default_time, default_day } = req.body;
-    if (!name) return res.status(400).json({ message: 'Nome obrigatório' });
-    try {
-      if (table === 'cult_types') {
-        const r = db.prepare('INSERT INTO cult_types (name, default_time, default_day) VALUES (?,?,?)').run(name, default_time || null, default_day ?? null);
-        res.json({ id: r.lastInsertRowid });
-      } else {
-        const r = db.prepare(`INSERT INTO ${table} (name, icon, is_active) VALUES (?,?,?)`).run(name, icon || null, is_active ?? 1);
-        res.json({ id: r.lastInsertRowid });
-      }
-    } catch (e) {
-      if (e.message?.includes('UNIQUE')) return res.status(409).json({ message: 'Já existe com este nome' });
-      res.status(500).json({ message: 'Erro ao criar' });
-    }
+SIMPLE_TABLES.forEach(table => {
+  app.get(`/api/${table}`, auth, async (req, res) => {
+    const { data, error } = await db.from(table).select('*').order('name');
+    if (error) return res.status(500).json({ message: error.message });
+    res.json(data);
   });
 
-  app.put(`/api/${table}/:id`, auth, requireRole('SuperAdmin', 'Admin'), (req, res) => {
-    const { name, icon, is_active, default_time, default_day, status } = req.body;
-    if (table === 'cult_types') {
-      db.prepare('UPDATE cult_types SET name=?, default_time=?, default_day=? WHERE id=?').run(name, default_time || null, default_day ?? null, req.params.id);
-    } else {
-      db.prepare(`UPDATE ${table} SET name=?, icon=?, is_active=? WHERE id=?`).run(name, icon || null, is_active ?? 1, req.params.id);
+  app.post(`/api/${table}`, auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+    const { name, icon, is_active, default_time, default_day } = req.body;
+    if (!name) return res.status(400).json({ message: 'Nome obrigatório' });
+
+    let payload = table === 'cult_types'
+      ? { name, default_time: default_time || null, default_day: default_day ?? null }
+      : { name, icon: icon || null, is_active: is_active ?? true };
+
+    const { data, error } = await db.from(table).insert(payload).select().single();
+    if (error) {
+      if (error.code === '23505') return res.status(409).json({ message: 'Já existe com este nome' });
+      return res.status(500).json({ message: error.message });
     }
+    res.json({ id: data.id });
+  });
+
+  app.put(`/api/${table}/:id`, auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+    const { name, icon, is_active, default_time, default_day } = req.body;
+    let payload = table === 'cult_types'
+      ? { name, default_time: default_time || null, default_day: default_day ?? null }
+      : { name, icon: icon || null, is_active: is_active ?? true };
+
+    await db.from(table).update(payload).eq('id', req.params.id);
     res.json({ message: 'Atualizado' });
   });
 
-  app.delete(`/api/${table}/:id`, auth, requireRole('SuperAdmin', 'Admin'), (req, res) => {
-    db.prepare(`DELETE FROM ${table} WHERE id=?`).run(req.params.id);
+  app.delete(`/api/${table}/:id`, auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+    await db.from(table).delete().eq('id', req.params.id);
     res.json({ message: 'Excluído' });
   });
 });
 
 // ─── Cults ────────────────────────────────────────────────────────────────────
-app.get('/api/cults', auth, (req, res) => {
+app.get('/api/cults', auth, async (req, res) => {
   const { status, limit } = req.query;
-  let query = `SELECT c.*, ct.name as type_name FROM cults c LEFT JOIN cult_types ct ON c.type_id=ct.id WHERE 1=1`;
-  const params = [];
-  if (status) { query += ' AND c.status=?'; params.push(status); }
-  query += ' ORDER BY c.date DESC';
-  if (limit) { query += ' LIMIT ?'; params.push(Number(limit)); }
-  res.json(db.prepare(query).all(...params));
+  let query = db.from('cults').select('*, cult_types(name)').order('date', { ascending: false });
+  if (status) query = query.eq('status', status);
+  if (limit) query = query.limit(Number(limit));
+
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ message: error.message });
+
+  res.json(data.map(c => ({ ...c, type_name: c.cult_types?.name || null, cult_types: undefined })));
 });
 
-app.post('/api/cults', auth, requireRole('SuperAdmin', 'Admin'), (req, res) => {
+app.post('/api/cults', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const { type_id, name, date, time, status } = req.body;
   if (!date || !time) return res.status(400).json({ message: 'Data e horário obrigatórios' });
-  const r = db.prepare('INSERT INTO cults (type_id, name, date, time, status) VALUES (?,?,?,?,?)').run(type_id || null, name || null, date, time, status || 'Agendado');
-  res.json({ id: r.lastInsertRowid });
+  const { data, error } = await db.from('cults').insert({ type_id: type_id || null, name: name || null, date, time, status: status || 'Agendado' }).select().single();
+  if (error) return res.status(500).json({ message: error.message });
+  res.json({ id: data.id });
 });
 
-app.put('/api/cults/:id', auth, requireRole('SuperAdmin', 'Admin'), (req, res) => {
+app.put('/api/cults/:id', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const { type_id, name, date, time, status } = req.body;
-  db.prepare('UPDATE cults SET type_id=?, name=?, date=?, time=?, status=? WHERE id=?').run(type_id || null, name || null, date, time, status || 'Agendado', req.params.id);
+  await db.from('cults').update({ type_id: type_id || null, name: name || null, date, time, status: status || 'Agendado' }).eq('id', req.params.id);
   res.json({ message: 'Atualizado' });
 });
 
-app.delete('/api/cults/:id', auth, requireRole('SuperAdmin', 'Admin'), (req, res) => {
-  db.prepare('DELETE FROM cults WHERE id=?').run(req.params.id);
+app.delete('/api/cults/:id', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  await db.from('cults').delete().eq('id', req.params.id);
   res.json({ message: 'Excluído' });
 });
 
-app.post('/api/cults/generate-month', auth, requireRole('SuperAdmin', 'Admin'), (req, res) => {
-  const { month, cult_type_ids } = req.body; // month = 'YYYY-MM'
+app.post('/api/cults/generate-month', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const { month, cult_type_ids } = req.body;
   if (!month || !cult_type_ids?.length) return res.status(400).json({ message: 'Mês e tipos obrigatórios' });
 
   const [year, mon] = month.split('-').map(Number);
-  const cultTypes = db.prepare(`SELECT * FROM cult_types WHERE id IN (${cult_type_ids.map(() => '?').join(',')})`).all(...cult_type_ids);
+  const { data: cultTypes } = await db.from('cult_types').select('*').in('id', cult_type_ids);
 
-  const insert = db.prepare('INSERT INTO cults (type_id, date, time, status) VALUES (?,?,?,?)');
-
-  let created = 0;
+  const toInsert = [];
   const daysInMonth = new Date(year, mon, 0).getDate();
 
   for (let day = 1; day <= daysInMonth; day++) {
@@ -510,268 +365,256 @@ app.post('/api/cults/generate-month', auth, requireRole('SuperAdmin', 'Admin'), 
 
     for (const ct of cultTypes) {
       if (ct.default_day === dayOfWeek || ct.default_day === null) {
-        insert.run(ct.id, dateStr, ct.default_time || '19:00', 'Agendado');
-        created++;
+        toInsert.push({ type_id: ct.id, date: dateStr, time: ct.default_time || '19:00', status: 'Agendado' });
       }
     }
   }
 
-  res.json({ message: `${created} culto(s) criado(s)` });
+  if (toInsert.length) await db.from('cults').insert(toInsert);
+  res.json({ message: `${toInsert.length} culto(s) criado(s)` });
 });
 
 // ─── Scales ───────────────────────────────────────────────────────────────────
-app.get('/api/scales', auth, (req, res) => {
+app.get('/api/scales', auth, async (req, res) => {
   const { cult_id, member_id, limit } = req.query;
-  let query = `
-    SELECT s.*, m.name as member_name, sec.name as sector_name,
-           c.date as cult_date, c.time as cult_time,
-           COALESCE(ct.name, c.name) as cult_name
-    FROM scales s
-    JOIN members m ON s.member_id=m.id
-    JOIN sectors sec ON s.sector_id=sec.id
-    JOIN cults c ON s.cult_id=c.id
-    LEFT JOIN cult_types ct ON c.type_id=ct.id
-    WHERE 1=1
-  `;
-  const params = [];
-  if (cult_id) { query += ' AND s.cult_id=?'; params.push(Number(cult_id)); }
-  if (member_id) { query += ' AND s.member_id=?'; params.push(Number(member_id)); }
-  query += ' ORDER BY c.date, m.name';
-  if (limit) { query += ' LIMIT ?'; params.push(Number(limit)); }
-  res.json(db.prepare(query).all(...params));
+
+  let query = db.from('scales').select(`
+    *, 
+    members(name),
+    sectors(name),
+    cults(date, time, name, cult_types(name))
+  `).order('cult_id');
+
+  if (cult_id) query = query.eq('cult_id', Number(cult_id));
+  if (member_id) query = query.eq('member_id', Number(member_id));
+  if (limit) query = query.limit(Number(limit));
+
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ message: error.message });
+
+  res.json(data.map(s => ({
+    ...s,
+    member_name: s.members?.name,
+    sector_name: s.sectors?.name,
+    cult_date: s.cults?.date,
+    cult_time: s.cults?.time,
+    cult_name: s.cults?.cult_types?.name || s.cults?.name,
+    members: undefined, sectors: undefined, cults: undefined,
+  })));
 });
 
-app.post('/api/scales', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), (req, res) => {
+app.post('/api/scales', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { cult_id, member_id, sector_id } = req.body;
   if (!cult_id || !member_id || !sector_id) return res.status(400).json({ message: 'Dados obrigatórios' });
 
-  // Check: same member in same cult (any sector) — prevent duplicates
-  const existing = db.prepare('SELECT id FROM scales WHERE cult_id=? AND member_id=?').get(cult_id, member_id);
+  const { data: existing } = await db.from('scales').select('id').eq('cult_id', cult_id).eq('member_id', member_id).maybeSingle();
   if (existing) return res.status(409).json({ message: 'Voluntário já está escalado neste culto' });
 
-  // Check: same sector in same cult — prevent same sector double booking
-  const sectorConflict = db.prepare('SELECT id FROM scales WHERE cult_id=? AND sector_id=?').get(cult_id, sector_id);
-  // Note: we allow multiple in same sector; uncomment to restrict:
-  // if (sectorConflict) return res.status(409).json({ message: 'Setor já está preenchido neste culto' });
-
-  // Check: max 3x in month (warning, not block — leaders can override)
-  const cult = db.prepare('SELECT date FROM cults WHERE id=?').get(cult_id);
+  // Check monthly limit
+  const { data: cult } = await db.from('cults').select('date').eq('id', cult_id).single();
   if (cult) {
     const month = cult.date.slice(0, 7);
-    const monthCount = db.prepare(`
-      SELECT count(*) as c FROM scales s JOIN cults c ON s.cult_id=c.id
-      WHERE s.member_id=? AND c.date LIKE ? AND s.status!='Recusado'
-    `).get(member_id, `${month}%`).c;
+    const { count: monthCount } = await db.from('scales')
+      .select('*, cults!inner(date)', { count: 'exact', head: true })
+      .eq('member_id', member_id)
+      .neq('status', 'Recusado')
+      .like('cults.date', `${month}%`);
+
     if (monthCount >= 3 && !isAdmin(req.user.role)) {
       return res.status(409).json({ message: `Voluntário já está escalado ${monthCount}x neste mês (máximo 3)` });
     }
   }
 
-  const r = db.prepare('INSERT INTO scales (cult_id, member_id, sector_id) VALUES (?,?,?)').run(cult_id, member_id, sector_id);
+  const { data, error } = await db.from('scales').insert({ cult_id, member_id, sector_id }).select().single();
+  if (error) return res.status(500).json({ message: error.message });
 
   // Notify member
-  const user = db.prepare('SELECT id FROM users WHERE member_id=?').get(member_id);
+  const { data: user } = await db.from('users').select('id').eq('member_id', member_id).maybeSingle();
   if (user && cult) {
-    const sector = db.prepare('SELECT name FROM sectors WHERE id=?').get(sector_id);
-    notify(user.id, 'Nova Escala', `Você foi escalado para ${sector?.name || 'setor'} em ${cult.date}`);
+    const { data: sector } = await db.from('sectors').select('name').eq('id', sector_id).single();
+    await notify(user.id, 'Nova Escala', `Você foi escalado para ${sector?.name || 'setor'} em ${cult.date}`);
   }
 
-  res.json({ id: r.lastInsertRowid });
+  res.json({ id: data.id });
 });
 
-app.put('/api/scales/:id/confirm', auth, (req, res) => {
-  db.prepare("UPDATE scales SET status='Confirmado', confirmed_at=CURRENT_TIMESTAMP WHERE id=?").run(req.params.id);
+app.put('/api/scales/:id/confirm', auth, async (req, res) => {
+  await db.from('scales').update({ status: 'Confirmado', confirmed_at: new Date().toISOString() }).eq('id', req.params.id);
   res.json({ message: 'Confirmado' });
 });
 
-app.delete('/api/scales/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), (req, res) => {
-  db.prepare('DELETE FROM scales WHERE id=?').run(req.params.id);
+app.delete('/api/scales/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
+  await db.from('scales').delete().eq('id', req.params.id);
   res.json({ message: 'Removido' });
 });
 
-app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), (req, res) => {
+app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { type, cult_id, month } = req.body;
+  const today = new Date().toISOString().slice(0, 10);
 
-  let cults = [];
-  if (type === 'month' && month) {
-    cults = db.prepare("SELECT * FROM cults WHERE date LIKE ? AND status='Agendado'").all(`${month}%`);
-  } else if (cult_id) {
-    const c = db.prepare('SELECT * FROM cults WHERE id=?').get(cult_id);
-    if (c) cults = [c];
-  } else {
-    cults = db.prepare("SELECT * FROM cults WHERE date >= date('now') AND status='Agendado'").all();
-  }
+  let cultsQuery = db.from('cults').select('*').eq('status', 'Agendado');
+  if (type === 'month' && month) cultsQuery = cultsQuery.like('date', `${month}%`);
+  else if (cult_id) cultsQuery = cultsQuery.eq('id', cult_id);
+  else cultsQuery = cultsQuery.gte('date', today);
 
-  const members = db.prepare('SELECT * FROM members WHERE is_active=1 AND status="Ativo"').all();
-  const sectors = db.prepare('SELECT * FROM sectors WHERE is_active=1').all();
+  const { data: cults } = await cultsQuery;
+  const { data: members } = await db.from('members').select('*').eq('is_active', true).eq('status', 'Ativo');
+  const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
 
   let created = 0;
-  const messages = [];
 
-  for (const cult of cults) {
-    const month = cult.date.slice(0, 7);
+  for (const cult of cults || []) {
+    const monthStr = cult.date.slice(0, 7);
+    for (const sector of sectors || []) {
+      for (const member of members || []) {
+        const { data: alreadyInCult } = await db.from('scales').select('id').eq('cult_id', cult.id).eq('member_id', member.id).maybeSingle();
+        if (alreadyInCult) continue;
 
-    for (const sector of sectors) {
-      // Find available member not already in this cult and not over limit
-      const available = members.filter(m => {
-        const alreadyInCult = db.prepare('SELECT id FROM scales WHERE cult_id=? AND member_id=?').get(cult.id, m.id);
-        if (alreadyInCult) { messages.push(`${m.name} já está escalado em ${cult.date}`); return false; }
+        const { count: monthCount } = await db.from('scales')
+          .select('*, cults!inner(date)', { count: 'exact', head: true })
+          .eq('member_id', member.id)
+          .like('cults.date', `${monthStr}%`);
 
-        const monthCount = db.prepare(`
-          SELECT count(*) as c FROM scales s JOIN cults c ON s.cult_id=c.id
-          WHERE s.member_id=? AND c.date LIKE ?
-        `).get(m.id, `${month}%`).c;
-        if (monthCount >= 3) return false;
+        if (monthCount >= 3) continue;
 
-        const avail = JSON.parse(m.availability || '{}');
-        return true; // simplified: check availability against cult type if needed
-      });
-
-      if (available.length > 0) {
-        const member = available[Math.floor(Math.random() * available.length)];
-        try {
-          db.prepare('INSERT INTO scales (cult_id, member_id, sector_id) VALUES (?,?,?)').run(cult.id, member.id, sector.id);
-          created++;
-        } catch {}
+        await db.from('scales').insert({ cult_id: cult.id, member_id: member.id, sector_id: sector.id });
+        created++;
+        break; // one member per sector per cult
       }
     }
   }
 
-  res.json({ message: `${created} escala(s) gerada(s)`, warnings: messages.slice(0, 10) });
+  res.json({ message: `${created} escala(s) gerada(s)` });
 });
 
 // ─── Swaps ────────────────────────────────────────────────────────────────────
-app.get('/api/swaps', auth, (req, res) => {
+app.get('/api/swaps', auth, async (req, res) => {
   const { status, member_id, limit } = req.query;
-  let query = `
-    SELECT sw.*, 
-      req.name as requester_name, 
-      sug.name as suggested_member_name,
-      sec.name as sector_name,
-      COALESCE(ct.name, cu.name) as cult_name,
-      cu.date as cult_date,
-      sc.department_id
-    FROM swaps sw
-    JOIN scales sc ON sw.scale_id=sc.id
-    JOIN members req ON sw.requester_id=req.id
-    LEFT JOIN members sug ON sw.suggested_member_id=sug.id
-    LEFT JOIN sectors sec ON sc.sector_id=sec.id
-    JOIN cults cu ON sc.cult_id=cu.id
-    LEFT JOIN cult_types ct ON cu.type_id=ct.id
-    WHERE 1=1
-  `;
-  const params = [];
-  if (status) { query += ' AND sw.status=?'; params.push(status); }
-  if (member_id) { query += ' AND (sw.requester_id=? OR sw.suggested_member_id=?)'; params.push(Number(member_id), Number(member_id)); }
 
-  // Leader: only their dept
+  let query = db.from('swaps').select(`
+    *,
+    requester:members!swaps_requester_id_fkey(name),
+    suggested:members!swaps_suggested_member_id_fkey(name),
+    scales(sector_id, department_id, cults(date, name, cult_types(name)), sectors(name))
+  `).order('created_at', { ascending: false });
+
+  if (status) query = query.eq('status', status);
+  if (member_id) query = query.or(`requester_id.eq.${member_id},suggested_member_id.eq.${member_id}`);
+  if (limit) query = query.limit(Number(limit));
+
   if (req.user.role === 'Líder' && req.user.member_id) {
-    const leaderMember = db.prepare('SELECT department_id FROM members WHERE id=?').get(req.user.member_id);
-    if (leaderMember?.department_id) { query += ' AND sc.department_id=?'; params.push(leaderMember.department_id); }
+    const { data: leaderMember } = await db.from('members').select('department_id').eq('id', req.user.member_id).single();
+    if (leaderMember?.department_id) query = query.eq('scales.department_id', leaderMember.department_id);
   }
 
-  query += ' ORDER BY sw.created_at DESC';
-  if (limit) { query += ' LIMIT ?'; params.push(Number(limit)); }
-  res.json(db.prepare(query).all(...params));
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ message: error.message });
+
+  res.json(data.map(sw => ({
+    ...sw,
+    requester_name: sw.requester?.name,
+    suggested_member_name: sw.suggested?.name,
+    sector_name: sw.scales?.sectors?.name,
+    cult_name: sw.scales?.cults?.cult_types?.name || sw.scales?.cults?.name,
+    cult_date: sw.scales?.cults?.date,
+    requester: undefined, suggested: undefined, scales: undefined,
+  })));
 });
 
-app.post('/api/swaps', auth, (req, res) => {
+app.post('/api/swaps', auth, async (req, res) => {
   const { scale_id, suggested_email } = req.body;
   if (!scale_id) return res.status(400).json({ message: 'scale_id obrigatório' });
 
-  const scale = db.prepare('SELECT * FROM scales WHERE id=?').get(scale_id);
+  const { data: scale } = await db.from('scales').select('*').eq('id', scale_id).single();
   if (!scale) return res.status(404).json({ message: 'Escala não encontrada' });
 
-  // Only same dept swaps
-  const requester = db.prepare('SELECT * FROM members WHERE id=?').get(scale.member_id);
+  const { data: requester } = await db.from('members').select('*').eq('id', scale.member_id).single();
   let suggestedId = null;
 
   if (suggested_email) {
-    const suggested = db.prepare('SELECT id, department_id FROM members WHERE email=?').get(suggested_email);
+    const { data: suggested } = await db.from('members').select('id, department_id').eq('email', suggested_email).single();
     if (!suggested) return res.status(404).json({ message: 'Membro sugerido não encontrado' });
     if (suggested.department_id !== requester.department_id) return res.status(400).json({ message: 'Trocas apenas entre membros do mesmo departamento' });
     suggestedId = suggested.id;
   }
 
-  const r = db.prepare('INSERT INTO swaps (scale_id, requester_id, suggested_member_id, department_id) VALUES (?,?,?,?)').run(scale_id, scale.member_id, suggestedId, requester.department_id);
+  const { data, error } = await db.from('swaps').insert({
+    scale_id, requester_id: scale.member_id, suggested_member_id: suggestedId, department_id: requester.department_id
+  }).select().single();
+  if (error) return res.status(500).json({ message: error.message });
 
   // Notify leader
   if (requester.department_id) {
-    const leader = db.prepare(`
-      SELECT u.id FROM users u JOIN members m ON u.member_id=m.id
-      WHERE m.department_id=? AND m.role='Líder' LIMIT 1
-    `).get(requester.department_id);
-    if (leader) notify(leader.id, 'Solicitação de Troca', `${requester.name} solicitou uma troca de setor`);
+    const { data: leader } = await db.from('users')
+      .select('id, members!inner(department_id, role)')
+      .eq('members.department_id', requester.department_id)
+      .eq('members.role', 'Líder')
+      .limit(1)
+      .maybeSingle();
+    if (leader) await notify(leader.id, 'Solicitação de Troca', `${requester.name} solicitou uma troca de setor`);
   }
 
-  // Notify suggested member
   if (suggestedId) {
-    const sugUser = db.prepare('SELECT id FROM users WHERE member_id=?').get(suggestedId);
-    if (sugUser) notify(sugUser.id, 'Troca Solicitada', `${requester.name} solicitou uma troca com você`);
+    const { data: sugUser } = await db.from('users').select('id').eq('member_id', suggestedId).maybeSingle();
+    if (sugUser) await notify(sugUser.id, 'Troca Solicitada', `${requester.name} solicitou uma troca com você`);
   }
 
-  res.json({ id: r.lastInsertRowid });
+  res.json({ id: data.id });
 });
 
-app.put('/api/swaps/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), (req, res) => {
+app.put('/api/swaps/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { status } = req.body;
-  const swap = db.prepare('SELECT * FROM swaps WHERE id=?').get(req.params.id);
+  const { data: swap } = await db.from('swaps').select('*').eq('id', req.params.id).single();
   if (!swap) return res.status(404).json({ message: 'Troca não encontrada' });
 
-  db.prepare('UPDATE swaps SET status=? WHERE id=?').run(status, req.params.id);
+  await db.from('swaps').update({ status }).eq('id', req.params.id);
 
   if (status === 'Aprovado' && swap.suggested_member_id) {
-    // Execute the swap
-    const scale = db.prepare('SELECT * FROM scales WHERE id=?').get(swap.scale_id);
-    if (scale) {
-      db.prepare("UPDATE scales SET member_id=?, status='Troca' WHERE id=?").run(swap.suggested_member_id, swap.scale_id);
-    }
+    await db.from('scales').update({ member_id: swap.suggested_member_id, status: 'Troca' }).eq('id', swap.scale_id);
   }
 
-  // Notify requester
-  const requesterUser = db.prepare('SELECT id FROM users WHERE member_id=?').get(swap.requester_id);
-  if (requesterUser) notify(requesterUser.id, 'Troca ' + status, `Sua solicitação de troca foi ${status.toLowerCase()}`);
+  const { data: requesterUser } = await db.from('users').select('id').eq('member_id', swap.requester_id).maybeSingle();
+  if (requesterUser) await notify(requesterUser.id, 'Troca ' + status, `Sua solicitação de troca foi ${status.toLowerCase()}`);
 
-  // Notify suggested
   if (swap.suggested_member_id) {
-    const sugUser = db.prepare('SELECT id FROM users WHERE member_id=?').get(swap.suggested_member_id);
-    if (sugUser) notify(sugUser.id, 'Troca ' + status, `A troca foi ${status.toLowerCase()} pelo líder`);
+    const { data: sugUser } = await db.from('users').select('id').eq('member_id', swap.suggested_member_id).maybeSingle();
+    if (sugUser) await notify(sugUser.id, 'Troca ' + status, `A troca foi ${status.toLowerCase()} pelo líder`);
   }
 
   res.json({ message: 'Atualizado' });
 });
 
-app.put('/api/swaps/:id/member', auth, (req, res) => {
+app.put('/api/swaps/:id/member', auth, async (req, res) => {
   const { member_status } = req.body;
-  const swap = db.prepare('SELECT * FROM swaps WHERE id=?').get(req.params.id);
+  const { data: swap } = await db.from('swaps').select('*').eq('id', req.params.id).single();
   if (!swap) return res.status(404).json({ message: 'Troca não encontrada' });
 
-  db.prepare('UPDATE swaps SET member_status=? WHERE id=?').run(member_status, req.params.id);
+  await db.from('swaps').update({ member_status }).eq('id', req.params.id);
 
-  // Notify requester
-  const requesterUser = db.prepare('SELECT id FROM users WHERE member_id=?').get(swap.requester_id);
-  if (requesterUser) notify(requesterUser.id, 'Resposta de Troca', `O membro ${member_status.toLowerCase()} a troca`);
+  const { data: requesterUser } = await db.from('users').select('id').eq('member_id', swap.requester_id).maybeSingle();
+  if (requesterUser) await notify(requesterUser.id, 'Resposta de Troca', `O membro ${member_status.toLowerCase()} a troca`);
 
   res.json({ message: 'Atualizado' });
 });
 
 // ─── Notifications ────────────────────────────────────────────────────────────
-app.get('/api/notifications/:user_id', auth, (req, res) => {
-  const notifications = db.prepare('SELECT * FROM notifications WHERE user_id=? ORDER BY created_at DESC LIMIT 50').all(req.params.user_id);
-  res.json(notifications);
+app.get('/api/notifications/:user_id', auth, async (req, res) => {
+  const { data } = await db.from('notifications').select('*').eq('user_id', req.params.user_id).order('created_at', { ascending: false }).limit(50);
+  res.json(data || []);
 });
 
-app.put('/api/notifications/:id/read', auth, (req, res) => {
-  db.prepare('UPDATE notifications SET is_read=1 WHERE id=?').run(req.params.id);
+app.put('/api/notifications/:id/read', auth, async (req, res) => {
+  await db.from('notifications').update({ is_read: true }).eq('id', req.params.id);
   res.json({ message: 'Lido' });
 });
 
 // ─── Activation Codes ─────────────────────────────────────────────────────────
-app.get('/api/activation-codes', auth, requireRole('SuperAdmin'), (req, res) => {
-  res.json(db.prepare('SELECT * FROM activation_codes ORDER BY created_at DESC').all());
+app.get('/api/activation-codes', auth, requireRole('SuperAdmin'), async (req, res) => {
+  const { data } = await db.from('activation_codes').select('*').order('created_at', { ascending: false });
+  res.json(data || []);
 });
 
-app.post('/api/activation-codes', auth, requireRole('SuperAdmin'), (req, res) => {
+app.post('/api/activation-codes', auth, requireRole('SuperAdmin'), async (req, res) => {
   const { institution, expiry_days } = req.body;
   if (!institution) return res.status(400).json({ message: 'Nome da instituição obrigatório' });
 
@@ -783,35 +626,34 @@ app.post('/api/activation-codes', auth, requireRole('SuperAdmin'), (req, res) =>
     expires = d.toISOString();
   }
 
-  db.prepare('INSERT INTO activation_codes (code, institution, expires_at) VALUES (?,?,?)').run(code, institution, expires);
+  await db.from('activation_codes').insert({ code, institution, expires_at: expires });
   res.json({ code, institution, expires_at: expires });
 });
 
-app.post('/api/activation-codes/activate', auth, (req, res) => {
+app.post('/api/activation-codes/activate', auth, async (req, res) => {
   const { code } = req.body;
   if (!code) return res.status(400).json({ message: 'Código obrigatório' });
 
-  const record = db.prepare('SELECT * FROM activation_codes WHERE code=?').get(code);
+  const { data: record } = await db.from('activation_codes').select('*').eq('code', code).single();
   if (!record) return res.status(404).json({ message: 'Código inválido' });
   if (record.is_used) return res.status(409).json({ message: 'Código já utilizado' });
   if (record.expires_at && new Date(record.expires_at) < new Date()) return res.status(410).json({ message: 'Código expirado' });
 
-  db.prepare('UPDATE activation_codes SET is_used=1 WHERE code=?').run(code);
-  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)').run('activated', '1');
+  await db.from('activation_codes').update({ is_used: true }).eq('code', code);
+  await db.from('settings').upsert({ key: 'activated', value: '1' }, { onConflict: 'key' });
 
   res.json({ message: 'Sistema ativado com sucesso!' });
 });
 
 // ─── Backup ───────────────────────────────────────────────────────────────────
-app.post('/api/backup', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), (req, res) => {
-  // In production: export to Supabase or S3
+app.post('/api/backup', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const tables = ['members', 'cults', 'scales', 'swaps', 'notifications', 'departments', 'sectors', 'ministries'];
   const backup = {};
   for (const t of tables) {
-    try { backup[t] = db.prepare(`SELECT * FROM ${t}`).all(); } catch {}
+    const { data } = await db.from(t).select('*');
+    backup[t] = data || [];
   }
   backup.exported_at = new Date().toISOString();
-
   res.json({ message: `Backup realizado em ${new Date().toLocaleString('pt-BR')}`, data: backup });
 });
 
@@ -827,7 +669,5 @@ if (process.env.NODE_ENV === 'production') {
 // ─── Start ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`\n🚀 EcclesiaScale API rodando em http://localhost:${PORT}`);
-  console.log(`\n📋 Credenciais padrão:`);
-  console.log(`   SuperAdmin: super@ecclesia.com / SuperAdmin@2024!`);
-  console.log(`   Admin:      admin@ecclesia.com / Admin@2024!\n`);
+  console.log(`   Supabase: ${SUPABASE_URL}\n`);
 });
