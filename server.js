@@ -69,10 +69,7 @@ async function checkTrial(res) {
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
-app.get('/api/genhash', async (req, res) => {
-  const hash = bcrypt.hashSync('123456', 10);
-  res.json({ hash });
-});
+
 // ─── Auth Routes ──────────────────────────────────────────────────────────────
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
@@ -228,8 +225,12 @@ app.post('/api/members', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asy
   if (error) return res.status(500).json({ message: error.message });
 
   if (email) {
-    const hash = bcrypt.hashSync('EcclesiaScale@' + member.id, 10);
-    await db.from('users').upsert({ email, password: hash, role: role || 'Membro', member_id: member.id }, { onConflict: 'email', ignoreDuplicates: true });
+    // ✅ CORREÇÃO: Verifica se usuário já existe antes de criar, evitando sobrescrever senha
+    const { data: existingUser } = await db.from('users').select('id').eq('email', email).maybeSingle();
+    if (!existingUser) {
+      const hash = bcrypt.hashSync('EcclesiaScale@' + member.id, 10);
+      await db.from('users').insert({ email, password: hash, role: role || 'Membro', member_id: member.id });
+    }
   }
 
   if (ministries?.length) {
