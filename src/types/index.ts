@@ -25,6 +25,9 @@ export interface Member {
   is_active: number;
   created_at: string;
   ministries?: Ministry[];
+  // ─── Campos de desativação ───────────────────────────────────────────────
+  deactivated_at?: string;
+  deactivated_by?: string;
 }
 
 export interface Ministry {
