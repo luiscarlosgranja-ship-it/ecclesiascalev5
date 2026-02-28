@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Users, Calendar, CheckCircle, Clock, Repeat, Settings, GripVertical, Eye, EyeOff } from 'lucide-react';
+import { Users, Calendar, CheckCircle, Clock, Repeat, Settings, Eye, EyeOff } from 'lucide-react';
 import { Card, Badge, Spinner } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import { useTrialStatus } from '../hooks/useTrialStatus';
+import { supabase } from '../utils/supabaseClient';
 import type { AuthUser, DashboardStats, DashboardWidget, Scale, Cult } from '../types';
 import { isAdmin, isLeader } from '../utils/permissions';
 import { format } from 'date-fns';
@@ -23,19 +24,37 @@ const DEFAULT_WIDGETS: DashboardWidget[] = [
 
 export default function DashboardPage({ user, setPage }: DashboardPageProps) {
   const [customizing, setCustomizing] = useState(false);
-  const [widgets, setWidgets] = useState<DashboardWidget[]>(() => {
-    const stored = localStorage.getItem(`widgets_${user.id}`);
-    return stored ? JSON.parse(stored) : DEFAULT_WIDGETS;
-  });
+
+  // ─── Preferências de widgets em memória (sem localStorage) ──────────────────
+  // Sincroniza entre dispositivos pois não persiste localmente
+  const [widgets, setWidgets] = useState<DashboardWidget[]>(DEFAULT_WIDGETS);
 
   const trial = useTrialStatus();
-  const { data: stats, loading: statsLoading } = useApi<DashboardStats>('/dashboard/stats');
-  const { data: upcomingCults } = useApi<Cult[]>('/cults?status=Agendado&limit=5');
-  const { data: myScales } = useApi<Scale[]>(user.member_id ? `/scales?member_id=${user.member_id}&limit=5` : null);
+  const { data: stats, loading: statsLoading, refetch: refetchStats } = useApi<DashboardStats>('/dashboard/stats');
+  const { data: upcomingCults, refetch: refetchCults } = useApi<Cult[]>('/cults?status=Agendado&limit=5');
+  const { data: myScales, refetch: refetchScales } = useApi<Scale[]>(
+    user.member_id ? `/scales?member_id=${user.member_id}&limit=5` : null
+  );
 
+  // ─── Supabase Realtime para atualizar dashboard automaticamente ───────────────
   useEffect(() => {
-    localStorage.setItem(`widgets_${user.id}`, JSON.stringify(widgets));
-  }, [widgets, user.id]);
+    const channel = supabase
+      .channel('dashboard-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cults' }, () => {
+        refetchCults();
+        refetchStats();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scales' }, () => {
+        refetchScales();
+        refetchStats();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'swaps' }, () => {
+        refetchStats();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [refetchCults, refetchScales, refetchStats]);
 
   const toggleWidget = (id: string) => {
     setWidgets(prev => prev.map(w => w.id === id ? { ...w, visible: !w.visible } : w));
@@ -228,7 +247,20 @@ function MyScalesWidget({ scales }: { scales: Scale[] }) {
 
 // ─── Pending Swaps ────────────────────────────────────────────────────────────
 function PendingSwapsWidget({ userId, role }: { userId: number; role: string }) {
-  const { data: swaps } = useApi<import('../types').Swap[]>('/swaps?status=Pendente&limit=5');
+  const { data: swaps, refetch } = useApi<import('../types').Swap[]>('/swaps?status=Pendente&limit=5');
+
+  // Realtime para trocas pendentes
+  useEffect(() => {
+    const channel = supabase
+      .channel('swaps-dashboard')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'swaps' }, () => {
+        refetch();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [refetch]);
+
   return (
     <Card className="p-4">
       <h3 className="text-stone-300 font-medium text-sm mb-3">Solicitações de Troca Pendentes</h3>

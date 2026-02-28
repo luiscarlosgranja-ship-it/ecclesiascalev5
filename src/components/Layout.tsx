@@ -1,12 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { clsx } from 'clsx';
 import {
   LayoutDashboard, Users, Calendar, Repeat, Settings, LogOut, Bell,
   BookOpen, Layers, Shield, ChevronLeft, ChevronRight, Wifi, WifiOff,
-  Database, Key, Menu, X
+  Database, Menu, X
 } from 'lucide-react';
 import type { AuthUser } from '../types';
-import { can } from '../utils/permissions';
+
 import { useNotifications } from '../hooks/useApi';
 
 type Page = string;
@@ -41,7 +41,20 @@ interface LayoutProps {
 export default function Layout({ user, page, setPage, onLogout, children }: LayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [online] = useState(navigator.onLine);
+
+  // ─── Indicador de conexão real usando eventos do browser ─────────────────────
+  const [online, setOnline] = useState(navigator.onLine);
+  useEffect(() => {
+    const handleOnline = () => setOnline(true);
+    const handleOffline = () => setOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   const { unread, notifications, markRead } = useNotifications(user.member_id);
   const [notifOpen, setNotifOpen] = useState(false);
 
@@ -100,7 +113,11 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
           {online
             ? <Wifi size={14} className="text-emerald-400" />
             : <WifiOff size={14} className="text-red-400" />}
-          {(!collapsed || mobile) && <span className={clsx('text-xs', online ? 'text-emerald-400' : 'text-red-400')}>{online ? 'Conectado' : 'Desconectado'}</span>}
+          {(!collapsed || mobile) && (
+            <span className={clsx('text-xs', online ? 'text-emerald-400' : 'text-red-400')}>
+              {online ? 'Conectado' : 'Desconectado'}
+            </span>
+          )}
         </div>
         <button
           onClick={onLogout}
@@ -139,6 +156,14 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
           <h1 className="text-stone-200 font-semibold text-sm capitalize">
             {NAV_ITEMS.find(n => n.id === page)?.label || page}
           </h1>
+
+          {/* Banner offline no topo */}
+          {!online && (
+            <div className="hidden sm:flex items-center gap-1.5 bg-red-900/30 border border-red-700/50 rounded-lg px-3 py-1">
+              <WifiOff size={12} className="text-red-400" />
+              <span className="text-red-400 text-xs">Sem conexão</span>
+            </div>
+          )}
 
           <div className="ml-auto flex items-center gap-3">
             {/* Notifications */}

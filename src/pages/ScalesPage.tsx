@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Printer, Zap, Trash2, CheckCircle, Repeat, Calendar } from 'lucide-react';
 import { Card, Button, Modal, Badge, Select, Spinner, Input } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
+import { supabase } from '../utils/supabaseClient';
 import type { AuthUser, Scale, Cult, Member, Sector, CultType } from '../types';
 import { isAdmin, isLeader } from '../utils/permissions';
 import { exportScalePDF } from '../utils/pdf';
@@ -22,6 +23,13 @@ export default function ScalesPage({ user }: Props) {
   const [error, setError] = useState('');
   const [cultError, setCultError] = useState('');
 
+  // ─── Modal de troca (substitui prompt/alert nativos) ─────────────────────────
+  const [swapModal, setSwapModal] = useState(false);
+  const [swapScaleId, setSwapScaleId] = useState<number | null>(null);
+  const [swapEmail, setSwapEmail] = useState('');
+  const [swapMsg, setSwapMsg] = useState('');
+  const [swapSaving, setSwapSaving] = useState(false);
+
   const { data: cults, refetch: refetchCults } = useApi<Cult[]>('/cults?status=Agendado');
   const { data: scales, refetch: refetchScales } = useApi<Scale[]>(
     selectedCult ? `/scales?cult_id=${selectedCult}` : null, [selectedCult]
@@ -31,6 +39,21 @@ export default function ScalesPage({ user }: Props) {
   const { data: cultTypes } = useApi<CultType[]>('/cult_types');
 
   const availableCults = cults || [];
+
+  // ─── Supabase Realtime ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const channel = supabase
+      .channel('scales-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scales' }, () => {
+        refetchScales();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cults' }, () => {
+        refetchCults();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [refetchScales, refetchCults]);
 
   // ─── Auto gerar escala ───────────────────────────────────────────────────────
   async function generateAuto() {
@@ -81,14 +104,13 @@ export default function ScalesPage({ user }: Props) {
     } finally { setSaving(false); }
   }
 
-  // ─── Criar nova escala (culto + data + horário + local) ──────────────────────
+  // ─── Criar nova escala ───────────────────────────────────────────────────────
   async function createNewCultScale() {
     if (!newCult.date || !newCult.time) {
       setCultError('Data e Horário são obrigatórios'); return;
     }
     setSavingCult(true); setCultError('');
     try {
-      // 1. Cria o culto
       const cult = await api.post<{ id: number }>('/cults', {
         type_id: newCult.type_id ? Number(newCult.type_id) : null,
         name: newCult.name || null,
@@ -96,8 +118,6 @@ export default function ScalesPage({ user }: Props) {
         time: newCult.time,
         status: 'Agendado',
       });
-
-      // 2. Se setor informado, já seleciona o culto criado
       setSelectedCult(cult.id);
       setNewCultModal(false);
       setNewCult({ type_id: '', name: '', date: '', time: '', sector_id: '' });
@@ -107,15 +127,28 @@ export default function ScalesPage({ user }: Props) {
     } finally { setSavingCult(false); }
   }
 
-  // ─── Solicitar troca ─────────────────────────────────────────────────────────
-  async function requestSwap(scaleId: number) {
-    const suggested = prompt('E-mail do voluntário para troca (opcional):');
+  // ─── Abrir modal de troca ────────────────────────────────────────────────────
+  function openSwapModal(scaleId: number) {
+    setSwapScaleId(scaleId);
+    setSwapEmail('');
+    setSwapMsg('');
+    setSwapModal(true);
+  }
+
+  // ─── Confirmar solicitação de troca ──────────────────────────────────────────
+  async function confirmSwap() {
+    if (!swapScaleId) return;
+    setSwapSaving(true); setSwapMsg('');
     try {
-      await api.post('/swaps', { scale_id: scaleId, suggested_email: suggested || undefined });
-      alert('Solicitação de troca enviada!');
+      await api.post('/swaps', {
+        scale_id: swapScaleId,
+        suggested_email: swapEmail.trim() || undefined,
+      });
+      setSwapMsg('✅ Solicitação enviada com sucesso!');
+      setTimeout(() => { setSwapModal(false); setSwapScaleId(null); }, 1500);
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Erro ao solicitar troca');
-    }
+      setSwapMsg('❌ ' + (e instanceof Error ? e.message : 'Erro ao solicitar troca'));
+    } finally { setSwapSaving(false); }
   }
 
   const selectedCultData = availableCults.find(c => c.id === selectedCult);
@@ -125,7 +158,6 @@ export default function ScalesPage({ user }: Props) {
     exportScalePDF(scales, selectedCultData, `Escala - ${selectedCultData.name || selectedCultData.type_name}`);
   }
 
-  // Exibe informações do culto selecionado
   function getCultLabel(c: Cult) {
     const nome = c.name || c.type_name || 'Culto';
     return `${nome} — ${c.date} ${c.time}`;
@@ -172,8 +204,6 @@ export default function ScalesPage({ user }: Props) {
             <option key={c.id} value={c.id}>{getCultLabel(c)}</option>
           ))}
         </select>
-
-        {/* Info do culto selecionado */}
         {selectedCultData && (
           <div className="mt-3 flex flex-wrap gap-4 text-xs text-stone-400">
             <span>📅 {selectedCultData.date}</span>
@@ -221,7 +251,7 @@ export default function ScalesPage({ user }: Props) {
                               <CheckCircle size={15} />
                             </button>
                           )}
-                          <button onClick={() => requestSwap(s.id)} title="Solicitar Troca"
+                          <button onClick={() => openSwapModal(s.id)} title="Solicitar Troca"
                             className="text-blue-400 hover:text-blue-300 p-1 transition-colors">
                             <Repeat size={15} />
                           </button>
@@ -248,22 +278,40 @@ export default function ScalesPage({ user }: Props) {
         </Card>
       )}
 
-      {/* Modal: Nova Escala (Culto com Data, Horário e Local) */}
+      {/* Modal: Solicitar Troca */}
+      <Modal open={swapModal} onClose={() => setSwapModal(false)} title="Solicitar Troca" size="sm">
+        <div className="space-y-4">
+          <p className="text-stone-400 text-sm">
+            Informe o e-mail do voluntário sugerido para a troca, ou deixe em branco para qualquer disponível.
+          </p>
+          <Input
+            label="E-mail do voluntário sugerido (opcional)"
+            type="email"
+            value={swapEmail}
+            onChange={e => setSwapEmail(e.target.value)}
+            placeholder="voluntario@email.com"
+          />
+          {swapMsg && (
+            <p className={`text-sm ${swapMsg.startsWith('✅') ? 'text-emerald-400' : 'text-red-400'}`}>{swapMsg}</p>
+          )}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setSwapModal(false)}>Cancelar</Button>
+            <Button onClick={confirmSwap} loading={swapSaving}>Confirmar Troca</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal: Nova Escala */}
       <Modal open={newCultModal} onClose={() => setNewCultModal(false)} title="Nova Escala" size="md">
         <div className="space-y-4">
           <p className="text-stone-400 text-xs">Preencha os dados do culto/evento para criar uma nova escala.</p>
-
           <div>
             <label className="text-xs text-stone-400 uppercase tracking-wide mb-1 block">Tipo de Culto</label>
             <select
               value={newCult.type_id}
               onChange={e => {
                 const ct = (cultTypes || []).find(c => c.id === Number(e.target.value));
-                setNewCult(n => ({
-                  ...n,
-                  type_id: e.target.value,
-                  time: ct?.default_time || n.time,
-                }));
+                setNewCult(n => ({ ...n, type_id: e.target.value, time: ct?.default_time || n.time }));
               }}
               className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
             >
@@ -273,29 +321,18 @@ export default function ScalesPage({ user }: Props) {
               ))}
             </select>
           </div>
-
           <Input
             label="Nome personalizado (opcional)"
             value={newCult.name}
             onChange={e => setNewCult(n => ({ ...n, name: e.target.value }))}
             placeholder="Ex: Culto de Aniversário"
           />
-
           <div className="grid grid-cols-2 gap-3">
-            <Input
-              label="Data *"
-              type="date"
-              value={newCult.date}
-              onChange={e => setNewCult(n => ({ ...n, date: e.target.value }))}
-            />
-            <Input
-              label="Horário *"
-              type="time"
-              value={newCult.time}
-              onChange={e => setNewCult(n => ({ ...n, time: e.target.value }))}
-            />
+            <Input label="Data *" type="date" value={newCult.date}
+              onChange={e => setNewCult(n => ({ ...n, date: e.target.value }))} />
+            <Input label="Horário *" type="time" value={newCult.time}
+              onChange={e => setNewCult(n => ({ ...n, time: e.target.value }))} />
           </div>
-
           <div>
             <label className="text-xs text-stone-400 uppercase tracking-wide mb-1 block">Local / Setor Principal</label>
             <select
@@ -308,9 +345,7 @@ export default function ScalesPage({ user }: Props) {
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
-            <p className="text-stone-600 text-xs mt-1">Após criar, você pode adicionar voluntários por setor individualmente.</p>
           </div>
-
           {cultError && <p className="text-red-400 text-xs">{cultError}</p>}
           <div className="flex gap-3">
             <Button variant="outline" onClick={() => setNewCultModal(false)}>Cancelar</Button>

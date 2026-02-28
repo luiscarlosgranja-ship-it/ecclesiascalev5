@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '../utils/api';
+import { supabase } from '../utils/supabaseClient';
 
 export function useApi<T>(path: string | null, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -39,11 +40,23 @@ export function useNotifications(userId: number | null) {
     } catch {}
   }, [userId]);
 
+  // ─── Carrega notificações iniciais e escuta via Supabase Realtime ─────────────
   useEffect(() => {
+    if (!userId) return;
+
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000);
-    return () => clearInterval(interval);
-  }, [fetchNotifications]);
+
+    const channel = supabase
+      .channel(`notifications-${userId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
+        () => { fetchNotifications(); }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [userId, fetchNotifications]);
 
   const markRead = useCallback(async (id: number) => {
     await api.put(`/notifications/${id}/read`, {});

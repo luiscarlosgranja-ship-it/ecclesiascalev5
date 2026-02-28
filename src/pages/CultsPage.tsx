@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Edit, Ban, History, Calendar, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { Card, Button, Modal, Badge, Select, Input } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
+import { supabase } from '../utils/supabaseClient';
 import type { AuthUser, Cult, CultType } from '../types';
 import { format, addMonths, subMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -25,7 +26,18 @@ export default function CultsPage({ user }: Props) {
   const active = (cults || []).filter(c => c.status !== 'Cancelado' && c.status !== 'Realizado');
   const history = (cults || []).filter(c => c.status === 'Cancelado' || c.status === 'Realizado');
 
-  // ─── Retorna o nome do culto com fallback seguro ──────────────────────────
+  // ─── Supabase Realtime ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const channel = supabase
+      .channel('cults-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cults' }, () => {
+        refetch();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [refetch]);
+
   function getCultName(c: Cult): string {
     return c.name || c.type_name || '(Sem nome)';
   }
@@ -47,7 +59,6 @@ export default function CultsPage({ user }: Props) {
 
   async function cancelCult(c: Cult) {
     if (!confirm(`Cancelar o culto "${getCultName(c)}"?`)) return;
-    // ✅ Passa todos os dados do culto para não perder nome/tipo ao cancelar
     await api.put(`/cults/${c.id}`, {
       type_id: c.type_id || null,
       name: c.name || null,
@@ -125,7 +136,6 @@ export default function CultsPage({ user }: Props) {
             <tbody>
               {(activeTab === 'active' ? active : history).map(c => (
                 <tr key={c.id} className="border-b border-stone-800 hover:bg-stone-800/30 transition-colors">
-                  {/* ✅ Nome com fallback seguro */}
                   <td className="p-3 text-stone-200 font-medium">{c.name || '—'}</td>
                   <td className="p-3 text-stone-400 text-xs">{c.type_name || '—'}</td>
                   <td className="p-3 text-stone-400 text-xs">{c.date}</td>
@@ -189,7 +199,6 @@ export default function CultsPage({ user }: Props) {
               </button>
             </div>
           </div>
-
           <div>
             <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Tipos de Culto</label>
             <div className="space-y-2">
@@ -218,7 +227,6 @@ export default function CultsPage({ user }: Props) {
               </button>
             </div>
           </div>
-
           {error && <p className="text-red-400 text-xs">{error}</p>}
           <div className="flex gap-3">
             <Button variant="outline" onClick={() => setGenerateModal(false)}>Cancelar</Button>
