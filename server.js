@@ -249,6 +249,14 @@ app.put('/api/members/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), 
     role, department_id: department_id || null, status, is_active: is_active ?? true
   }).eq('id', req.params.id);
 
+  // ✅ CORREÇÃO: Atualiza apenas role e is_active do usuário, NUNCA a senha
+  if (email && role) {
+    const { data: existingUser } = await db.from('users').select('id').eq('email', email).maybeSingle();
+    if (existingUser) {
+      await db.from('users').update({ role, is_active: is_active ?? true }).eq('id', existingUser.id);
+    }
+  }
+
   if (ministries !== undefined) {
     await db.from('member_ministries').delete().eq('member_id', req.params.id);
     if (ministries.length) {

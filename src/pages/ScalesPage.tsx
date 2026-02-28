@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Plus, Printer, Zap, Trash2, CheckCircle, Repeat, ChevronDown } from 'lucide-react';
-import { Card, Button, Modal, Badge, Select, Spinner } from '../components/ui';
+import { Plus, Printer, Zap, Trash2, CheckCircle, Repeat, Calendar } from 'lucide-react';
+import { Card, Button, Modal, Badge, Select, Spinner, Input } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
-import type { AuthUser, Scale, Cult, Member, Sector } from '../types';
+import type { AuthUser, Scale, Cult, Member, Sector, CultType } from '../types';
 import { isAdmin, isLeader } from '../utils/permissions';
 import { exportScalePDF } from '../utils/pdf';
 
@@ -14,18 +14,25 @@ export default function ScalesPage({ user }: Props) {
   const [autoModal, setAutoModal] = useState(false);
   const [autoType, setAutoType] = useState<'month' | 'standard' | 'thematic'>('month');
   const [addModal, setAddModal] = useState(false);
+  const [newCultModal, setNewCultModal] = useState(false);
   const [newScale, setNewScale] = useState({ member_id: '', sector_id: '' });
+  const [newCult, setNewCult] = useState({ type_id: '', name: '', date: '', time: '', sector_id: '' });
   const [saving, setSaving] = useState(false);
+  const [savingCult, setSavingCult] = useState(false);
   const [error, setError] = useState('');
+  const [cultError, setCultError] = useState('');
 
-  const { data: cults } = useApi<Cult[]>('/cults?status=Agendado');
-  const { data: scales, refetch: refetchScales } = useApi<Scale[]>(selectedCult ? `/scales?cult_id=${selectedCult}` : null, [selectedCult]);
+  const { data: cults, refetch: refetchCults } = useApi<Cult[]>('/cults?status=Agendado');
+  const { data: scales, refetch: refetchScales } = useApi<Scale[]>(
+    selectedCult ? `/scales?cult_id=${selectedCult}` : null, [selectedCult]
+  );
   const { data: members } = useApi<Member[]>('/members?is_active=1');
   const { data: sectors } = useApi<Sector[]>('/sectors?is_active=1');
+  const { data: cultTypes } = useApi<CultType[]>('/cult_types');
 
-  // Filter cults by dept for leaders
   const availableCults = cults || [];
 
+  // ─── Auto gerar escala ───────────────────────────────────────────────────────
   async function generateAuto() {
     if (!selectedCult && autoType !== 'month') { setError('Selecione um culto'); return; }
     setSaving(true); setError('');
@@ -41,22 +48,31 @@ export default function ScalesPage({ user }: Props) {
     } finally { setSaving(false); }
   }
 
+  // ─── Confirmar escala ────────────────────────────────────────────────────────
   async function confirmScale(id: number) {
     await api.put(`/scales/${id}/confirm`, {});
     refetchScales();
   }
 
+  // ─── Remover escala ──────────────────────────────────────────────────────────
   async function removeScale(id: number) {
     if (!confirm('Remover desta escala? O membro ficará disponível novamente.')) return;
     await api.delete(`/scales/${id}`);
     refetchScales();
   }
 
+  // ─── Adicionar membro à escala ───────────────────────────────────────────────
   async function addToScale() {
-    if (!selectedCult || !newScale.member_id || !newScale.sector_id) return;
+    if (!selectedCult || !newScale.member_id || !newScale.sector_id) {
+      setError('Voluntário e Setor são obrigatórios'); return;
+    }
     setSaving(true); setError('');
     try {
-      await api.post('/scales', { cult_id: selectedCult, member_id: Number(newScale.member_id), sector_id: Number(newScale.sector_id) });
+      await api.post('/scales', {
+        cult_id: selectedCult,
+        member_id: Number(newScale.member_id),
+        sector_id: Number(newScale.sector_id),
+      });
       setAddModal(false);
       setNewScale({ member_id: '', sector_id: '' });
       refetchScales();
@@ -65,6 +81,33 @@ export default function ScalesPage({ user }: Props) {
     } finally { setSaving(false); }
   }
 
+  // ─── Criar nova escala (culto + data + horário + local) ──────────────────────
+  async function createNewCultScale() {
+    if (!newCult.date || !newCult.time) {
+      setCultError('Data e Horário são obrigatórios'); return;
+    }
+    setSavingCult(true); setCultError('');
+    try {
+      // 1. Cria o culto
+      const cult = await api.post<{ id: number }>('/cults', {
+        type_id: newCult.type_id ? Number(newCult.type_id) : null,
+        name: newCult.name || null,
+        date: newCult.date,
+        time: newCult.time,
+        status: 'Agendado',
+      });
+
+      // 2. Se setor informado, já seleciona o culto criado
+      setSelectedCult(cult.id);
+      setNewCultModal(false);
+      setNewCult({ type_id: '', name: '', date: '', time: '', sector_id: '' });
+      refetchCults();
+    } catch (e) {
+      setCultError(e instanceof Error ? e.message : 'Erro ao criar escala');
+    } finally { setSavingCult(false); }
+  }
+
+  // ─── Solicitar troca ─────────────────────────────────────────────────────────
   async function requestSwap(scaleId: number) {
     const suggested = prompt('E-mail do voluntário para troca (opcional):');
     try {
@@ -82,6 +125,12 @@ export default function ScalesPage({ user }: Props) {
     exportScalePDF(scales, selectedCultData, `Escala - ${selectedCultData.name || selectedCultData.type_name}`);
   }
 
+  // Exibe informações do culto selecionado
+  function getCultLabel(c: Cult) {
+    const nome = c.name || c.type_name || 'Culto';
+    return `${nome} — ${c.date} ${c.time}`;
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-4">
@@ -92,9 +141,12 @@ export default function ScalesPage({ user }: Props) {
               <Button variant="secondary" size="sm" onClick={() => { setAutoModal(true); setError(''); }}>
                 <Zap size={16} /> Gerar Automático
               </Button>
+              <Button variant="secondary" size="sm" onClick={() => { setNewCultModal(true); setCultError(''); }}>
+                <Calendar size={16} /> Nova Escala
+              </Button>
               {selectedCult && (
                 <Button size="sm" onClick={() => { setAddModal(true); setError(''); }}>
-                  <Plus size={16} /> Adicionar
+                  <Plus size={16} /> Adicionar Voluntário
                 </Button>
               )}
             </>
@@ -107,24 +159,32 @@ export default function ScalesPage({ user }: Props) {
         </div>
       </div>
 
-      {/* Cult selector */}
+      {/* Seletor de Culto */}
       <Card className="p-4">
-        <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Selecionar Culto</label>
+        <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Selecionar Culto / Evento</label>
         <select
           value={selectedCult || ''}
           onChange={e => setSelectedCult(Number(e.target.value) || null)}
-          className="w-full md:w-96 bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+          className="w-full md:w-auto md:min-w-96 bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
         >
           <option value="">Selecione um culto...</option>
           {availableCults.map(c => (
-            <option key={c.id} value={c.id}>
-              {c.name || c.type_name} — {c.date} {c.time}
-            </option>
+            <option key={c.id} value={c.id}>{getCultLabel(c)}</option>
           ))}
         </select>
+
+        {/* Info do culto selecionado */}
+        {selectedCultData && (
+          <div className="mt-3 flex flex-wrap gap-4 text-xs text-stone-400">
+            <span>📅 {selectedCultData.date}</span>
+            <span>🕐 {selectedCultData.time}</span>
+            <span>📋 {selectedCultData.name || selectedCultData.type_name}</span>
+            <span>👥 {scales?.length ?? 0} voluntário(s) escalado(s)</span>
+          </div>
+        )}
       </Card>
 
-      {/* Scale table */}
+      {/* Tabela de Escala */}
       {selectedCult && (
         <Card className="overflow-hidden">
           {!scales ? (
@@ -136,7 +196,7 @@ export default function ScalesPage({ user }: Props) {
                   <tr className="border-b border-stone-700 bg-stone-800/50">
                     <th className="text-left p-3 text-stone-400 font-medium text-xs">#</th>
                     <th className="text-left p-3 text-stone-400 font-medium text-xs">Voluntário</th>
-                    <th className="text-left p-3 text-stone-400 font-medium text-xs">Setor</th>
+                    <th className="text-left p-3 text-stone-400 font-medium text-xs">Setor / Local</th>
                     <th className="text-left p-3 text-stone-400 font-medium text-xs">Status</th>
                     <th className="text-right p-3 text-stone-400 font-medium text-xs">Ações</th>
                   </tr>
@@ -146,7 +206,7 @@ export default function ScalesPage({ user }: Props) {
                     <tr key={s.id} className="border-b border-stone-800 hover:bg-stone-800/30 transition-colors">
                       <td className="p-3 text-stone-500 text-xs">{i + 1}</td>
                       <td className="p-3 text-stone-200">{s.member_name}</td>
-                      <td className="p-3 text-stone-400 text-xs">{s.sector_name}</td>
+                      <td className="p-3 text-stone-400 text-xs">{s.sector_name || '—'}</td>
                       <td className="p-3">
                         <Badge
                           label={s.status}
@@ -156,15 +216,18 @@ export default function ScalesPage({ user }: Props) {
                       <td className="p-3">
                         <div className="flex justify-end gap-1">
                           {s.status === 'Pendente' && (
-                            <button onClick={() => confirmScale(s.id)} title="Confirmar" className="text-emerald-400 hover:text-emerald-300 p-1 transition-colors">
+                            <button onClick={() => confirmScale(s.id)} title="Confirmar"
+                              className="text-emerald-400 hover:text-emerald-300 p-1 transition-colors">
                               <CheckCircle size={15} />
                             </button>
                           )}
-                          <button onClick={() => requestSwap(s.id)} title="Solicitar Troca" className="text-blue-400 hover:text-blue-300 p-1 transition-colors">
+                          <button onClick={() => requestSwap(s.id)} title="Solicitar Troca"
+                            className="text-blue-400 hover:text-blue-300 p-1 transition-colors">
                             <Repeat size={15} />
                           </button>
                           {(isAdmin(user.role) || isLeader(user.role)) && (
-                            <button onClick={() => removeScale(s.id)} title="Remover" className="text-red-400 hover:text-red-300 p-1 transition-colors">
+                            <button onClick={() => removeScale(s.id)} title="Remover"
+                              className="text-red-400 hover:text-red-300 p-1 transition-colors">
                               <Trash2 size={15} />
                             </button>
                           )}
@@ -175,25 +238,103 @@ export default function ScalesPage({ user }: Props) {
                 </tbody>
               </table>
               {scales.length === 0 && (
-                <p className="text-center text-stone-500 text-sm py-10">Nenhum voluntário nesta escala</p>
+                <div className="py-10 text-center">
+                  <p className="text-stone-500 text-sm">Nenhum voluntário nesta escala</p>
+                  <p className="text-stone-600 text-xs mt-1">Clique em "Adicionar Voluntário" para escalar alguém</p>
+                </div>
               )}
             </div>
           )}
         </Card>
       )}
 
-      {/* Auto Generate Modal */}
+      {/* Modal: Nova Escala (Culto com Data, Horário e Local) */}
+      <Modal open={newCultModal} onClose={() => setNewCultModal(false)} title="Nova Escala" size="md">
+        <div className="space-y-4">
+          <p className="text-stone-400 text-xs">Preencha os dados do culto/evento para criar uma nova escala.</p>
+
+          <div>
+            <label className="text-xs text-stone-400 uppercase tracking-wide mb-1 block">Tipo de Culto</label>
+            <select
+              value={newCult.type_id}
+              onChange={e => {
+                const ct = (cultTypes || []).find(c => c.id === Number(e.target.value));
+                setNewCult(n => ({
+                  ...n,
+                  type_id: e.target.value,
+                  time: ct?.default_time || n.time,
+                }));
+              }}
+              className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+            >
+              <option value="">Selecionar tipo...</option>
+              {(cultTypes || []).map(ct => (
+                <option key={ct.id} value={ct.id}>{ct.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <Input
+            label="Nome personalizado (opcional)"
+            value={newCult.name}
+            onChange={e => setNewCult(n => ({ ...n, name: e.target.value }))}
+            placeholder="Ex: Culto de Aniversário"
+          />
+
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Data *"
+              type="date"
+              value={newCult.date}
+              onChange={e => setNewCult(n => ({ ...n, date: e.target.value }))}
+            />
+            <Input
+              label="Horário *"
+              type="time"
+              value={newCult.time}
+              onChange={e => setNewCult(n => ({ ...n, time: e.target.value }))}
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-stone-400 uppercase tracking-wide mb-1 block">Local / Setor Principal</label>
+            <select
+              value={newCult.sector_id}
+              onChange={e => setNewCult(n => ({ ...n, sector_id: e.target.value }))}
+              className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+            >
+              <option value="">Selecionar setor (opcional)...</option>
+              {(sectors || []).map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            <p className="text-stone-600 text-xs mt-1">Após criar, você pode adicionar voluntários por setor individualmente.</p>
+          </div>
+
+          {cultError && <p className="text-red-400 text-xs">{cultError}</p>}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setNewCultModal(false)}>Cancelar</Button>
+            <Button onClick={createNewCultScale} loading={savingCult}>Criar Escala</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal: Gerar Escala Automática */}
       <Modal open={autoModal} onClose={() => setAutoModal(false)} title="Gerar Escala Automática" size="sm">
         <div className="space-y-4">
-          <p className="text-stone-400 text-sm">Selecione o tipo de escala a gerar. O sistema respeitará as regras de não-repetição (máx. 3x/mês) e evitará duplicidade de setor.</p>
+          <p className="text-stone-400 text-sm">
+            O sistema respeitará as regras de não-repetição (máx. 3x/mês) e evitará duplicidade de setor.
+          </p>
           <div className="space-y-2">
             {[
               { value: 'month', label: 'Mês Inteiro' },
               { value: 'standard', label: 'Cultos Padrão' },
               { value: 'thematic', label: 'Cultos Temáticos' },
             ].map(opt => (
-              <label key={opt.value} className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-stone-700 hover:border-amber-600 transition-all">
-                <input type="radio" value={opt.value} checked={autoType === opt.value} onChange={() => setAutoType(opt.value as any)} className="accent-amber-500" />
+              <label key={opt.value}
+                className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-stone-700 hover:border-amber-600 transition-all">
+                <input type="radio" value={opt.value} checked={autoType === opt.value}
+                  onChange={() => setAutoType(opt.value as any)} className="accent-amber-500" />
                 <span className="text-stone-200 text-sm">{opt.label}</span>
               </label>
             ))}
@@ -206,21 +347,28 @@ export default function ScalesPage({ user }: Props) {
         </div>
       </Modal>
 
-      {/* Add to Scale Modal */}
-      <Modal open={addModal} onClose={() => setAddModal(false)} title="Adicionar à Escala" size="sm">
+      {/* Modal: Adicionar Voluntário à Escala */}
+      <Modal open={addModal} onClose={() => setAddModal(false)} title="Adicionar Voluntário à Escala" size="sm">
         <div className="space-y-4">
+          {selectedCultData && (
+            <div className="bg-stone-800/50 rounded-lg p-3 text-xs text-stone-400 space-y-1">
+              <p><span className="text-stone-300">Culto:</span> {selectedCultData.name || selectedCultData.type_name}</p>
+              <p><span className="text-stone-300">Data:</span> {selectedCultData.date}</p>
+              <p><span className="text-stone-300">Horário:</span> {selectedCultData.time}</p>
+            </div>
+          )}
           <Select
-            label="Voluntário"
+            label="Voluntário *"
             value={newScale.member_id}
             onChange={e => setNewScale(n => ({ ...n, member_id: e.target.value }))}
-            placeholder="Selecionar..."
+            placeholder="Selecionar voluntário..."
             options={(members || []).map(m => ({ value: m.id, label: m.name }))}
           />
           <Select
-            label="Setor"
+            label="Setor / Local *"
             value={newScale.sector_id}
             onChange={e => setNewScale(n => ({ ...n, sector_id: e.target.value }))}
-            placeholder="Selecionar..."
+            placeholder="Selecionar setor..."
             options={(sectors || []).map(s => ({ value: s.id, label: s.name }))}
           />
           {error && <p className="text-red-400 text-xs">{error}</p>}
