@@ -300,9 +300,11 @@ SIMPLE_TABLES.forEach(table => {
     const { name, icon, is_active, default_time, default_day } = req.body;
     if (!name) return res.status(400).json({ message: 'Nome obrigatório' });
 
-    let payload = table === 'cult_types'
-      ? { name, default_time: default_time || null, default_day: default_day ?? null }
-      : { name, icon: icon || null, is_active: is_active ?? true };
+  let payload = table === 'cult_types'
+  ? { name, default_time: default_time || null, default_day: default_day ?? null }
+  : table === 'sectors'
+  ? { name, is_active: is_active ?? true }
+  : { name, icon: icon || null, is_active: is_active ?? true };
 
     const { data, error } = await db.from(table).insert(payload).select().single();
     if (error) {
@@ -315,8 +317,10 @@ SIMPLE_TABLES.forEach(table => {
   app.put(`/api/${table}/:id`, auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
     const { name, icon, is_active, default_time, default_day } = req.body;
     let payload = table === 'cult_types'
-      ? { name, default_time: default_time || null, default_day: default_day ?? null }
-      : { name, icon: icon || null, is_active: is_active ?? true };
+  ? { name, default_time: default_time || null, default_day: default_day ?? null }
+  : table === 'sectors'
+  ? { name, is_active: is_active ?? true }
+  : { name, icon: icon || null, is_active: is_active ?? true };
 
     await db.from(table).update(payload).eq('id', req.params.id);
     res.json({ message: 'Atualizado' });
