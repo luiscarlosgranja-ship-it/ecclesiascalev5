@@ -300,15 +300,19 @@ SIMPLE_TABLES.forEach(table => {
     const { name, icon, is_active, default_time, default_day } = req.body;
     if (!name) return res.status(400).json({ message: 'Nome obrigatório' });
 
-  let payload = table === 'cult_types'
-  ? { name, default_time: default_time || null, default_day: default_day ?? null }
-  : table === 'sectors'
-  ? { name, is_active: is_active ?? true }
-  : { name, icon: icon || null, is_active: is_active ?? true };
+    // Verifica duplicidade por nome (case-insensitive)
+    const { data: existing } = await db.from(table).select('id').ilike('name', name.trim()).maybeSingle();
+    if (existing) return res.status(409).json({ message: `Já existe um item com o nome "${name.trim()}" nesta lista.` });
+
+    let payload = table === 'cult_types'
+      ? { name: name.trim(), default_time: default_time || null, default_day: default_day ?? null }
+      : table === 'sectors'
+      ? { name: name.trim(), is_active: is_active ?? true }
+      : { name: name.trim(), icon: icon || null, is_active: is_active ?? true };
 
     const { data, error } = await db.from(table).insert(payload).select().single();
     if (error) {
-      if (error.code === '23505') return res.status(409).json({ message: 'Já existe com este nome' });
+      if (error.code === '23505') return res.status(409).json({ message: `Já existe um item com o nome "${name.trim()}" nesta lista.` });
       return res.status(500).json({ message: error.message });
     }
     res.json({ id: data.id });
@@ -316,11 +320,17 @@ SIMPLE_TABLES.forEach(table => {
 
   app.put(`/api/${table}/:id`, auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
     const { name, icon, is_active, default_time, default_day } = req.body;
+    if (!name) return res.status(400).json({ message: 'Nome obrigatório' });
+
+    // Verifica duplicidade por nome (case-insensitive), excluindo o próprio item
+    const { data: existing } = await db.from(table).select('id').ilike('name', name.trim()).neq('id', req.params.id).maybeSingle();
+    if (existing) return res.status(409).json({ message: `Já existe um item com o nome "${name.trim()}" nesta lista.` });
+
     let payload = table === 'cult_types'
-  ? { name, default_time: default_time || null, default_day: default_day ?? null }
-  : table === 'sectors'
-  ? { name, is_active: is_active ?? true }
-  : { name, icon: icon || null, is_active: is_active ?? true };
+      ? { name: name.trim(), default_time: default_time || null, default_day: default_day ?? null }
+      : table === 'sectors'
+      ? { name: name.trim(), is_active: is_active ?? true }
+      : { name: name.trim(), icon: icon || null, is_active: is_active ?? true };
 
     await db.from(table).update(payload).eq('id', req.params.id);
     res.json({ message: 'Atualizado' });

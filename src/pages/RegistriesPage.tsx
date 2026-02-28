@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Plus, Edit, Trash2, ToggleLeft, ToggleRight, Download } from 'lucide-react';
+import { Plus, Edit, Trash2, ToggleLeft, ToggleRight, Download, Clock, AlertTriangle, ShieldOff } from 'lucide-react';
 import { Card, Button, Modal, Input, Badge } from '../components/ui';
 import { useApi } from '../hooks/useApi';
+import { useTrialStatus } from '../hooks/useTrialStatus';
 import api from '../utils/api';
 import type { AuthUser, Ministry, Department, Sector, CultType } from '../types';
 
@@ -10,7 +11,6 @@ type Tab = 'ministries' | 'departments' | 'sectors' | 'cult_types';
 
 const DIAS_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
-// ─── Dados Padrão ─────────────────────────────────────────────────────────────
 const DEFAULT_MINISTRIES = [
   'Louvor', 'Homens', 'Mulheres', 'Família', 'Ação Social', 'Mídia',
   'Intercessão', 'Infantil', 'Jovens', 'Adolescentes',
@@ -45,6 +45,8 @@ export default function RegistriesPage({ user }: Props) {
   const [seeding, setSeeding] = useState(false);
   const [error, setError] = useState('');
   const [seedConfirm, setSeedConfirm] = useState(false);
+
+  const trial = useTrialStatus();
 
   const { data: ministries, refetch: rMin } = useApi<Ministry[]>('/ministries');
   const { data: departments, refetch: rDept } = useApi<Department[]>('/departments');
@@ -104,7 +106,6 @@ export default function RegistriesPage({ user }: Props) {
     refetchMap[tab]();
   }
 
-  // ─── Popular Dados Padrão ────────────────────────────────────────────────────
   async function seedDefaults() {
     setSeeding(true);
     try {
@@ -147,6 +148,29 @@ export default function RegistriesPage({ user }: Props) {
     { id: 'cult_types', label: 'Tipos de Culto' },
   ];
 
+  // ─── Trial bloqueado: mostra apenas tela de bloqueio ─────────────────────────
+  if (trial.isExpired) {
+    return (
+      <div className="space-y-5">
+        <h1 className="text-xl font-bold text-stone-100">Cadastros</h1>
+        <div className="flex flex-col items-center justify-center py-20 gap-6">
+          <div className="w-20 h-20 rounded-full bg-red-900/30 flex items-center justify-center">
+            <ShieldOff className="text-red-400" size={40} />
+          </div>
+          <div className="text-center space-y-2">
+            <p className="text-red-300 text-lg font-semibold">Sistema Bloqueado</p>
+            <p className="text-stone-400 text-sm max-w-md">
+              O período de avaliação expirou. Para continuar usando o EcclesiaScale, insira uma chave de ativação em <strong className="text-amber-400">Segurança → Ativar Sistema</strong>.
+            </p>
+          </div>
+          <div className="bg-red-900/20 border border-red-700 rounded-xl px-6 py-4 text-center">
+            <p className="text-red-300 text-xs">Entre em contato para obter sua chave de ativação.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-4">
@@ -161,6 +185,45 @@ export default function RegistriesPage({ user }: Props) {
         </div>
       </div>
 
+      {/* Banner Trial */}
+      {trial.isTrial && !trial.isExpired && (
+        <div className={`rounded-xl px-4 py-3 flex items-center gap-3 border ${
+          trial.daysLeft <= 3
+            ? 'bg-red-900/30 border-red-700'
+            : trial.daysLeft <= 7
+            ? 'bg-amber-900/30 border-amber-700'
+            : 'bg-stone-800 border-stone-600'
+        }`}>
+          {trial.daysLeft <= 7 ? (
+            <AlertTriangle className={trial.daysLeft <= 3 ? 'text-red-400' : 'text-amber-400'} size={18} />
+          ) : (
+            <Clock className="text-stone-400" size={18} />
+          )}
+          <div className="flex-1">
+            <p className={`text-sm font-medium ${trial.daysLeft <= 3 ? 'text-red-300' : trial.daysLeft <= 7 ? 'text-amber-300' : 'text-stone-300'}`}>
+              Período de Avaliação
+            </p>
+            <p className={`text-xs mt-0.5 ${trial.daysLeft <= 3 ? 'text-red-400' : trial.daysLeft <= 7 ? 'text-amber-400' : 'text-stone-500'}`}>
+              {trial.daysLeft === 0
+                ? '⚠️ Último dia! Ative o sistema hoje.'
+                : `Restam ${trial.daysLeft} dia(s) de avaliação gratuita.`}
+              {' '}Acesse <strong>Segurança → Ativar Sistema</strong> para continuar sem interrupção.
+            </p>
+          </div>
+          {/* Contador visual */}
+          <div className={`flex-shrink-0 w-12 h-12 rounded-full border-2 flex flex-col items-center justify-center ${
+            trial.daysLeft <= 3 ? 'border-red-500 bg-red-900/30' :
+            trial.daysLeft <= 7 ? 'border-amber-500 bg-amber-900/30' :
+            'border-stone-500 bg-stone-800'
+          }`}>
+            <span className={`text-lg font-bold leading-none ${trial.daysLeft <= 3 ? 'text-red-300' : trial.daysLeft <= 7 ? 'text-amber-300' : 'text-stone-300'}`}>
+              {trial.daysLeft}
+            </span>
+            <span className="text-xs text-stone-500 leading-none">dias</span>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex border-b border-stone-700 overflow-x-auto">
         {TABS.map(t => (
@@ -172,7 +235,6 @@ export default function RegistriesPage({ user }: Props) {
         ))}
       </div>
 
-      {/* Descrição da aba */}
       <div className="text-xs text-stone-500 px-1">
         {tab === 'ministries' && 'Gerencie os ministérios da igreja (Louvor, Homens, Mulheres, Família, etc.)'}
         {tab === 'departments' && 'Gerencie os departamentos (Família, Som, Infantil, Jovens, etc.)'}
@@ -250,7 +312,7 @@ export default function RegistriesPage({ user }: Props) {
             <Input
               label="Nome *"
               value={editItem.name || ''}
-              onChange={e => setEditItem((i: any) => ({ ...i, name: e.target.value }))}
+              onChange={e => { setEditItem((i: any) => ({ ...i, name: e.target.value })); setError(''); }}
               placeholder="Digite o nome..."
               autoFocus
             />
@@ -281,7 +343,12 @@ export default function RegistriesPage({ user }: Props) {
               </>
             )}
 
-            {error && <p className="text-red-400 text-xs">{error}</p>}
+            {error && (
+              <div className="flex items-center gap-2 bg-red-900/20 border border-red-700 rounded-lg px-3 py-2">
+                <AlertTriangle size={14} className="text-red-400 flex-shrink-0" />
+                <p className="text-red-300 text-xs">{error}</p>
+              </div>
+            )}
             <div className="flex gap-3">
               <Button variant="outline" onClick={() => setModalOpen(false)}>Cancelar</Button>
               <Button onClick={save} loading={saving}>Salvar</Button>
@@ -297,7 +364,6 @@ export default function RegistriesPage({ user }: Props) {
           <p className="text-stone-300 text-sm">
             Isso irá cadastrar automaticamente os seguintes dados padrão (apenas os que ainda não existirem):
           </p>
-
           <div className="space-y-3 text-xs text-stone-400">
             <div>
               <p className="text-stone-300 font-medium mb-1">Ministérios ({DEFAULT_MINISTRIES.length})</p>
@@ -316,9 +382,7 @@ export default function RegistriesPage({ user }: Props) {
               <p className="leading-relaxed">{DEFAULT_CULT_TYPES.map(c => c.name).join(', ')}</p>
             </div>
           </div>
-
           <p className="text-stone-500 text-xs">✅ Itens já existentes não serão duplicados.</p>
-
           <div className="flex gap-3">
             <Button variant="outline" onClick={() => setSeedConfirm(false)}>Cancelar</Button>
             <Button onClick={seedDefaults} loading={seeding}>Confirmar e Popular</Button>
