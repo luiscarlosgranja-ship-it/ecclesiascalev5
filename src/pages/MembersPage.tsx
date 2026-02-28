@@ -3,25 +3,16 @@ import { Search, SortAsc, Filter, Plus, Edit, UserX, KeyRound, MessageSquare, Lo
 import { Card, Button, Modal, Badge, Input, Select } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
-import type { AuthUser, Member, Department, Ministry } from '../types';
+import type { AuthUser, Member, Department, Ministry, CultType } from '../types';
 import { isAdmin, isLeader } from '../utils/permissions';
 
 interface Props { user: AuthUser; }
-
-const CULT_TYPES = [
-  { id: 1, label: 'Domingo Manhã' },
-  { id: 2, label: 'Domingo Noite' },
-  { id: 3, label: 'Terça (EDP)' },
-  { id: 4, label: 'Quarta Manhã' },
-  { id: 5, label: 'Quarta Noite' },
-  { id: 6, label: 'Quinta' },
-  { id: 7, label: 'Segunda Noite' },
-];
 
 export default function MembersPage({ user }: Props) {
   const { data: members, loading, refetch } = useApi<Member[]>('/members');
   const { data: departments } = useApi<Department[]>('/departments');
   const { data: ministries } = useApi<Ministry[]>('/ministries');
+  const { data: cultTypes } = useApi<CultType[]>('/cult_types');
 
   const [search, setSearch] = useState('');
   const [sortAlpha, setSortAlpha] = useState(false);
@@ -39,7 +30,6 @@ export default function MembersPage({ user }: Props) {
     let list = members || [];
     if (search) list = list.filter(m => m.name.toLowerCase().includes(search.toLowerCase()) || m.email?.toLowerCase().includes(search.toLowerCase()));
     if (filterDept.length > 0) list = list.filter(m => m.department_id && filterDept.includes(m.department_id));
-    // Leader: only their dept
     if (isLeader(user.role) && !isAdmin(user.role) && user.member_id) {
       const myDept = members?.find(m => m.id === user.member_id)?.department_id;
       if (myDept) list = list.filter(m => m.department_id === myDept);
@@ -49,7 +39,7 @@ export default function MembersPage({ user }: Props) {
   }, [members, search, filterDept, sortAlpha, user]);
 
   function openNew() {
-    setEditMember({ role: 'Membro', status: 'Ativo', availability: {}, is_active: 1 });
+    setEditMember({ role: 'Membro', status: 'Ativo', availability: {}, is_active: 1, ministries: [] });
     setModalOpen(true);
   }
 
@@ -144,6 +134,7 @@ export default function MembersPage({ user }: Props) {
                   <th className="text-left p-3 text-stone-400 font-medium text-xs">E-mail</th>
                   <th className="text-left p-3 text-stone-400 font-medium text-xs hidden md:table-cell">WhatsApp</th>
                   <th className="text-left p-3 text-stone-400 font-medium text-xs hidden lg:table-cell">Departamento</th>
+                  <th className="text-left p-3 text-stone-400 font-medium text-xs hidden lg:table-cell">Ministérios</th>
                   <th className="text-left p-3 text-stone-400 font-medium text-xs">Nível</th>
                   <th className="text-left p-3 text-stone-400 font-medium text-xs">Status</th>
                   {isAdmin(user.role) && <th className="text-left p-3 text-stone-400 font-medium text-xs">Cadastro</th>}
@@ -158,6 +149,17 @@ export default function MembersPage({ user }: Props) {
                     <td className="p-3 text-stone-400 text-xs">{m.email || '—'}</td>
                     <td className="p-3 text-stone-400 text-xs hidden md:table-cell">{m.whatsapp || '—'}</td>
                     <td className="p-3 text-stone-400 text-xs hidden lg:table-cell">{m.department_name || '—'}</td>
+                    <td className="p-3 hidden lg:table-cell">
+                      <div className="flex flex-wrap gap-1">
+                        {(m.ministries || []).slice(0, 2).map(min => (
+                          <span key={min.id} className="px-1.5 py-0.5 bg-stone-800 border border-stone-600 rounded text-xs text-stone-400">{min.name}</span>
+                        ))}
+                        {(m.ministries || []).length > 2 && (
+                          <span className="px-1.5 py-0.5 text-xs text-stone-500">+{(m.ministries || []).length - 2}</span>
+                        )}
+                        {(m.ministries || []).length === 0 && <span className="text-stone-600 text-xs">—</span>}
+                      </div>
+                    </td>
                     <td className="p-3">
                       <Badge label={m.role} color={m.role === 'Admin' || m.role === 'SuperAdmin' ? 'red' : m.role === 'Líder' ? 'blue' : 'gray'} />
                     </td>
@@ -250,48 +252,56 @@ export default function MembersPage({ user }: Props) {
               />
             </div>
 
-            {/* Availability */}
-            <div>
-              <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Disponibilidade</label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                {CULT_TYPES.map(ct => (
-                  <label key={ct.id} className="flex items-center gap-2 cursor-pointer bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 hover:border-amber-600 transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={!!(editMember.availability?.[ct.id])}
-                      onChange={e => setEditMember(m => ({ ...m!, availability: { ...m!.availability, [ct.id]: e.target.checked } }))}
-                      className="w-3.5 h-3.5 accent-amber-500"
-                    />
-                    <span className="text-stone-300 text-xs leading-tight">{ct.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {/* Ministries */}
+            {/* Ministérios */}
             <div>
               <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Ministérios</label>
-              <div className="flex flex-wrap gap-2">
-                {(ministries || []).map(min => {
-                  const selected = editMember.ministries?.some(mm => mm.id === min.id);
-                  return (
-                    <button
-                      key={min.id}
-                      type="button"
-                      onClick={() => {
-                        const curr = editMember.ministries || [];
-                        setEditMember(m => ({
-                          ...m!,
-                          ministries: selected ? curr.filter(mm => mm.id !== min.id) : [...curr, min]
-                        }));
-                      }}
-                      className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${selected ? 'bg-amber-600/20 border-amber-500 text-amber-300' : 'bg-stone-800 border-stone-600 text-stone-400 hover:border-stone-500'}`}
-                    >
-                      {min.name}
-                    </button>
-                  );
-                })}
-              </div>
+              {(ministries || []).length === 0 ? (
+                <p className="text-stone-600 text-xs">Nenhum ministério cadastrado. Acesse Cadastros → Ministérios.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {(ministries || []).map(min => {
+                    const selected = editMember.ministries?.some(mm => mm.id === min.id);
+                    return (
+                      <button
+                        key={min.id}
+                        type="button"
+                        onClick={() => {
+                          const curr = editMember.ministries || [];
+                          setEditMember(m => ({
+                            ...m!,
+                            ministries: selected ? curr.filter(mm => mm.id !== min.id) : [...curr, min]
+                          }));
+                        }}
+                        className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${selected ? 'bg-amber-600/20 border-amber-500 text-amber-300' : 'bg-stone-800 border-stone-600 text-stone-400 hover:border-stone-500'}`}
+                      >
+                        {min.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Disponibilidade por tipo de culto */}
+            <div>
+              <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Disponibilidade</label>
+              {(cultTypes || []).length === 0 ? (
+                <p className="text-stone-600 text-xs">Nenhum tipo de culto cadastrado. Acesse Cadastros → Tipos de Culto.</p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                  {(cultTypes || []).map(ct => (
+                    <label key={ct.id} className="flex items-center gap-2 cursor-pointer bg-stone-800 border border-stone-700 rounded-lg px-2 py-1.5 hover:border-amber-600 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={!!(editMember.availability?.[ct.id])}
+                        onChange={e => setEditMember(m => ({ ...m!, availability: { ...m!.availability, [ct.id]: e.target.checked } }))}
+                        className="w-3.5 h-3.5 accent-amber-500"
+                      />
+                      <span className="text-stone-300 text-xs leading-tight">{ct.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
 
             {error && <p className="text-red-400 text-xs">{error}</p>}

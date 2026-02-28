@@ -8,8 +8,6 @@ import type { AuthUser, Ministry, Department, Sector, CultType } from '../types'
 interface Props { user: AuthUser; }
 type Tab = 'ministries' | 'departments' | 'sectors' | 'cult_types';
 
-const DEPT_ICONS = ['Users', 'Volume2', 'Baby', 'Heart', 'Zap', 'Shield', 'Home', 'Monitor', 'Music', 'Star'];
-
 const DIAS_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
 // ─── Dados Padrão ─────────────────────────────────────────────────────────────
@@ -30,12 +28,12 @@ const DEFAULT_SECTORS = [
 ];
 
 const DEFAULT_CULT_TYPES = [
-  { name: 'Domingo Manhã',                    default_day: 0, default_time: '09:00' },
-  { name: 'Domingo Noite (Celebração)',        default_day: 0, default_time: '19:00' },
-  { name: 'Terça-feira (EDP)',                 default_day: 2, default_time: '19:30' },
-  { name: 'Quarta-feira Manhã (Manhã de Milagres)', default_day: 3, default_time: '09:00' },
-  { name: 'Quarta-feira Noite (Quarta D)',     default_day: 3, default_time: '19:30' },
-  { name: 'Quinta-feira (Culto da Vitória)',   default_day: 4, default_time: '19:30' },
+  { name: 'Domingo Manhã',                              default_day: 0, default_time: '09:00' },
+  { name: 'Domingo Noite (Celebração)',                 default_day: 0, default_time: '19:00' },
+  { name: 'Terça-feira (EDP)',                          default_day: 2, default_time: '19:30' },
+  { name: 'Quarta-feira Manhã (Manhã de Milagres)',     default_day: 3, default_time: '09:00' },
+  { name: 'Quarta-feira Noite (Quarta D)',              default_day: 3, default_time: '19:30' },
+  { name: 'Quinta-feira (Culto da Vitória)',            default_day: 4, default_time: '19:30' },
   { name: 'Segunda-feira Noite (Culto de Empreendedores)', default_day: 1, default_time: '19:30' },
 ];
 
@@ -70,7 +68,7 @@ export default function RegistriesPage({ user }: Props) {
   function openNew() {
     setEditItem(tab === 'cult_types'
       ? { name: '', default_time: '', default_day: '' }
-      : { name: '', icon: '', is_active: 1 });
+      : { name: '', is_active: 1 });
     setError('');
     setModalOpen(true);
   }
@@ -117,29 +115,21 @@ export default function RegistriesPage({ user }: Props) {
         cult_types: (cultTypes || []).map((c: any) => c.name.toLowerCase()),
       };
 
-      // Ministérios
       for (const name of DEFAULT_MINISTRIES) {
-        if (!existing.ministries.includes(name.toLowerCase())) {
+        if (!existing.ministries.includes(name.toLowerCase()))
           await api.post('/ministries', { name, is_active: 1 });
-        }
       }
-      // Departamentos
       for (const name of DEFAULT_DEPARTMENTS) {
-        if (!existing.departments.includes(name.toLowerCase())) {
+        if (!existing.departments.includes(name.toLowerCase()))
           await api.post('/departments', { name, is_active: 1 });
-        }
       }
-      // Setores
       for (const name of DEFAULT_SECTORS) {
-        if (!existing.sectors.includes(name.toLowerCase())) {
+        if (!existing.sectors.includes(name.toLowerCase()))
           await api.post('/sectors', { name, is_active: 1 });
-        }
       }
-      // Tipos de Culto
       for (const ct of DEFAULT_CULT_TYPES) {
-        if (!existing.cult_types.includes(ct.name.toLowerCase())) {
+        if (!existing.cult_types.includes(ct.name.toLowerCase()))
           await api.post('/cult_types', ct);
-        }
       }
 
       rMin(); rDept(); rSec(); rCT();
@@ -182,6 +172,14 @@ export default function RegistriesPage({ user }: Props) {
         ))}
       </div>
 
+      {/* Descrição da aba */}
+      <div className="text-xs text-stone-500 px-1">
+        {tab === 'ministries' && 'Gerencie os ministérios da igreja (Louvor, Homens, Mulheres, Família, etc.)'}
+        {tab === 'departments' && 'Gerencie os departamentos (Família, Som, Infantil, Jovens, etc.)'}
+        {tab === 'sectors' && 'Gerencie os setores de escala (Setor 1, Recepção, Externo, etc.)'}
+        {tab === 'cult_types' && 'Gerencie os tipos de culto com dia e horário padrão'}
+      </div>
+
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -189,7 +187,6 @@ export default function RegistriesPage({ user }: Props) {
               <tr className="border-b border-stone-700 bg-stone-800/50">
                 <th className="text-left p-3 text-stone-400 font-medium text-xs">#</th>
                 <th className="text-left p-3 text-stone-400 font-medium text-xs">Nome</th>
-                {tab !== 'cult_types' && <th className="text-left p-3 text-stone-400 font-medium text-xs">Ícone</th>}
                 {tab === 'cult_types' && <th className="text-left p-3 text-stone-400 font-medium text-xs">Dia Padrão</th>}
                 {tab === 'cult_types' && <th className="text-left p-3 text-stone-400 font-medium text-xs">Horário</th>}
                 {tab !== 'cult_types' && <th className="text-left p-3 text-stone-400 font-medium text-xs">Status</th>}
@@ -201,7 +198,6 @@ export default function RegistriesPage({ user }: Props) {
                 <tr key={item.id} className="border-b border-stone-800 hover:bg-stone-800/30 transition-colors">
                   <td className="p-3 text-stone-500 text-xs">{i + 1}</td>
                   <td className="p-3 text-stone-200 font-medium">{item.name}</td>
-                  {tab !== 'cult_types' && <td className="p-3 text-stone-400 text-xs">{item.icon || '—'}</td>}
                   {tab === 'cult_types' && (
                     <td className="p-3 text-stone-400 text-xs">
                       {item.default_day != null ? DIAS_SEMANA[item.default_day] : '—'}
@@ -256,24 +252,8 @@ export default function RegistriesPage({ user }: Props) {
               value={editItem.name || ''}
               onChange={e => setEditItem((i: any) => ({ ...i, name: e.target.value }))}
               placeholder="Digite o nome..."
+              autoFocus
             />
-
-            {tab !== 'cult_types' && (
-              <div>
-                <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Ícone</label>
-                <div className="flex flex-wrap gap-2">
-                  {DEPT_ICONS.map(icon => (
-                    <button key={icon} type="button"
-                      onClick={() => setEditItem((i: any) => ({ ...i, icon }))}
-                      className={`px-2 py-1 text-xs rounded border transition-all ${editItem.icon === icon
-                        ? 'bg-amber-600/20 border-amber-500 text-amber-300'
-                        : 'bg-stone-800 border-stone-600 text-stone-400 hover:border-stone-500'}`}>
-                      {icon}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {tab === 'cult_types' && (
               <>
@@ -337,9 +317,7 @@ export default function RegistriesPage({ user }: Props) {
             </div>
           </div>
 
-          <p className="text-stone-500 text-xs">
-            ✅ Itens já existentes não serão duplicados.
-          </p>
+          <p className="text-stone-500 text-xs">✅ Itens já existentes não serão duplicados.</p>
 
           <div className="flex gap-3">
             <Button variant="outline" onClick={() => setSeedConfirm(false)}>Cancelar</Button>
