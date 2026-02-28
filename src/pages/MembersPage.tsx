@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Search, SortAsc, Filter, Plus, Edit, UserX, UserCheck, KeyRound, MessageSquare, Loader2, UserMinus } from 'lucide-react';
 import { Card, Button, Modal, Badge, Input, Select } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
+import { supabase } from '../utils/supabaseClient';
 import type { AuthUser, Member, Department, Ministry, CultType } from '../types';
 import { isAdmin, isLeader } from '../utils/permissions';
 
@@ -31,6 +32,20 @@ export default function MembersPage({ user }: Props) {
   // ─── Modal de confirmação de desativação / reativação ───────────────────────
   const [deactivateTarget, setDeactivateTarget] = useState<Member | null>(null);
   const [deactivateModal, setDeactivateModal] = useState(false);
+
+  // ─── Supabase Realtime ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const channel = supabase
+      .channel('members-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'members' },
+        () => { refetch(); }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [refetch]);
 
   // ─── Membros ativos e desativados ───────────────────────────────────────────
   const activeMembers = useMemo(() => (members || []).filter(m => m.is_active), [members]);
