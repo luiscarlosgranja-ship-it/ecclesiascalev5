@@ -138,42 +138,11 @@ app.post('/api/register', async (req, res) => {
 app.post('/api/forgot-password', async (req, res) => {
   const { email } = req.body;
   const { data: user } = await db.from('users').select('id').eq('email', email).single();
-  // Sempre retorna a mesma mensagem para não revelar se o e-mail existe
   if (!user) return res.json({ message: 'Se o e-mail existir, você receberá as instruções.' });
 
   const code = randomBytes(4).toString('hex').toUpperCase();
-  const expires = new Date(Date.now() + 3600000).toISOString(); // 1 hora
+  const expires = new Date(Date.now() + 3600000).toISOString();
   await db.from('users').update({ two_factor_code: code, two_factor_expires: expires }).eq('id', user.id);
-
-  // ✅ CORREÇÃO: Envia o código por e-mail
-  try {
-    const transporter = await getTransporter();
-    const { data: smtpCfg } = await db.from('settings').select('key,value').in('key', ['smtp_user']);
-    const fromEmail = smtpCfg?.[0]?.value || process.env.SMTP_USER || '';
-
-    await transporter.sendMail({
-      from: `EcclesiaScale <${fromEmail}>`,
-      to: email,
-      subject: 'Recuperação de Senha — EcclesiaScale',
-      html: `
-        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:8px">
-          <h2 style="color:#b45309;margin-bottom:8px">🔐 Recuperação de Senha</h2>
-          <p style="color:#374151">Use o código abaixo para redefinir sua senha:</p>
-          <div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:20px;text-align:center;margin:20px 0">
-            <span style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#92400e">${code}</span>
-          </div>
-          <p style="color:#6b7280;font-size:13px">⏰ Este código expira em <strong>1 hora</strong>.</p>
-          <p style="color:#6b7280;font-size:13px">Se você não solicitou a recuperação de senha, ignore este e-mail.</p>
-          <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0"/>
-          <p style="color:#9ca3af;font-size:11px;text-align:center">EcclesiaScale — Sistema de Gestão de Escalas</p>
-        </div>
-      `,
-    });
-  } catch (err) {
-    console.error('❌ Erro ao enviar e-mail de recuperação:', err.message);
-    // Não retorna erro ao usuário por segurança, mas loga o problema
-  }
-
   res.json({ message: 'Se o e-mail existir, você receberá as instruções.' });
 });
 
@@ -742,6 +711,37 @@ async function generateBackupData() {
   backup.exported_at = new Date().toISOString();
   return backup;
 }
+
+// ─── Backup Email Config (por usuário) ───────────────────────────────────────
+// GET  /api/settings/backup-email?user_id=X  → retorna e-mail configurado
+app.get('/api/settings/backup-email', auth, async (req, res) => {
+  const { user_id } = req.query;
+  if (!user_id) return res.status(400).json({ message: 'user_id obrigatório' });
+
+  // Apenas o próprio usuário ou admin pode ver
+  if (Number(user_id) !== req.user.id && !isAdmin(req.user.role)) {
+    return res.status(403).json({ message: 'Acesso negado' });
+  }
+
+  const key = `backup_email_user_${user_id}`;
+  const { data } = await db.from('settings').select('value').eq('key', key).maybeSingle();
+  res.json({ value: data?.value || null });
+});
+
+// POST /api/settings/backup-email  → salva e-mail do usuário
+app.post('/api/settings/backup-email', auth, async (req, res) => {
+  const { user_id, email } = req.body;
+  if (!user_id || !email) return res.status(400).json({ message: 'user_id e email obrigatórios' });
+
+  // Apenas o próprio usuário ou admin pode salvar
+  if (Number(user_id) !== req.user.id && !isAdmin(req.user.role)) {
+    return res.status(403).json({ message: 'Acesso negado' });
+  }
+
+  const key = `backup_email_user_${user_id}`;
+  await db.from('settings').upsert({ key, value: email }, { onConflict: 'key' });
+  res.json({ message: 'E-mail salvo com sucesso!' });
+});
 
 // ─── Backup ───────────────────────────────────────────────────────────────────
 app.post('/api/backup', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {

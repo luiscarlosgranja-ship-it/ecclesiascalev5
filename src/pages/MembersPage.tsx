@@ -3,7 +3,7 @@ import { Search, SortAsc, Filter, Plus, Edit, UserX, UserCheck, KeyRound, Messag
 import { Card, Button, Modal, Badge, Input, Select } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
-import { supabase } from '../utils/supabaseClient';
+import { getSupabase } from '../utils/supabaseClient';
 import type { AuthUser, Member, Department, Ministry, CultType } from '../types';
 import { isAdmin, isLeader } from '../utils/permissions';
 
@@ -35,7 +35,10 @@ export default function MembersPage({ user }: Props) {
 
   // ─── Supabase Realtime ───────────────────────────────────────────────────────
   useEffect(() => {
-    const channel = supabase
+    const sb = getSupabase();
+    if (!sb) return; // Realtime desativado se env vars não configuradas
+
+    const channel = sb
       .channel('members-realtime')
       .on(
         'postgres_changes',
@@ -44,7 +47,7 @@ export default function MembersPage({ user }: Props) {
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { sb.removeChannel(channel); };
   }, [refetch]);
 
   // ─── Membros ativos e desativados ───────────────────────────────────────────
