@@ -543,7 +543,9 @@ export default function BackupPage(props: Props) {
                 {/* Sidebar */}
                 <div className="bg-stone-950 border border-stone-700 rounded-xl p-3 flex flex-col items-center gap-2">
                   {logoPreview ? (
-                    <img src={logoPreview} alt="Logo" className="w-8 h-8 object-contain rounded-lg" style={{ background: 'transparent' }} />
+                    <div className="w-8 h-8 rounded-lg overflow-hidden bg-stone-800 border border-stone-700">
+                      <img src={logoPreview} alt="Logo" className="w-full h-full object-contain p-0.5" />
+                    </div>
                   ) : (
                     <div className="w-8 h-8 rounded-lg bg-amber-600 flex items-center justify-center">
                       <span className="text-white font-bold text-sm">E</span>
@@ -554,7 +556,9 @@ export default function BackupPage(props: Props) {
                 {/* Login */}
                 <div className="bg-stone-950 border border-stone-700 rounded-xl p-3 flex flex-col items-center gap-2">
                   {logoPreview ? (
-                    <img src={logoPreview} alt="Logo" className="w-12 h-12 object-contain rounded-2xl" style={{ background: 'transparent' }} />
+                    <div className="w-12 h-12 rounded-2xl overflow-hidden bg-stone-800 border border-stone-700">
+                      <img src={logoPreview} alt="Logo" className="w-full h-full object-contain p-1" />
+                    </div>
                   ) : (
                     <div className="w-12 h-12 rounded-2xl bg-amber-600 flex items-center justify-center">
                       <span className="text-white font-bold text-xl">E</span>
@@ -563,15 +567,15 @@ export default function BackupPage(props: Props) {
                   <p className="text-stone-500 text-xs">Login</p>
                 </div>
                 {/* PDF */}
-                <div className="bg-white border border-stone-300 rounded-xl p-3 flex flex-col items-center gap-2">
+                <div className="bg-stone-950 border border-stone-700 rounded-xl p-3 flex flex-col items-center gap-2">
                   {logoPreview ? (
                     <img src={logoPreview} alt="Logo" className="w-10 h-10 object-contain" style={{ background: 'transparent' }} />
                   ) : (
-                    <div className="w-10 h-10 bg-stone-900 rounded flex items-center justify-center">
+                    <div className="w-10 h-10 bg-amber-600 rounded flex items-center justify-center">
                       <span className="text-white font-bold">E</span>
                     </div>
                   )}
-                  <p className="text-stone-500 text-xs text-center" style={{ color: '#78716c' }}>PDF</p>
+                  <p className="text-stone-500 text-xs text-center">PDF</p>
                 </div>
               </div>
             </div>
@@ -601,35 +605,14 @@ export default function BackupPage(props: Props) {
               )}
 
               <div className="flex gap-3 flex-wrap">
-                {/* Salvar — habilitado só quando há imagem nova selecionada */}
                 <Button onClick={saveLogo} loading={savingLogo} disabled={!logoPreview || logoPreview === currentLogo}>
                   <Save size={15} /> Salvar Logotipo
                 </Button>
-
-                {/* Restaurar Padrão — limpa o preview mostrando o "E" sem alterar o banco */}
-                {logoPreview && (
-                  <Button variant="outline" onClick={() => {
-                    setLogoPreview(currentLogo); // volta ao logo salvo (ou null)
-                    setLogoMsg('');
-                    if (logoFileRef.current) logoFileRef.current.value = '';
-                  }}>
-                    <RotateCcw size={15} /> Restaurar
-                  </Button>
-                )}
-
-                {/* Remover — apaga o logo do banco e volta ao ícone "E" padrão */}
                 {currentLogo && (
                   <Button variant="danger" onClick={() => setRemoveLogoModal(true)}>
-                    <XCircle size={15} /> Remover Logo
+                    <XCircle size={15} /> Remover
                   </Button>
                 )}
-              </div>
-
-              {/* Legenda dos botões */}
-              <div className="space-y-1 pt-1">
-                <p className="text-stone-600 text-xs">• <strong className="text-stone-500">Salvar</strong> — aplica o logo selecionado em todo o sistema</p>
-                <p className="text-stone-600 text-xs">• <strong className="text-stone-500">Restaurar</strong> — descarta a seleção atual sem alterar o banco</p>
-                <p className="text-stone-600 text-xs">• <strong className="text-stone-500">Remover Logo</strong> — apaga o logo do sistema, voltando ao ícone padrão "E"</p>
               </div>
             </div>
           </Card>
@@ -639,19 +622,13 @@ export default function BackupPage(props: Props) {
       {/* ─── Modal: Confirmar remoção do logo ────────────────────────────────────── */}
       <Modal open={removeLogoModal} onClose={() => setRemoveLogoModal(false)} title="Remover Logotipo" size="sm">
         <div className="space-y-4">
-          <div className="bg-red-900/20 border border-red-700/40 rounded-xl p-4 flex gap-3">
-            <AlertTriangle size={18} className="text-red-400 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-stone-200 text-sm font-medium">Remover logotipo personalizado?</p>
-              <p className="text-stone-400 text-xs mt-1">
-                O sistema voltará a exibir o ícone padrão <strong className="text-amber-300">"E"</strong> na sidebar, tela de login e PDFs. Esta ação pode ser desfeita fazendo um novo upload.
-              </p>
-            </div>
-          </div>
+          <p className="text-stone-400 text-sm">
+            Ao remover o logotipo, o sistema voltará a exibir o ícone padrão <strong className="text-amber-300">"E"</strong> em todos os lugares.
+          </p>
           <div className="flex gap-3">
             <Button variant="outline" onClick={() => setRemoveLogoModal(false)}>Cancelar</Button>
             <Button variant="danger" onClick={removeLogo} loading={savingLogo}>
-              <XCircle size={15} /> Sim, Remover
+              <XCircle size={15} /> Remover
             </Button>
           </div>
         </div>
