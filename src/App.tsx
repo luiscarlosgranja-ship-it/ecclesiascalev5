@@ -60,8 +60,7 @@ export default function App() {
 
   // Páginas de Segurança adicionais — roteadas para BackupPage com tab ativa
   const backupTab =
-    page === 'restore'    ? 'restore'    :
-    page === 'activation' ? 'activation' : null;
+    page === 'restore' ? 'restore' : null;
 
   return (
     <Layout user={user} page={page} setPage={p => setPage(p as Page)} onLogout={handleLogout}>
@@ -72,6 +71,7 @@ export default function App() {
       {page === 'cults'      && <CultsPage      user={user} />}
       {page === 'swaps'      && <SwapsPage      user={user} />}
       {page === 'security'   && <SecurityPage   user={user} />}
+      {page === 'activation'  && <SecurityPage   user={user} />}
       {/* Cadastros — RegistriesPage recebe qual aba abrir */}
       {(page === 'registries' || registryTab) && (
         <RegistriesPage user={user} initialTab={registryTab || undefined} />
