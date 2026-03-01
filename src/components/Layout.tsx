@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Calendar, Repeat, Settings, LogOut, Bell,
   BookOpen, Layers, Shield, ChevronLeft, ChevronRight, Wifi, WifiOff,
   Database, Menu, X, Building2, Grid3X3, Church, RefreshCcw, KeyRound,
-  Sun, Moon
+  Sun, Moon, HeartHandshake
 } from 'lucide-react';
 import type { AuthUser } from '../types';
 import { useNotifications } from '../hooks/useApi';
@@ -45,12 +45,18 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: 'Pastoral',
+    items: [
+      { id: 'pastoral', label: 'Atendimento Pastoral', icon: <HeartHandshake size={18} />, roles: ['SuperAdmin', 'Admin', 'Secretária'] },
+    ],
+  },
+  {
     label: 'Segurança',
     items: [
       { id: 'security',   label: 'Reset de Senha',     icon: <Shield size={18} />,     roles: ['SuperAdmin', 'Admin'] },
       { id: 'backup',     label: 'Backup',             icon: <Database size={18} />,   roles: ['SuperAdmin', 'Admin'] },
       { id: 'restore',    label: 'Restaurar Backup',   icon: <RefreshCcw size={18} />, roles: ['SuperAdmin', 'Admin'] },
-      { id: 'activation', label: 'Ativação do Sistema',icon: <KeyRound size={18} />,   roles: ['SuperAdmin', 'Admin', 'Líder', 'Membro'] },
+      { id: 'activation', label: 'Ativação do Sistema',icon: <KeyRound size={18} />,   roles: ['SuperAdmin', 'Admin', 'Líder', 'Membro', 'Secretária'] },
     ],
   },
 ];

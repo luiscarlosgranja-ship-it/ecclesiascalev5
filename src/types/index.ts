@@ -1,6 +1,6 @@
 // ─── Core Types ──────────────────────────────────────────────────────────────
 
-export type Role = 'SuperAdmin' | 'Admin' | 'Líder' | 'Membro';
+export type Role = 'SuperAdmin' | 'Admin' | 'Líder' | 'Membro' | 'Secretária';
 
 export interface AuthUser {
   id: number;
@@ -129,4 +129,17 @@ export interface DashboardWidget {
   title: string;
   visible: boolean;
   order: number;
+}
+
+export interface PastoralAppointment {
+  id: number;
+  name: string;
+  date: string;
+  time: string;
+  notes?: string;
+  status: 'Agendado' | 'Reagendado' | 'Realizado' | 'Cancelado';
+  created_by?: number;
+  created_by_name?: string;
+  created_at: string;
+  updated_at?: string;
 }

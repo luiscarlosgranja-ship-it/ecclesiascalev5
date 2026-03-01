@@ -686,8 +686,63 @@ app.post('/api/activation-codes/activate', auth, async (req, res) => {
   res.json({ message: 'Sistema ativado com sucesso!' });
 });
 
+// ─── Pastoral Appointments ───────────────────────────────────────────────────
+app.get('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretária'), async (req, res) => {
+  const { data, error } = await db
+    .from('pastoral_appointments')
+    .select('*, users(email)')
+    .order('date', { ascending: true })
+    .order('time', { ascending: true });
+  if (error) return res.status(500).json({ message: error.message });
+
+  const result = (data || []).map(a => ({
+    ...a,
+    created_by_name: a.users?.email || null,
+    users: undefined,
+  }));
+  res.json(result);
+});
+
+app.post('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretária'), async (req, res) => {
+  const { name, date, time, notes, status } = req.body;
+  if (!name?.trim() || !date || !time) return res.status(400).json({ message: 'Nome, data e hora são obrigatórios' });
+
+  const { data, error } = await db.from('pastoral_appointments').insert({
+    name: name.trim(),
+    date,
+    time,
+    notes: notes || null,
+    status: status || 'Agendado',
+    created_by: req.user.id,
+  }).select().single();
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.json(data);
+});
+
+app.put('/api/pastoral/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretária'), async (req, res) => {
+  const { name, date, time, notes, status } = req.body;
+  if (!name?.trim() || !date || !time) return res.status(400).json({ message: 'Nome, data e hora são obrigatórios' });
+
+  const { error } = await db.from('pastoral_appointments').update({
+    name: name.trim(), date, time,
+    notes: notes || null,
+    status: status || 'Agendado',
+    updated_at: new Date().toISOString(),
+  }).eq('id', req.params.id);
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.json({ message: 'Atualizado' });
+});
+
+app.delete('/api/pastoral/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretária'), async (req, res) => {
+  const { error } = await db.from('pastoral_appointments').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ message: error.message });
+  res.json({ message: 'Excluído' });
+});
+
 // Helper: generate backup data (single source of truth)
-const BACKUP_TABLES = ['departments', 'ministries', 'sectors', 'cult_types', 'members', 'member_ministries', 'cults', 'scales', 'swaps', 'notifications'];
+const BACKUP_TABLES = ['departments', 'ministries', 'sectors', 'cult_types', 'members', 'member_ministries', 'cults', 'scales', 'swaps', 'notifications', 'pastoral_appointments'];
 async function generateBackupData() {
   const backup = {};
   for (const t of BACKUP_TABLES) {
