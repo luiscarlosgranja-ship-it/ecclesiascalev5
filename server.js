@@ -93,12 +93,14 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.post('/api/register', async (req, res) => {
-  const { name, email, password } = req.body;
+  const { name, email, password, department_id } = req.body;
   if (!email || !password || !name) return res.status(400).json({ message: 'Dados obrigatórios' });
   if (password.length < 8) return res.status(400).json({ message: 'Senha deve ter mínimo 8 caracteres' });
 
   const hash = bcrypt.hashSync(password, 10);
-  const { data: member, error: memberError } = await db.from('members').insert({ name, email, role: 'Membro', is_active: true }).select().single();
+  const memberData = { name, email, role: 'Membro', is_active: true };
+  if (department_id) memberData.department_id = Number(department_id);
+  const { data: member, error: memberError } = await db.from('members').insert(memberData).select().single();
   if (memberError) {
     if (memberError.code === '23505') return res.status(409).json({ message: 'E-mail já cadastrado' });
     return res.status(500).json({ message: 'Erro ao criar conta' });
@@ -269,22 +271,9 @@ app.put('/api/members/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), 
 });
 
 // ─── Users ────────────────────────────────────────────────────────────────────
-app.put('/api/users/:id/password', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
+app.put('/api/users/:id/password', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const { password } = req.body;
   if (!password || password.length < 8) return res.status(400).json({ message: 'Senha deve ter mínimo 8 caracteres' });
-
-  // Líder só pode alterar senha de membros do seu próprio departamento
-  if (req.user.role === 'Líder') {
-    const { data: leaderMember } = await db.from('members').select('department_id').eq('id', req.user.member_id).single();
-    const { data: targetUser } = await db.from('users').select('member_id').eq('id', req.params.id).single();
-    if (targetUser?.member_id) {
-      const { data: targetMember } = await db.from('members').select('department_id').eq('id', targetUser.member_id).single();
-      if (!leaderMember || !targetMember || leaderMember.department_id !== targetMember.department_id) {
-        return res.status(403).json({ message: 'Você só pode alterar a senha de membros do seu departamento' });
-      }
-    }
-  }
-
   const hash = bcrypt.hashSync(password, 10);
   await db.from('users').update({ password: hash }).eq('id', req.params.id);
   res.json({ message: 'Senha alterada' });
