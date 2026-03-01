@@ -939,7 +939,7 @@ app.get('/api/settings/gmail/auth', auth, requireRole('SuperAdmin', 'Admin'), (r
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
-    scope: ['https://mail.google.com/'],
+    scope: ['https://mail.google.com/', 'openid', 'email', 'profile'],
     state: String(req.user.id), // passa userId para recuperar no callback
   });
   res.json({ url });
