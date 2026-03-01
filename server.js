@@ -129,12 +129,41 @@ app.post('/api/register', async (req, res) => {
 
 app.post('/api/forgot-password', async (req, res) => {
   const { email } = req.body;
+  if (!email) return res.status(400).json({ message: 'E-mail obrigatório' });
+
   const { data: user } = await db.from('users').select('id').eq('email', email).single();
+  // Always return same message to avoid user enumeration
   if (!user) return res.json({ message: 'Se o e-mail existir, você receberá as instruções.' });
 
   const code = randomBytes(4).toString('hex').toUpperCase();
   const expires = new Date(Date.now() + 3600000).toISOString();
   await db.from('users').update({ two_factor_code: code, two_factor_expires: expires }).eq('id', user.id);
+
+  // Get SMTP sender
+  const { data: smtpCfg } = await db.from('settings').select('key,value').in('key', ['smtp_user']);
+  const fromEmail = smtpCfg?.[0]?.value || process.env.SMTP_USER || '';
+
+  try {
+    const transporter = await getTransporter();
+    await transporter.sendMail({
+      from: `EcclesiaScale <${fromEmail}>`,
+      to: email,
+      subject: 'Redefinição de senha — EcclesiaScale',
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:auto">
+          <h2 style="color:#b45309">🔐 Redefinição de senha</h2>
+          <p>Seu código de verificação é:</p>
+          <div style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#b45309;margin:24px 0">${code}</div>
+          <p>Este código expira em <strong>1 hora</strong>.</p>
+          <p style="color:#666;font-size:13px">Se você não solicitou isso, ignore este e-mail.</p>
+        </div>
+      `,
+    });
+  } catch (err) {
+    console.error('Erro ao enviar e-mail de recuperação:', err);
+    // Still return success to avoid leaking user existence, but log the error
+  }
+
   res.json({ message: 'Se o e-mail existir, você receberá as instruções.' });
 });
 
