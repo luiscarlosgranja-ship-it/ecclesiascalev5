@@ -837,26 +837,43 @@ app.post('/api/backup/restore', auth, requireRole('SuperAdmin', 'Admin'), async 
   });
 });
 
-// POST send backup by email
-app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+// POST send backup by email — aberto para SuperAdmin, Admin e Líder
+app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ message: 'E-mail destinatário obrigatório' });
+
+  // ✅ Validar se SMTP está configurado antes de tentar enviar
+  const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
+  const { data: smtpRows } = await db.from('settings').select('key,value').in('key', keys);
+  const cfg = Object.fromEntries((smtpRows || []).map(r => [r.key, r.value]));
+
+  const smtpHost = cfg.smtp_host || process.env.SMTP_HOST;
+  const smtpUser = cfg.smtp_user || process.env.SMTP_USER;
+  const smtpPass = cfg.smtp_pass || process.env.SMTP_PASS;
+
+  if (!smtpHost || !smtpUser || !smtpPass) {
+    return res.status(400).json({
+      message: 'SMTP não configurado. Acesse Backup → Config. E-mail e preencha as configurações SMTP antes de enviar.'
+    });
+  }
 
   const backup = await generateBackupData();
   const json = JSON.stringify(backup, null, 2);
   const filename = `backup_ecclesiascale_${new Date().toISOString().slice(0, 10)}.json`;
 
-  // Get SMTP user for "from" field before creating transporter
-  const { data: smtpCfg } = await db.from('settings').select('key,value').in('key', ['smtp_user']);
-  const fromEmail = smtpCfg?.[0]?.value || process.env.SMTP_USER || '';
-
   try {
-    const transporter = await getTransporter();
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: Number(cfg.smtp_port || process.env.SMTP_PORT || 587),
+      secure: false,
+      auth: { user: smtpUser, pass: smtpPass },
+    });
+
     await transporter.sendMail({
-      from: `EcclesiaScale <${fromEmail}>`,
+      from: `EcclesiaScale <${smtpUser}>`,
       to: email,
       subject: `Backup EcclesiaScale - ${new Date().toLocaleDateString('pt-BR')}`,
-      html: `<div style="font-family:sans-serif;max-width:480px;margin:auto">
+      html: `<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
         <h2 style="color:#b45309">📦 Backup EcclesiaScale</h2>
         <p>Segue em anexo o backup do sistema gerado em <strong>${new Date().toLocaleString('pt-BR')}</strong>.</p>
         <p style="color:#666;font-size:13px">Este e-mail foi enviado automaticamente. Guarde o arquivo em local seguro.</p>
@@ -865,8 +882,14 @@ app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin'), asy
     });
     res.json({ message: `Backup enviado para ${email} com sucesso!` });
   } catch (err) {
-    console.error('Erro ao enviar e-mail:', err);
-    res.status(500).json({ message: 'Erro ao enviar e-mail. Verifique as configurações SMTP na aba Config. E-mail.' });
+    console.error('Erro ao enviar e-mail:', err.message);
+    // Retorna mensagem detalhada para facilitar diagnóstico
+    const detail = err.code === 'EAUTH'
+      ? 'Credenciais inválidas. Verifique o e-mail e senha/app password.'
+      : err.code === 'ECONNECTION' || err.code === 'ETIMEDOUT'
+      ? 'Não foi possível conectar ao servidor SMTP. Verifique o host e a porta.'
+      : err.message;
+    res.status(500).json({ message: `Erro ao enviar: ${detail}` });
   }
 });
 
