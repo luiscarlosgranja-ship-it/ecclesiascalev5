@@ -507,6 +507,7 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
   const { type, cult_id, month } = req.body;
   const today = new Date().toISOString().slice(0, 10);
 
+  // ─── Busca cultos conforme o tipo de geração ──────────────────────────────────
   let cultsQuery = db.from('cults').select('*').eq('status', 'Agendado');
   if (type === 'month' && month) cultsQuery = cultsQuery.like('date', `${month}%`);
   else if (cult_id) cultsQuery = cultsQuery.eq('id', cult_id);
@@ -517,29 +518,78 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
   const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
 
   let created = 0;
+  let skippedUnavailable = 0;
 
   for (const cult of cults || []) {
     const monthStr = cult.date.slice(0, 7);
+
+    // ✅ Descobre o dia da semana do culto (0=Dom, 1=Seg ... 6=Sab)
+    // Usa UTC para evitar problemas de fuso horário ao parsear 'YYYY-MM-DD'
+    const [cy, cm, cd] = cult.date.split('-').map(Number);
+    const cultDayOfWeek = new Date(Date.UTC(cy, cm - 1, cd)).getUTCDay();
+
     for (const sector of sectors || []) {
       for (const member of members || []) {
-        const { data: alreadyInCult } = await db.from('scales').select('id').eq('cult_id', cult.id).eq('member_id', member.id).maybeSingle();
+        // ── Verifica se já está escalado neste culto ──────────────────────────
+        const { data: alreadyInCult } = await db.from('scales')
+          .select('id').eq('cult_id', cult.id).eq('member_id', member.id).maybeSingle();
         if (alreadyInCult) continue;
 
+        // ✅ Verifica disponibilidade do membro para o dia da semana do culto
+        // availability é um objeto { [cult_type_id ou day_of_week]: boolean }
+        // O campo armazenado pode ser string (JSON) ou objeto — normaliza aqui
+        let availability = member.availability;
+        if (typeof availability === 'string') {
+          try { availability = JSON.parse(availability); } catch { availability = {}; }
+        }
+        availability = availability || {};
+
+        // Verifica disponibilidade pelo type_id do culto (se existir)
+        // E também pelo dia da semana como fallback
+        const availableByType = cult.type_id != null
+          ? availability[cult.type_id] === true || availability[String(cult.type_id)] === true
+          : true;
+
+        const availableByDay = availability[cultDayOfWeek] === true
+          || availability[String(cultDayOfWeek)] === true;
+
+        // Se a disponibilidade foi cadastrada por tipo de culto, usa o tipo.
+        // Se foi por dia da semana, usa o dia. Se o objeto estiver vazio,
+        // considera disponível (membro sem restrição cadastrada).
+        const hasAnyAvailability = Object.keys(availability).length > 0;
+
+        if (hasAnyAvailability) {
+          // Tenta primeiro pelo type_id; se não tiver type_id, tenta pelo dia
+          const isAvailable = cult.type_id != null ? availableByType : availableByDay;
+          if (!isAvailable) {
+            skippedUnavailable++;
+            continue; // ← pula membro indisponível
+          }
+        }
+        // Se availability estiver vazio ({}) → sem restrição → pode ser escalado
+
+        // ── Verifica limite mensal (máx 3x por mês) ───────────────────────────
         const { count: monthCount } = await db.from('scales')
           .select('*, cults!inner(date)', { count: 'exact', head: true })
           .eq('member_id', member.id)
+          .neq('status', 'Recusado')
           .like('cults.date', `${monthStr}%`);
 
         if (monthCount >= 3) continue;
 
+        // ── Escala o membro ───────────────────────────────────────────────────
         await db.from('scales').insert({ cult_id: cult.id, member_id: member.id, sector_id: sector.id });
         created++;
-        break; // one member per sector per cult
+        break; // um membro por setor por culto
       }
     }
   }
 
-  res.json({ message: `${created} escala(s) gerada(s)` });
+  res.json({
+    message: `${created} escala(s) gerada(s)${skippedUnavailable > 0 ? ` · ${skippedUnavailable} voluntário(s) pulado(s) por indisponibilidade` : ''}`,
+    created,
+    skipped_unavailable: skippedUnavailable,
+  });
 });
 
 // ─── Swaps ────────────────────────────────────────────────────────────────────
