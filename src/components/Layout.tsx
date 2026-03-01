@@ -3,7 +3,8 @@ import { clsx } from 'clsx';
 import {
   LayoutDashboard, Users, Calendar, Repeat, Settings, LogOut, Bell,
   BookOpen, Layers, Shield, ChevronLeft, ChevronRight, Wifi, WifiOff,
-  Database, Menu, X, Building2, Grid3X3, Church, RefreshCcw, KeyRound
+  Database, Menu, X, Building2, Grid3X3, Church, RefreshCcw, KeyRound,
+  Sun, Moon
 } from 'lucide-react';
 import type { AuthUser } from '../types';
 import { useNotifications } from '../hooks/useApi';
@@ -80,6 +81,18 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
     window.addEventListener('offline', off);
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
   }, []);
+
+  // ─── Tema claro/escuro ────────────────────────────────────────────────────────
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    return (localStorage.getItem('ecclesia_theme') as 'dark' | 'light') || 'dark';
+  });
+  useEffect(() => {
+    const html = document.documentElement;
+    if (theme === 'light') { html.classList.add('light'); html.classList.remove('dark'); }
+    else { html.classList.remove('light'); html.classList.add('dark'); }
+    localStorage.setItem('ecclesia_theme', theme);
+  }, [theme]);
+  function toggleTheme() { setTheme(t => t === 'dark' ? 'light' : 'dark'); }
 
   const { unread, notifications, markRead } = useNotifications(user.member_id);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -205,6 +218,14 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
           )}
 
           <div className="ml-auto flex items-center gap-3">
+            {/* Botão tema claro/escuro */}
+            <button
+              onClick={toggleTheme}
+              title={theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
+              className="text-stone-400 hover:text-amber-400 transition-colors p-1 rounded-lg hover:bg-stone-800"
+            >
+              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
             <div className="relative">
               <button onClick={() => setNotifOpen(!notifOpen)} className="relative text-stone-400 hover:text-stone-200 transition-colors p-1">
                 <Bell size={20} />
