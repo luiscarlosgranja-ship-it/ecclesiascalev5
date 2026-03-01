@@ -28,9 +28,9 @@ export default function MyPanelPage({ user, setPage }: Props) {
     }
   }
 
-  function printMyScale() {
+  async function printMyScale() {
     if (!scales) return;
-    exportMemberScalePDF(scales, user.name || user.email);
+    await exportMemberScalePDF(scales, user.name || user.email);
   }
 
   return (

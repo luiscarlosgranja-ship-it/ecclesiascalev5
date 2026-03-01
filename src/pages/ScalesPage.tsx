@@ -156,9 +156,9 @@ export default function ScalesPage({ user }: Props) {
 
   const selectedCultData = availableCults.find(c => c.id === selectedCult);
 
-  function handlePrint() {
+  async function handlePrint() {
     if (!scales || !selectedCultData) return;
-    exportScalePDF(scales, selectedCultData, `Escala - ${selectedCultData.name || selectedCultData.type_name}`);
+    await exportScalePDF(scales, selectedCultData, `Escala - ${selectedCultData.name || selectedCultData.type_name}`);
   }
 
   function getCultLabel(c: Cult) {

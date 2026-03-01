@@ -24,6 +24,28 @@ const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 const PORT = process.env.PORT || 3000;
 
+// ─── Auto-inicializa trial se não existir ─────────────────────────────────────
+async function ensureTrialInitialized() {
+  try {
+    const { data: activated } = await db.from('settings').select('value').eq('key', 'activated').single();
+    if (activated?.value === '1') return; // já ativado, não precisa checar trial
+
+    const { data: trial } = await db.from('settings').select('value').eq('key', 'trial_expires').single();
+    if (!trial) {
+      const trialEnd = new Date();
+      trialEnd.setDate(trialEnd.getDate() + 7);
+      await db.from('settings').insert({ key: 'trial_expires', value: trialEnd.toISOString() });
+      console.log('\u23f1\ufe0f  Trial de 7 dias iniciado. Expira em:', trialEnd.toLocaleDateString('pt-BR'));
+    } else {
+      const expires = new Date(trial.value);
+      const daysLeft = Math.max(0, Math.ceil((expires - new Date()) / 86400000));
+      console.log(`\u23f1\ufe0f  Trial: ${daysLeft} dia(s) restante(s) (expira ${expires.toLocaleDateString('pt-BR')})`);
+    }
+  } catch (e) {
+    console.warn('⚠️  Não foi possível verificar trial (Supabase indisponível?):', e.message);
+  }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function auth(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '');
@@ -71,20 +93,6 @@ async function checkTrial(res) {
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
-// ─── Rotas públicas (sem autenticação) ────────────────────────────────────────
-// Usadas na tela de cadastro antes do login
-app.get('/api/public/departments', async (req, res) => {
-  const { data, error } = await db.from('departments').select('id, name').order('name');
-  if (error) return res.status(500).json({ message: error.message });
-  res.json(data);
-});
-
-app.get('/api/public/cult_types', async (req, res) => {
-  const { data, error } = await db.from('cult_types').select('id, name').order('name');
-  if (error) return res.status(500).json({ message: error.message });
-  res.json(data);
-});
-
 // ─── Auth Routes ──────────────────────────────────────────────────────────────
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
@@ -131,37 +139,31 @@ app.post('/api/forgot-password', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ message: 'E-mail obrigatório' });
 
-  const { data: user } = await db.from('users').select('id').eq('email', email).single();
-  // Always return same message to avoid user enumeration
+  const { data: user } = await db.from('users').select('id').eq('email', email).maybeSingle();
+  // Resposta genérica para não revelar se o e-mail existe
   if (!user) return res.json({ message: 'Se o e-mail existir, você receberá as instruções.' });
 
   const code = randomBytes(4).toString('hex').toUpperCase();
   const expires = new Date(Date.now() + 3600000).toISOString();
   await db.from('users').update({ two_factor_code: code, two_factor_expires: expires }).eq('id', user.id);
 
-  // Get SMTP sender
-  const { data: smtpCfg } = await db.from('settings').select('key,value').in('key', ['smtp_user']);
-  const fromEmail = smtpCfg?.[0]?.value || process.env.SMTP_USER || '';
-
+  // ✅ Envia o código por e-mail (se SMTP configurado)
   try {
-    const transporter = await getTransporter();
+    const { transporter, user: smtpUser } = await getTransporter();
     await transporter.sendMail({
-      from: `EcclesiaScale <${fromEmail}>`,
+      from: `EcclesiaScale <${smtpUser}>`,
       to: email,
-      subject: 'Redefinição de senha — EcclesiaScale',
-      html: `
-        <div style="font-family:sans-serif;max-width:480px;margin:auto">
-          <h2 style="color:#b45309">🔐 Redefinição de senha</h2>
-          <p>Seu código de verificação é:</p>
-          <div style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#b45309;margin:24px 0">${code}</div>
-          <p>Este código expira em <strong>1 hora</strong>.</p>
-          <p style="color:#666;font-size:13px">Se você não solicitou isso, ignore este e-mail.</p>
-        </div>
-      `,
+      subject: 'Código de Recuperação — EcclesiaScale',
+      html: `<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
+        <h2 style="color:#b45309">🔐 Recuperação de Senha</h2>
+        <p>Seu código de recuperação é:</p>
+        <div style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#b45309;background:#1c1917;padding:16px 24px;border-radius:8px;display:inline-block;margin:12px 0">${code}</div>
+        <p style="color:#666;font-size:13px">Este código expira em <strong>1 hora</strong>. Se você não solicitou isso, ignore este e-mail.</p>
+      </div>`,
     });
   } catch (err) {
-    console.error('Erro ao enviar e-mail de recuperação:', err);
-    // Still return success to avoid leaking user existence, but log the error
+    // Loga mas não expõe ao usuário — o código ainda fica salvo para uso manual
+    console.error('[forgot-password] Falha ao enviar e-mail:', err.message);
   }
 
   res.json({ message: 'Se o e-mail existir, você receberá as instruções.' });
@@ -187,7 +189,13 @@ app.get('/api/settings/trial', async (req, res) => {
   if (activated?.value === '1') return res.json({ isActive: true, isTrial: false, daysLeft: 999, isExpired: false, message: 'Ativo' });
 
   const { data: trial } = await db.from('settings').select('value').eq('key', 'trial_expires').single();
-  if (!trial) return res.json({ isActive: true, isTrial: false, daysLeft: 999, isExpired: false, message: '' });
+  // Se não existe registro de trial, cria agora com 7 dias e retorna como trial ativo
+  if (!trial) {
+    const trialEnd = new Date();
+    trialEnd.setDate(trialEnd.getDate() + 7);
+    await db.from('settings').insert({ key: 'trial_expires', value: trialEnd.toISOString() });
+    return res.json({ isActive: true, isTrial: true, daysLeft: 7, isExpired: false, message: '7 dia(s) restante(s)' });
+  }
 
   const expires = new Date(trial.value);
   const now = new Date();
@@ -268,12 +276,17 @@ app.post('/api/members', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asy
 
   if (error) return res.status(500).json({ message: error.message });
 
+  let defaultPassword = null;
+  let userCreated = false;
+
   if (email) {
-    // ✅ CORREÇÃO: Verifica se usuário já existe antes de criar, evitando sobrescrever senha
     const { data: existingUser } = await db.from('users').select('id').eq('email', email).maybeSingle();
     if (!existingUser) {
-      const hash = bcrypt.hashSync('EcclesiaScale@' + member.id, 10);
+      // ✅ Gera senha padrão e retorna ao Admin para informar ao membro
+      defaultPassword = 'EcclesiaScale@' + member.id;
+      const hash = bcrypt.hashSync(defaultPassword, 10);
       await db.from('users').insert({ email, password: hash, role: role || 'Membro', member_id: member.id });
+      userCreated = true;
     }
   }
 
@@ -281,7 +294,15 @@ app.post('/api/members', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asy
     await db.from('member_ministries').upsert(ministries.map(min => ({ member_id: member.id, ministry_id: min.id })), { ignoreDuplicates: true });
   }
 
-  res.json({ id: member.id, message: 'Membro criado' });
+  res.json({
+    id: member.id,
+    message: 'Membro criado',
+    user_created: userCreated,
+    default_password: defaultPassword,
+    login_info: userCreated
+      ? `Acesso criado! E-mail: ${email} | Senha inicial: ${defaultPassword} | Oriente o voluntário a trocar a senha no primeiro acesso.`
+      : null,
+  });
 });
 
 app.put('/api/members/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
@@ -293,11 +314,19 @@ app.put('/api/members/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), 
     role, department_id: department_id || null, status, is_active: is_active ?? true
   }).eq('id', req.params.id);
 
-  // ✅ CORREÇÃO: Atualiza apenas role e is_active do usuário, NUNCA a senha
+  // ✅ Atualiza usuário existente OU cria se e-mail foi adicionado agora
   if (email && role) {
     const { data: existingUser } = await db.from('users').select('id').eq('email', email).maybeSingle();
     if (existingUser) {
+      // Usuário já existe: atualiza role e status, NUNCA a senha
       await db.from('users').update({ role, is_active: is_active ?? true }).eq('id', existingUser.id);
+    } else {
+      // ✅ Novo e-mail adicionado ao membro: cria acesso com senha padrão
+      const memberId = req.params.id;
+      const defaultPassword = 'EcclesiaScale@' + memberId;
+      const hash = bcrypt.hashSync(defaultPassword, 10);
+      await db.from('users').insert({ email, password: hash, role: role || 'Membro', member_id: Number(memberId), is_active: is_active ?? true });
+      console.log(`[users] Acesso criado para membro ${memberId} via PUT. Senha inicial: ${defaultPassword}`);
     }
   }
 
@@ -522,6 +551,7 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
   const { type, cult_id, month } = req.body;
   const today = new Date().toISOString().slice(0, 10);
 
+  // ─── Busca cultos conforme o tipo de geração ──────────────────────────────────
   let cultsQuery = db.from('cults').select('*').eq('status', 'Agendado');
   if (type === 'month' && month) cultsQuery = cultsQuery.like('date', `${month}%`);
   else if (cult_id) cultsQuery = cultsQuery.eq('id', cult_id);
@@ -532,29 +562,78 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
   const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
 
   let created = 0;
+  let skippedUnavailable = 0;
 
   for (const cult of cults || []) {
     const monthStr = cult.date.slice(0, 7);
+
+    // ✅ Descobre o dia da semana do culto (0=Dom, 1=Seg ... 6=Sab)
+    // Usa UTC para evitar problemas de fuso horário ao parsear 'YYYY-MM-DD'
+    const [cy, cm, cd] = cult.date.split('-').map(Number);
+    const cultDayOfWeek = new Date(Date.UTC(cy, cm - 1, cd)).getUTCDay();
+
     for (const sector of sectors || []) {
       for (const member of members || []) {
-        const { data: alreadyInCult } = await db.from('scales').select('id').eq('cult_id', cult.id).eq('member_id', member.id).maybeSingle();
+        // ── Verifica se já está escalado neste culto ──────────────────────────
+        const { data: alreadyInCult } = await db.from('scales')
+          .select('id').eq('cult_id', cult.id).eq('member_id', member.id).maybeSingle();
         if (alreadyInCult) continue;
 
+        // ✅ Verifica disponibilidade do membro para o dia da semana do culto
+        // availability é um objeto { [cult_type_id ou day_of_week]: boolean }
+        // O campo armazenado pode ser string (JSON) ou objeto — normaliza aqui
+        let availability = member.availability;
+        if (typeof availability === 'string') {
+          try { availability = JSON.parse(availability); } catch { availability = {}; }
+        }
+        availability = availability || {};
+
+        // Verifica disponibilidade pelo type_id do culto (se existir)
+        // E também pelo dia da semana como fallback
+        const availableByType = cult.type_id != null
+          ? availability[cult.type_id] === true || availability[String(cult.type_id)] === true
+          : true;
+
+        const availableByDay = availability[cultDayOfWeek] === true
+          || availability[String(cultDayOfWeek)] === true;
+
+        // Se a disponibilidade foi cadastrada por tipo de culto, usa o tipo.
+        // Se foi por dia da semana, usa o dia. Se o objeto estiver vazio,
+        // considera disponível (membro sem restrição cadastrada).
+        const hasAnyAvailability = Object.keys(availability).length > 0;
+
+        if (hasAnyAvailability) {
+          // Tenta primeiro pelo type_id; se não tiver type_id, tenta pelo dia
+          const isAvailable = cult.type_id != null ? availableByType : availableByDay;
+          if (!isAvailable) {
+            skippedUnavailable++;
+            continue; // ← pula membro indisponível
+          }
+        }
+        // Se availability estiver vazio ({}) → sem restrição → pode ser escalado
+
+        // ── Verifica limite mensal (máx 3x por mês) ───────────────────────────
         const { count: monthCount } = await db.from('scales')
           .select('*, cults!inner(date)', { count: 'exact', head: true })
           .eq('member_id', member.id)
+          .neq('status', 'Recusado')
           .like('cults.date', `${monthStr}%`);
 
         if (monthCount >= 3) continue;
 
+        // ── Escala o membro ───────────────────────────────────────────────────
         await db.from('scales').insert({ cult_id: cult.id, member_id: member.id, sector_id: sector.id });
         created++;
-        break; // one member per sector per cult
+        break; // um membro por setor por culto
       }
     }
   }
 
-  res.json({ message: `${created} escala(s) gerada(s)` });
+  res.json({
+    message: `${created} escala(s) gerada(s)${skippedUnavailable > 0 ? ` · ${skippedUnavailable} voluntário(s) pulado(s) por indisponibilidade` : ''}`,
+    created,
+    skipped_unavailable: skippedUnavailable,
+  });
 });
 
 // ─── Swaps ────────────────────────────────────────────────────────────────────
@@ -715,63 +794,8 @@ app.post('/api/activation-codes/activate', auth, async (req, res) => {
   res.json({ message: 'Sistema ativado com sucesso!' });
 });
 
-// ─── Pastoral Appointments ───────────────────────────────────────────────────
-app.get('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretária'), async (req, res) => {
-  const { data, error } = await db
-    .from('pastoral_appointments')
-    .select('*, users(email)')
-    .order('date', { ascending: true })
-    .order('time', { ascending: true });
-  if (error) return res.status(500).json({ message: error.message });
-
-  const result = (data || []).map(a => ({
-    ...a,
-    created_by_name: a.users?.email || null,
-    users: undefined,
-  }));
-  res.json(result);
-});
-
-app.post('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretária'), async (req, res) => {
-  const { name, date, time, notes, status } = req.body;
-  if (!name?.trim() || !date || !time) return res.status(400).json({ message: 'Nome, data e hora são obrigatórios' });
-
-  const { data, error } = await db.from('pastoral_appointments').insert({
-    name: name.trim(),
-    date,
-    time,
-    notes: notes || null,
-    status: status || 'Agendado',
-    created_by: req.user.id,
-  }).select().single();
-
-  if (error) return res.status(500).json({ message: error.message });
-  res.json(data);
-});
-
-app.put('/api/pastoral/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretária'), async (req, res) => {
-  const { name, date, time, notes, status } = req.body;
-  if (!name?.trim() || !date || !time) return res.status(400).json({ message: 'Nome, data e hora são obrigatórios' });
-
-  const { error } = await db.from('pastoral_appointments').update({
-    name: name.trim(), date, time,
-    notes: notes || null,
-    status: status || 'Agendado',
-    updated_at: new Date().toISOString(),
-  }).eq('id', req.params.id);
-
-  if (error) return res.status(500).json({ message: error.message });
-  res.json({ message: 'Atualizado' });
-});
-
-app.delete('/api/pastoral/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretária'), async (req, res) => {
-  const { error } = await db.from('pastoral_appointments').delete().eq('id', req.params.id);
-  if (error) return res.status(500).json({ message: error.message });
-  res.json({ message: 'Excluído' });
-});
-
 // Helper: generate backup data (single source of truth)
-const BACKUP_TABLES = ['departments', 'ministries', 'sectors', 'cult_types', 'members', 'member_ministries', 'cults', 'scales', 'swaps', 'notifications', 'pastoral_appointments'];
+const BACKUP_TABLES = ['departments', 'ministries', 'sectors', 'cult_types', 'members', 'member_ministries', 'cults', 'scales', 'swaps', 'notifications'];
 async function generateBackupData() {
   const backup = {};
   for (const t of BACKUP_TABLES) {
@@ -782,39 +806,141 @@ async function generateBackupData() {
   return backup;
 }
 
+// ─── Logo ────────────────────────────────────────────────────────────────────
+// GET  /api/settings/logo — público (sem auth, usado na LoginPage e Layout)
+app.get('/api/settings/logo', async (req, res) => {
+  const { data } = await db.from('settings').select('value').eq('key', 'logo').maybeSingle();
+  if (!data?.value) return res.json({ logo: null });
+  res.json({ logo: data.value }); // base64 data URL ou URL externa
+});
+
+// POST /api/settings/logo — somente Admin/SuperAdmin
+app.post('/api/settings/logo', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const { logo } = req.body;
+  if (!logo) {
+    // Remover logo
+    await db.from('settings').delete().eq('key', 'logo');
+    return res.json({ message: 'Logotipo removido.' });
+  }
+  // Validar: aceita data URL (base64) ou URL https
+  const isDataUrl = /^data:image\/(png|jpeg|jpg|svg\+xml|webp);base64,/.test(logo);
+  const isUrl = /^https?:\/\/.+/.test(logo);
+  if (!isDataUrl && !isUrl) {
+    return res.status(400).json({ message: 'Formato inválido. Envie uma imagem em base64 ou URL https.' });
+  }
+  // Limitar tamanho: base64 de 500KB → ~680KB string
+  if (logo.length > 700_000) {
+    return res.status(400).json({ message: 'Imagem muito grande. Máximo 500KB.' });
+  }
+  await db.from('settings').upsert({ key: 'logo', value: logo }, { onConflict: 'key' });
+  res.json({ message: 'Logotipo salvo com sucesso!' });
+});
+
+// ─── Backup Email Config (por usuário) ───────────────────────────────────────
+// GET  /api/settings/backup-email?user_id=X  → retorna e-mail configurado
+app.get('/api/settings/backup-email', auth, async (req, res) => {
+  const { user_id } = req.query;
+  if (!user_id) return res.status(400).json({ message: 'user_id obrigatório' });
+
+  // Apenas o próprio usuário ou admin pode ver
+  if (Number(user_id) !== req.user.id && !isAdmin(req.user.role)) {
+    return res.status(403).json({ message: 'Acesso negado' });
+  }
+
+  const key = `backup_email_user_${user_id}`;
+  const { data } = await db.from('settings').select('value').eq('key', key).maybeSingle();
+  res.json({ value: data?.value || null });
+});
+
+// POST /api/settings/backup-email  → salva e-mail do usuário
+app.post('/api/settings/backup-email', auth, async (req, res) => {
+  const { user_id, email } = req.body;
+  if (!user_id || !email) return res.status(400).json({ message: 'user_id e email obrigatórios' });
+
+  // Apenas o próprio usuário ou admin pode salvar
+  if (Number(user_id) !== req.user.id && !isAdmin(req.user.role)) {
+    return res.status(403).json({ message: 'Acesso negado' });
+  }
+
+  const key = `backup_email_user_${user_id}`;
+  await db.from('settings').upsert({ key, value: email }, { onConflict: 'key' });
+  res.json({ message: 'E-mail salvo com sucesso!' });
+});
+
 // ─── Backup ───────────────────────────────────────────────────────────────────
 app.post('/api/backup', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const backup = await generateBackupData();
   res.json({ message: `Backup realizado em ${new Date().toLocaleString('pt-BR')}`, data: backup });
 });
 
-// Helper: get SMTP transporter from DB settings or env
-async function getTransporter() {
+// Helper: carrega config SMTP do banco ou .env e valida antes de criar transporter
+async function getSmtpConfig() {
   const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
   const { data } = await db.from('settings').select('key,value').in('key', keys);
   const cfg = Object.fromEntries((data || []).map(r => [r.key, r.value]));
-  return nodemailer.createTransport({
-    host: cfg.smtp_host || process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: Number(cfg.smtp_port || process.env.SMTP_PORT || 587),
-    secure: false,
-    auth: {
-      user: cfg.smtp_user || process.env.SMTP_USER,
-      pass: cfg.smtp_pass || process.env.SMTP_PASS,
-    },
-  });
+
+  const host = cfg.smtp_host || process.env.SMTP_HOST;
+  const port = Number(cfg.smtp_port || process.env.SMTP_PORT || 587);
+  const user = cfg.smtp_user || process.env.SMTP_USER;
+  const pass = cfg.smtp_pass || process.env.SMTP_PASS;
+
+  return { host, port, user, pass };
 }
 
-// GET SMTP config (pass masked)
+async function getTransporter() {
+  const { host, port, user, pass } = await getSmtpConfig();
+
+  if (!host || !user || !pass) {
+    throw new Error('SMTP não configurado. Acesse Backup → Config. E-mail e preencha Host, E-mail e Senha.');
+  }
+
+  // porta 465 → SSL direto (secure:true); demais portas → STARTTLS (secure:false)
+  const secure = port === 465;
+
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: { user, pass },
+    tls: { rejectUnauthorized: false }, // aceita certs auto-assinados em dev
+  });
+
+  return { transporter, user };
+}
+
+// GET SMTP config (pass masked) — inclui flag configured para o frontend
 app.get('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
   const { data } = await db.from('settings').select('key,value').in('key', keys);
   const cfg = Object.fromEntries((data || []).map(r => [r.key, r.value]));
+  const host = cfg.smtp_host || '';
+  const user = cfg.smtp_user || '';
   res.json({
-    host: cfg.smtp_host || '',
+    host,
     port: cfg.smtp_port || '587',
-    user: cfg.smtp_user || '',
+    user,
     pass: cfg.smtp_pass ? '••••••••' : '',
+    configured: !!(host && user && cfg.smtp_pass), // ✅ flag para o frontend
   });
+});
+
+// POST /api/settings/smtp/test — verifica conexão SMTP sem enviar e-mail
+app.post('/api/settings/smtp/test', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  try {
+    const { transporter } = await getTransporter();
+    await transporter.verify(); // abre conexão e verifica autenticação
+    res.json({ message: '✅ Conexão SMTP verificada com sucesso!' });
+  } catch (err) {
+    console.error('[smtp/test]', err.message, err.code);
+    const detail =
+      err.message.includes('SMTP não configurado') ? err.message :
+      err.code === 'EAUTH'       ? 'Credenciais inválidas — verifique o e-mail e a senha/App Password.' :
+      err.code === 'ECONNECTION' ? 'Não foi possível conectar — verifique o Host e a Porta.' :
+      err.code === 'ETIMEDOUT'   ? 'Tempo esgotado — verifique o Host e a Porta.' :
+      err.code === 'ESOCKET'     ? 'Erro de socket — tente trocar a porta (587 ↔ 465).' :
+      err.message;
+    res.status(400).json({ message: detail });
+  }
 });
 
 // POST SMTP config (save to settings table)
@@ -876,8 +1002,8 @@ app.post('/api/backup/restore', auth, requireRole('SuperAdmin', 'Admin'), async 
   });
 });
 
-// POST send backup by email
-app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+// POST send backup by email — aberto para SuperAdmin, Admin e Líder
+app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ message: 'E-mail destinatário obrigatório' });
 
@@ -885,17 +1011,13 @@ app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin'), asy
   const json = JSON.stringify(backup, null, 2);
   const filename = `backup_ecclesiascale_${new Date().toISOString().slice(0, 10)}.json`;
 
-  // Get SMTP user for "from" field before creating transporter
-  const { data: smtpCfg } = await db.from('settings').select('key,value').in('key', ['smtp_user']);
-  const fromEmail = smtpCfg?.[0]?.value || process.env.SMTP_USER || '';
-
   try {
-    const transporter = await getTransporter();
+    const { transporter, user: smtpUser } = await getTransporter();
     await transporter.sendMail({
-      from: `EcclesiaScale <${fromEmail}>`,
+      from: `EcclesiaScale <${smtpUser}>`,
       to: email,
-      subject: `Backup EcclesiaScale - ${new Date().toLocaleDateString('pt-BR')}`,
-      html: `<div style="font-family:sans-serif;max-width:480px;margin:auto">
+      subject: `Backup EcclesiaScale — ${new Date().toLocaleDateString('pt-BR')}`,
+      html: `<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
         <h2 style="color:#b45309">📦 Backup EcclesiaScale</h2>
         <p>Segue em anexo o backup do sistema gerado em <strong>${new Date().toLocaleString('pt-BR')}</strong>.</p>
         <p style="color:#666;font-size:13px">Este e-mail foi enviado automaticamente. Guarde o arquivo em local seguro.</p>
@@ -904,8 +1026,15 @@ app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin'), asy
     });
     res.json({ message: `Backup enviado para ${email} com sucesso!` });
   } catch (err) {
-    console.error('Erro ao enviar e-mail:', err);
-    res.status(500).json({ message: 'Erro ao enviar e-mail. Verifique as configurações SMTP na aba Config. E-mail.' });
+    console.error('[backup/send-email] Erro:', err.message, '| code:', err.code);
+    const detail =
+      err.message.includes('SMTP não configurado') ? err.message :
+      err.code === 'EAUTH'                         ? 'Credenciais inválidas — verifique o e-mail e a senha/App Password.' :
+      err.code === 'ECONNECTION'                   ? 'Não foi possível conectar ao servidor SMTP. Verifique o Host e a Porta.' :
+      err.code === 'ETIMEDOUT'                     ? 'Tempo esgotado ao conectar ao servidor SMTP. Verifique o Host e a Porta.' :
+      err.code === 'ESOCKET'                       ? 'Erro de socket. Tente trocar a porta (587 ↔ 465) ou ative "Acesso a app menos seguro".' :
+      err.message;
+    res.status(500).json({ message: detail });
   }
 });
 
@@ -913,13 +1042,17 @@ app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin'), asy
 if (process.env.NODE_ENV === 'production') {
   const distPath = path.join(__dirname, 'dist');
   app.use(express.static(distPath));
-  app.get('/*path', (req, res) => {
-    if (!req.path.startsWith('/api')) res.sendFile(path.join(distPath, 'index.html'));
+  // Compatível com Express 4 e 5
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(distPath, 'index.html'));
   });
 }
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`\n🚀 EcclesiaScale API rodando em http://localhost:${PORT}`);
-  console.log(`   Supabase: ${SUPABASE_URL}\n`);
+  console.log(`   Supabase: ${SUPABASE_URL}`);
+  await ensureTrialInitialized();
+  console.log('');
 });

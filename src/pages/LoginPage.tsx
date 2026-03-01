@@ -20,8 +20,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [departments, setDepartments] = useState<{ id: number; name: string }[]>([]);
   const [cultTypes, setCultTypes] = useState<{ id: number; name: string }[]>([]);
   const [availability, setAvailability] = useState<Record<number, boolean>>({});
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
 
-  // Carrega departamentos e tipos de culto para o formulário de cadastro
   useEffect(() => {
     fetch('/api/public/departments')
       .then(r => r.ok ? r.json() : [])
@@ -30,6 +30,11 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     fetch('/api/public/cult_types')
       .then(r => r.ok ? r.json() : [])
       .then(data => setCultTypes(Array.isArray(data) ? data : []))
+      .catch(() => {});
+    // ✅ Busca logo customizado
+    fetch('/api/settings/logo')
+      .then(r => r.ok ? r.json() : {})
+      .then(data => { if (data.logo) setLogoUrl(data.logo); })
       .catch(() => {});
   }, []);
 
@@ -123,9 +128,15 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       <div className="relative w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-amber-600 rounded-2xl shadow-lg mb-4">
-            <span className="text-white font-bold text-2xl">E</span>
-          </div>
+          {logoUrl ? (
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl shadow-lg mb-4 overflow-hidden bg-stone-800 border border-stone-700">
+              <img src={logoUrl} alt="Logo" className="w-full h-full object-contain p-1" />
+            </div>
+          ) : (
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-amber-600 rounded-2xl shadow-lg mb-4">
+              <span className="text-white font-bold text-2xl">E</span>
+            </div>
+          )}
           <h1 className="text-2xl font-bold text-stone-100">EcclesiaScale</h1>
           <p className="text-stone-500 text-sm mt-1">Gestão de Escalas para Igrejas</p>
         </div>

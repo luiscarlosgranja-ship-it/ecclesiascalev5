@@ -2,22 +2,22 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Database, Download, Mail, Save, Send, CheckCircle,
   Settings, Eye, EyeOff, AlertTriangle, Upload, RotateCcw,
-  CheckSquare, XCircle, Link, Link2Off, ChevronDown, ChevronUp,
+  CheckSquare, XCircle, Image,
 } from 'lucide-react';
 import { Card, Button, Input, Modal } from '../components/ui';
 import api from '../utils/api';
 import type { AuthUser } from '../types';
 import { isAdmin } from '../utils/permissions';
 
-interface Props { user: AuthUser; }
-type Tab = 'backup' | 'restore' | 'email-config';
+interface Props { user: AuthUser; initialTab?: Tab; }
+type Tab = 'backup' | 'restore' | 'email-config' | 'logo';
 
 interface SmtpConfig { host: string; port: string; user: string; pass: string; configured?: boolean; }
 interface RestoreResult { table: string; status: 'ok' | 'error' | 'skipped'; count: number; }
-interface GmailStatus { connected: boolean; email: string | null; }
 
-export default function BackupPage({ user }: Props) {
-  const [tab, setTab] = useState<Tab>('backup');
+export default function BackupPage(props: Props) {
+  const { user } = props;
+  const [tab, setTab] = useState<Tab>(props.initialTab || 'backup');
 
   // ─── Backup ──────────────────────────────────────────────────────────────────
   const [loading, setLoading] = useState(false);
@@ -46,11 +46,13 @@ export default function BackupPage({ user }: Props) {
   const [testing, setTesting] = useState(false);
   const [testMsg, setTestMsg] = useState('');
 
-  // ─── Gmail OAuth2 ─────────────────────────────────────────────────────────────
-  const [gmail, setGmail] = useState<GmailStatus>({ connected: false, email: null });
-  const [loadingGmail, setLoadingGmail] = useState(false);
-  const [gmailMsg, setGmailMsg] = useState('');
-  const [showSmtpFallback, setShowSmtpFallback] = useState(false);
+  // ─── Logotipo ─────────────────────────────────────────────────────────────────
+  const [currentLogo, setCurrentLogo] = useState<string | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [savingLogo, setSavingLogo] = useState(false);
+  const [logoMsg, setLogoMsg] = useState('');
+  const [removeLogoModal, setRemoveLogoModal] = useState(false);
+  const logoFileRef = useRef<HTMLInputElement>(null);
 
   // ─── Restauração ─────────────────────────────────────────────────────────────
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
@@ -73,17 +75,63 @@ export default function BackupPage({ user }: Props) {
         .then(res => {
           if (res) {
             setSmtp(res);
-            // ✅ usa flag "configured" retornada pelo servidor (host+user+pass presentes)
             setSmtpConfigured(res.configured ?? !!(res.host && res.user));
           }
         })
         .catch(() => {});
-      // Carrega status Gmail OAuth2
-      api.get<GmailStatus>('/settings/gmail/status')
-        .then(res => { if (res) setGmail(res); })
+    }
+
+    // Carrega logo atual (todos os admins)
+    if (isAdmin(user.role)) {
+      fetch('/api/settings/logo')
+        .then(r => r.ok ? r.json() : {})
+        .then(data => { if (data.logo) { setCurrentLogo(data.logo); setLogoPreview(data.logo); } })
         .catch(() => {});
     }
   }, [user.id, user.role]);
+
+  // ─── Logo: upload de arquivo ─────────────────────────────────────────────────
+  function handleLogoFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 500 * 1024) { setLogoMsg('❌ Arquivo muito grande. Máximo 500KB.'); return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const result = ev.target?.result as string;
+      setLogoPreview(result);
+      setLogoMsg('');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // ─── Logo: salvar ─────────────────────────────────────────────────────────────
+  async function saveLogo() {
+    if (!logoPreview) return;
+    setSavingLogo(true); setLogoMsg('');
+    try {
+      await api.post('/settings/logo', { logo: logoPreview });
+      setCurrentLogo(logoPreview);
+      setLogoMsg('✅ Logotipo salvo com sucesso!');
+      // Dispara evento para Layout e LoginPage atualizarem sem reload
+      window.dispatchEvent(new CustomEvent('ecclesia-logo-updated', { detail: { logo: logoPreview } }));
+    } catch (e) {
+      setLogoMsg('❌ ' + (e instanceof Error ? e.message : 'Erro ao salvar'));
+    } finally { setSavingLogo(false); }
+  }
+
+  // ─── Logo: remover ────────────────────────────────────────────────────────────
+  async function removeLogo() {
+    setSavingLogo(true); setLogoMsg('');
+    try {
+      await api.post('/settings/logo', { logo: null });
+      setCurrentLogo(null); setLogoPreview(null);
+      setLogoMsg('✅ Logotipo removido.');
+      window.dispatchEvent(new CustomEvent('ecclesia-logo-updated', { detail: { logo: null } }));
+      setRemoveLogoModal(false);
+    } catch (e) {
+      setLogoMsg('❌ ' + (e instanceof Error ? e.message : 'Erro ao remover'));
+    } finally { setSavingLogo(false); }
+  }
 
   // ─── Fazer Backup ─────────────────────────────────────────────────────────────
   async function doBackup() {
@@ -123,37 +171,6 @@ export default function BackupPage({ user }: Props) {
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Erro ao salvar');
     } finally { setSavingMyEmail(false); }
-  }
-
-  // ─── Conectar Gmail OAuth2 ────────────────────────────────────────────────────
-  async function connectGmail() {
-    setLoadingGmail(true); setGmailMsg('');
-    try {
-      const res = await api.get<{ url: string }>('/settings/gmail/auth');
-      if (!res?.url) throw new Error('URL de autenticação não retornada');
-      const popup = window.open(res.url, 'gmail_auth', 'width=500,height=600');
-      // Escuta mensagem de sucesso da janela popup
-      const handler = (e: MessageEvent) => {
-        if (e.data === 'gmail_connected') {
-          window.removeEventListener('message', handler);
-          popup?.close();
-          api.get<GmailStatus>('/settings/gmail/status')
-            .then(s => { if (s) { setGmail(s); setGmailMsg('✅ Gmail conectado com sucesso!'); } })
-            .catch(() => {});
-        }
-      };
-      window.addEventListener('message', handler);
-    } catch (e) {
-      setGmailMsg('❌ ' + (e instanceof Error ? e.message : 'Erro ao conectar Gmail'));
-    } finally { setLoadingGmail(false); }
-  }
-
-  async function disconnectGmail() {
-    try {
-      await api.delete('/settings/gmail');
-      setGmail({ connected: false, email: null });
-      setGmailMsg('Gmail desconectado.');
-    } catch { setGmailMsg('Erro ao desconectar.'); }
   }
 
   // ─── Salvar SMTP ──────────────────────────────────────────────────────────────
@@ -245,7 +262,8 @@ export default function BackupPage({ user }: Props) {
         {[
           { id: 'backup', label: 'Fazer Backup', icon: <Database size={14} /> },
           ...(isAdmin(user.role) ? [{ id: 'restore', label: 'Restaurar', icon: <RotateCcw size={14} /> }] : []),
-          { id: 'email-config', label: 'Config. E-mail', icon: <Mail size={14} />, alert: isAdmin(user.role) && !smtpConfigured && !gmail.connected },
+          { id: 'email-config', label: 'Config. E-mail', icon: <Mail size={14} />, alert: isAdmin(user.role) && !smtpConfigured },
+          ...(isAdmin(user.role) ? [{ id: 'logo', label: 'Logotipo', icon: <Image size={14} /> }] : []),
         ].map((t: any) => (
           <button key={t.id} onClick={() => setTab(t.id as Tab)}
             className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === t.id ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
@@ -258,7 +276,7 @@ export default function BackupPage({ user }: Props) {
       {/* ─── Aba: Fazer Backup ──────────────────────────────────────────────────── */}
       {tab === 'backup' && (
         <div className="space-y-4 max-w-md">
-          {isAdmin(user.role) && !smtpConfigured && !gmail.connected && (
+          {isAdmin(user.role) && !smtpConfigured && (
             <div className="flex items-start gap-3 bg-amber-900/20 border border-amber-700/50 rounded-xl px-4 py-3">
               <AlertTriangle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
               <p className="text-amber-300 text-xs">
@@ -396,64 +414,24 @@ export default function BackupPage({ user }: Props) {
       {tab === 'email-config' && (
         <div className="space-y-6 max-w-lg">
 
-          {/* Config. E-mail — apenas Admin */}
+          {/* SMTP — apenas Admin */}
           {isAdmin(user.role) && (
             <Card className="p-6">
               <div className="flex items-center gap-3 mb-1">
-                <Mail className="text-amber-400" size={20} />
-                <p className="text-stone-200 font-semibold">Configuração de E-mail</p>
-                {(gmail.connected || smtpConfigured) && (
+                <Settings className="text-amber-400" size={20} />
+                <p className="text-stone-200 font-semibold">Configuração SMTP</p>
+                {smtpConfigured && (
                   <span className="ml-auto flex items-center gap-1 text-emerald-400 text-xs">
                     <CheckCircle size={13} /> Configurado
                   </span>
                 )}
               </div>
-              <p className="text-stone-500 text-xs mb-5">Necessário para envio de backups e recuperação de senha.</p>
+              <p className="text-stone-500 text-xs mb-5">Servidor de e-mail para envio de backups e recuperação de senha.</p>
 
-              {/* Opção 1: Gmail OAuth2 */}
-              <div className="bg-stone-800/60 border border-stone-700 rounded-xl p-4 mb-4">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center flex-shrink-0">
-                    <svg viewBox="0 0 24 24" width="16" height="16"><path fill="#EA4335" d="M5.266 9.765A7.077 7.077 0 0 1 12 4.909c1.69 0 3.218.6 4.418 1.582L19.91 3C17.782 1.145 15.055 0 12 0 7.27 0 3.198 2.698 1.24 6.65l4.026 3.115z"/><path fill="#34A853" d="M16.04 18.013c-1.09.703-2.474 1.078-4.04 1.078a7.077 7.077 0 0 1-6.723-4.823l-4.04 3.067A11.965 11.965 0 0 0 12 24c2.933 0 5.735-1.043 7.834-3l-3.793-2.987z"/><path fill="#4A90D9" d="M19.834 21c2.195-2.048 3.62-5.096 3.62-9 0-.71-.109-1.473-.272-2.182H12v4.637h6.436c-.317 1.559-1.17 2.766-2.395 3.558L19.834 21z"/><path fill="#FBBC05" d="M5.277 14.268A7.12 7.12 0 0 1 4.909 12c0-.782.125-1.533.357-2.235L1.24 6.65A11.934 11.934 0 0 0 0 12c0 1.92.445 3.73 1.237 5.335l4.04-3.067z"/></svg>
-                  </div>
-                  <div>
-                    <p className="text-stone-200 text-sm font-medium">Conectar via Gmail</p>
-                    <p className="text-stone-500 text-xs">Recomendado — funciona no Railway sem bloqueios</p>
-                  </div>
-                  {gmail.connected && (
-                    <span className="ml-auto flex items-center gap-1 bg-emerald-900/30 border border-emerald-700/40 rounded-lg px-2 py-1 text-emerald-400 text-xs">
-                      <CheckCircle size={11} /> Conectado
-                    </span>
-                  )}
-                </div>
-                {gmail.connected && gmail.email ? (
-                  <div className="flex items-center justify-between bg-stone-900 rounded-lg px-3 py-2">
-                    <span className="text-amber-300 text-sm">{gmail.email}</span>
-                    <button onClick={disconnectGmail} className="flex items-center gap-1.5 text-red-400 hover:text-red-300 text-xs transition-colors">
-                      <Link2Off size={13} /> Desconectar
-                    </button>
-                  </div>
-                ) : (
-                  <Button onClick={connectGmail} loading={loadingGmail} size="sm">
-                    <Link size={14} /> Conectar Gmail
-                  </Button>
-                )}
-                {gmailMsg && (
-                  <p className={`text-xs mt-2 ${gmailMsg.startsWith('✅') ? 'text-emerald-400' : 'text-red-400'}`}>{gmailMsg}</p>
-                )}
-              </div>
-
-              {/* Opção 2: SMTP manual */}
-              <button
-                onClick={() => setShowSmtpFallback(v => !v)}
-                className="flex items-center gap-2 text-stone-500 hover:text-stone-300 text-xs transition-colors w-full mb-2"
-              >
-                {showSmtpFallback ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                Configuração SMTP manual (avançado)
-              </button>
-
-              {showSmtpFallback && (
-                <div className="space-y-4 border border-stone-700 rounded-xl p-4">
+              <div className="space-y-4">
+                {/* Presets */}
+                <div>
+                  <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Servidor pré-configurado</label>
                   <div className="flex flex-wrap gap-2">
                     {[
                       { label: 'Gmail', host: 'smtp.gmail.com', port: '587' },
@@ -466,48 +444,58 @@ export default function BackupPage({ user }: Props) {
                       </button>
                     ))}
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="col-span-2">
-                      <Input label="Host SMTP *" value={smtp.host} onChange={e => setSmtp(s => ({ ...s, host: e.target.value }))} placeholder="smtp.gmail.com" />
-                    </div>
-                    <Input label="Porta" value={smtp.port} onChange={e => setSmtp(s => ({ ...s, port: e.target.value }))} placeholder="587" />
-                  </div>
-                  <Input label="E-mail remetente *" type="email" value={smtp.user} onChange={e => setSmtp(s => ({ ...s, user: e.target.value }))} placeholder="seuemail@gmail.com" />
-                  <div className="relative">
-                    <Input
-                      label="Senha / App Password *"
-                      type={showPass ? 'text' : 'password'}
-                      value={smtp.pass}
-                      onChange={e => setSmtp(s => ({ ...s, pass: e.target.value }))}
-                      placeholder={smtp.pass === '••••••••' ? 'Deixe em branco para manter' : 'Senha ou App Password'}
-                    />
-                    <button type="button" onClick={() => setShowPass(!showPass)}
-                      className="absolute right-3 bottom-2 text-stone-500 hover:text-stone-300 transition-colors">
-                      {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
-                    </button>
-                  </div>
-                  {smtpError && <p className="text-red-400 text-xs">{smtpError}</p>}
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <Button onClick={saveSmtp} loading={savingSmtp}><Save size={15} /> Salvar SMTP</Button>
-                    {smtpSaved && <span className="flex items-center gap-1.5 text-emerald-400 text-sm"><CheckCircle size={14} /> Salvo!</span>}
-                  </div>
                 </div>
-              )}
 
-              {/* Testar conexão */}
-              {(gmail.connected || smtpConfigured) && (
-                <div className="border-t border-stone-700 pt-4 mt-4">
-                  <p className="text-stone-400 text-xs font-medium mb-2">Testar conexão e envio</p>
-                  <p className="text-stone-600 text-xs mb-2">Deixe em branco para verificar só a conexão, ou preencha um e-mail para receber um teste.</p>
-                  <div className="flex gap-2">
-                    <input type="email" value={testEmail} onChange={e => setTestEmail(e.target.value)}
-                      placeholder="e-mail para teste (opcional)..."
-                      className="flex-1 bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm placeholder-stone-500 focus:outline-none focus:border-amber-500" />
-                    <Button size="sm" variant="secondary" onClick={testSmtp} loading={testing}>Testar</Button>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="col-span-2">
+                    <Input label="Host SMTP *" value={smtp.host} onChange={e => setSmtp(s => ({ ...s, host: e.target.value }))} placeholder="smtp.gmail.com" />
                   </div>
-                  {testMsg && <p className={`text-xs mt-2 ${testMsg.startsWith('✅') ? 'text-emerald-400' : testMsg.includes('Verificando') ? 'text-amber-400' : 'text-red-400'}`}>{testMsg}</p>}
+                  <Input label="Porta" value={smtp.port} onChange={e => setSmtp(s => ({ ...s, port: e.target.value }))} placeholder="587" />
                 </div>
-              )}
+
+                <Input label="E-mail remetente *" type="email" value={smtp.user} onChange={e => setSmtp(s => ({ ...s, user: e.target.value }))} placeholder="seuemail@gmail.com" />
+
+                <div className="relative">
+                  <Input
+                    label="Senha / App Password *"
+                    type={showPass ? 'text' : 'password'}
+                    value={smtp.pass}
+                    onChange={e => setSmtp(s => ({ ...s, pass: e.target.value }))}
+                    placeholder={smtp.pass === '••••••••' ? 'Deixe em branco para manter' : 'Senha ou App Password'}
+                  />
+                  <button type="button" onClick={() => setShowPass(!showPass)}
+                    className="absolute right-3 bottom-2 text-stone-500 hover:text-stone-300 transition-colors">
+                    {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+
+                {smtp.host.includes('gmail') && (
+                  <div className="bg-blue-900/20 border border-blue-700/40 rounded-lg px-3 py-2 text-xs text-blue-300">
+                    💡 Para Gmail use uma <strong>App Password</strong>: Conta Google → Segurança → Verificação em 2 etapas → Senhas de app.
+                  </div>
+                )}
+
+                {smtpError && <p className="text-red-400 text-xs">{smtpError}</p>}
+
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Button onClick={saveSmtp} loading={savingSmtp}><Save size={15} /> Salvar SMTP</Button>
+                  {smtpSaved && <span className="flex items-center gap-1.5 text-emerald-400 text-sm"><CheckCircle size={14} /> Salvo!</span>}
+                </div>
+
+                {smtpConfigured && (
+                  <div className="border-t border-stone-700 pt-4">
+                    <p className="text-stone-400 text-xs font-medium mb-2">Testar conexão e envio</p>
+                    <p className="text-stone-600 text-xs mb-2">Deixe em branco para verificar só a conexão, ou preencha um e-mail para receber um teste.</p>
+                    <div className="flex gap-2">
+                      <input type="email" value={testEmail} onChange={e => setTestEmail(e.target.value)}
+                        placeholder="e-mail para teste (opcional)..."
+                        className="flex-1 bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm placeholder-stone-500 focus:outline-none focus:border-amber-500" />
+                      <Button size="sm" variant="secondary" onClick={testSmtp} loading={testing}>Testar</Button>
+                    </div>
+                    {testMsg && <p className={`text-xs mt-2 ${testMsg.startsWith('✅') ? 'text-emerald-400' : testMsg.includes('Verificando') ? 'text-amber-400' : 'text-red-400'}`}>{testMsg}</p>}
+                  </div>
+                )}
+              </div>
             </Card>
           )}
 
@@ -536,12 +524,122 @@ export default function BackupPage({ user }: Props) {
         </div>
       )}
 
+      {/* ─── Aba: Logotipo ──────────────────────────────────────────────────────── */}
+      {tab === 'logo' && isAdmin(user.role) && (
+        <div className="space-y-6 max-w-lg">
+          <Card className="p-6">
+            <div className="flex items-center gap-3 mb-1">
+              <Image className="text-amber-400" size={20} />
+              <p className="text-stone-200 font-semibold">Logotipo da Igreja</p>
+            </div>
+            <p className="text-stone-500 text-xs mb-5">
+              Aparece na sidebar, tela de login e no cabeçalho das escalas em PDF. PNG, JPG ou SVG — máx. 500KB.
+            </p>
+
+            {/* Preview ao vivo */}
+            <div className="mb-5 space-y-3">
+              <p className="text-stone-400 text-xs font-medium uppercase tracking-wide">Pré-visualização</p>
+              <div className="grid grid-cols-3 gap-3">
+                {/* Sidebar */}
+                <div className="bg-stone-950 border border-stone-700 rounded-xl p-3 flex flex-col items-center gap-2">
+                  {logoPreview ? (
+                    <div className="w-8 h-8 rounded-lg overflow-hidden bg-stone-800 border border-stone-700">
+                      <img src={logoPreview} alt="Logo" className="w-full h-full object-contain p-0.5" />
+                    </div>
+                  ) : (
+                    <div className="w-8 h-8 rounded-lg bg-amber-600 flex items-center justify-center">
+                      <span className="text-white font-bold text-sm">E</span>
+                    </div>
+                  )}
+                  <p className="text-stone-500 text-xs">Sidebar</p>
+                </div>
+                {/* Login */}
+                <div className="bg-stone-950 border border-stone-700 rounded-xl p-3 flex flex-col items-center gap-2">
+                  {logoPreview ? (
+                    <div className="w-12 h-12 rounded-2xl overflow-hidden bg-stone-800 border border-stone-700">
+                      <img src={logoPreview} alt="Logo" className="w-full h-full object-contain p-1" />
+                    </div>
+                  ) : (
+                    <div className="w-12 h-12 rounded-2xl bg-amber-600 flex items-center justify-center">
+                      <span className="text-white font-bold text-xl">E</span>
+                    </div>
+                  )}
+                  <p className="text-stone-500 text-xs">Login</p>
+                </div>
+                {/* PDF */}
+                <div className="bg-white border border-stone-300 rounded-xl p-3 flex flex-col items-center gap-2">
+                  {logoPreview ? (
+                    <img src={logoPreview} alt="Logo" className="w-10 h-10 object-contain" />
+                  ) : (
+                    <div className="w-10 h-10 bg-stone-900 rounded flex items-center justify-center">
+                      <span className="text-white font-bold">E</span>
+                    </div>
+                  )}
+                  <p className="text-stone-500 text-xs text-center" style={{ color: '#78716c' }}>PDF</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Upload de arquivo */}
+            <div className="space-y-4">
+              <div
+                onClick={() => logoFileRef.current?.click()}
+                className="border-2 border-dashed border-stone-600 hover:border-amber-500 rounded-xl p-6 text-center cursor-pointer transition-colors group"
+              >
+                <Upload size={24} className="mx-auto mb-2 text-stone-500 group-hover:text-amber-400 transition-colors" />
+                <p className="text-stone-400 text-sm">Clique para selecionar imagem</p>
+                <p className="text-stone-600 text-xs mt-1">PNG, JPG, SVG — máx. 500KB</p>
+                <input
+                  ref={logoFileRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp"
+                  className="hidden"
+                  onChange={handleLogoFile}
+                />
+              </div>
+
+              {logoMsg && (
+                <p className={`text-sm ${logoMsg.startsWith('✅') ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {logoMsg}
+                </p>
+              )}
+
+              <div className="flex gap-3 flex-wrap">
+                <Button onClick={saveLogo} loading={savingLogo} disabled={!logoPreview || logoPreview === currentLogo}>
+                  <Save size={15} /> Salvar Logotipo
+                </Button>
+                {currentLogo && (
+                  <Button variant="danger" onClick={() => setRemoveLogoModal(true)}>
+                    <XCircle size={15} /> Remover
+                  </Button>
+                )}
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ─── Modal: Confirmar remoção do logo ────────────────────────────────────── */}
+      <Modal open={removeLogoModal} onClose={() => setRemoveLogoModal(false)} title="Remover Logotipo" size="sm">
+        <div className="space-y-4">
+          <p className="text-stone-400 text-sm">
+            Ao remover o logotipo, o sistema voltará a exibir o ícone padrão <strong className="text-amber-300">"E"</strong> em todos os lugares.
+          </p>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setRemoveLogoModal(false)}>Cancelar</Button>
+            <Button variant="danger" onClick={removeLogo} loading={savingLogo}>
+              <XCircle size={15} /> Remover
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
       {/* ─── Modal: Enviar Backup por E-mail ─────────────────────────────────────── */}
       <Modal open={emailModal} onClose={() => setEmailModal(false)} title="📦 Enviar Backup por E-mail" size="sm">
         <div className="space-y-4">
           <p className="text-stone-400 text-sm">Backup gerado! Confirme o e-mail para envio:</p>
           <Input label="E-mail destinatário *" type="email" value={sendEmail} onChange={e => setSendEmail(e.target.value)} placeholder="seuemail@exemplo.com" />
-          {isAdmin(user.role) && !smtpConfigured && !gmail.connected && (
+          {isAdmin(user.role) && !smtpConfigured && (
             <div className="flex items-center gap-2 bg-amber-900/20 border border-amber-700/40 rounded-lg px-3 py-2">
               <AlertTriangle size={13} className="text-amber-400" />
               <p className="text-amber-300 text-xs">SMTP não configurado. O envio irá falhar.</p>
