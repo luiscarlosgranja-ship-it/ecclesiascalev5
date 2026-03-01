@@ -253,12 +253,17 @@ app.post('/api/members', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asy
 
   if (error) return res.status(500).json({ message: error.message });
 
+  let defaultPassword = null;
+  let userCreated = false;
+
   if (email) {
-    // ✅ CORREÇÃO: Verifica se usuário já existe antes de criar, evitando sobrescrever senha
     const { data: existingUser } = await db.from('users').select('id').eq('email', email).maybeSingle();
     if (!existingUser) {
-      const hash = bcrypt.hashSync('EcclesiaScale@' + member.id, 10);
+      // ✅ Gera senha padrão e retorna ao Admin para informar ao membro
+      defaultPassword = 'EcclesiaScale@' + member.id;
+      const hash = bcrypt.hashSync(defaultPassword, 10);
       await db.from('users').insert({ email, password: hash, role: role || 'Membro', member_id: member.id });
+      userCreated = true;
     }
   }
 
@@ -266,7 +271,15 @@ app.post('/api/members', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asy
     await db.from('member_ministries').upsert(ministries.map(min => ({ member_id: member.id, ministry_id: min.id })), { ignoreDuplicates: true });
   }
 
-  res.json({ id: member.id, message: 'Membro criado' });
+  res.json({
+    id: member.id,
+    message: 'Membro criado',
+    user_created: userCreated,
+    default_password: defaultPassword,
+    login_info: userCreated
+      ? `Acesso criado! E-mail: ${email} | Senha inicial: ${defaultPassword} | Oriente o voluntário a trocar a senha no primeiro acesso.`
+      : null,
+  });
 });
 
 app.put('/api/members/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
@@ -278,11 +291,19 @@ app.put('/api/members/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), 
     role, department_id: department_id || null, status, is_active: is_active ?? true
   }).eq('id', req.params.id);
 
-  // ✅ CORREÇÃO: Atualiza apenas role e is_active do usuário, NUNCA a senha
+  // ✅ Atualiza usuário existente OU cria se e-mail foi adicionado agora
   if (email && role) {
     const { data: existingUser } = await db.from('users').select('id').eq('email', email).maybeSingle();
     if (existingUser) {
+      // Usuário já existe: atualiza role e status, NUNCA a senha
       await db.from('users').update({ role, is_active: is_active ?? true }).eq('id', existingUser.id);
+    } else {
+      // ✅ Novo e-mail adicionado ao membro: cria acesso com senha padrão
+      const memberId = req.params.id;
+      const defaultPassword = 'EcclesiaScale@' + memberId;
+      const hash = bcrypt.hashSync(defaultPassword, 10);
+      await db.from('users').insert({ email, password: hash, role: role || 'Membro', member_id: Number(memberId), is_active: is_active ?? true });
+      console.log(`[users] Acesso criado para membro ${memberId} via PUT. Senha inicial: ${defaultPassword}`);
     }
   }
 

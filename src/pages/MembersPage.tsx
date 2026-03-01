@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Search, SortAsc, Filter, Plus, Edit, UserX, UserCheck, KeyRound, MessageSquare, Loader2, UserMinus } from 'lucide-react';
+import { Search, SortAsc, Filter, Plus, Edit, UserX, UserCheck, KeyRound, MessageSquare, Loader2, UserMinus, Copy, Check } from 'lucide-react';
 import { Card, Button, Modal, Badge, Input, Select } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
-import { getSupabase } from '../utils/supabaseClient';
+import { supabase } from '../utils/supabaseClient';
 import type { AuthUser, Member, Department, Ministry, CultType } from '../types';
 import { isAdmin, isLeader } from '../utils/permissions';
 
@@ -29,16 +29,17 @@ export default function MembersPage({ user }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  // ─── Modal de credenciais geradas ───────────────────────────────────────────
+  const [credModal, setCredModal] = useState(false);
+  const [credInfo, setCredInfo] = useState<{ email: string; password: string } | null>(null);
+
   // ─── Modal de confirmação de desativação / reativação ───────────────────────
   const [deactivateTarget, setDeactivateTarget] = useState<Member | null>(null);
   const [deactivateModal, setDeactivateModal] = useState(false);
 
   // ─── Supabase Realtime ───────────────────────────────────────────────────────
   useEffect(() => {
-    const sb = getSupabase();
-    if (!sb) return; // Realtime desativado se env vars não configuradas
-
-    const channel = sb
+    const channel = supabase
       .channel('members-realtime')
       .on(
         'postgres_changes',
@@ -47,7 +48,7 @@ export default function MembersPage({ user }: Props) {
       )
       .subscribe();
 
-    return () => { sb.removeChannel(channel); };
+    return () => { supabase.removeChannel(channel); };
   }, [refetch]);
 
   // ─── Membros ativos e desativados ───────────────────────────────────────────
@@ -85,11 +86,21 @@ export default function MembersPage({ user }: Props) {
     try {
       if (editMember.id) {
         await api.put(`/members/${editMember.id}`, editMember);
+        setModalOpen(false);
+        refetch();
       } else {
-        await api.post('/members', editMember);
+        const res = await api.post<{
+          id: number; message: string;
+          user_created?: boolean; default_password?: string;
+        }>('/members', editMember);
+        setModalOpen(false);
+        refetch();
+        // ✅ Se um acesso foi criado, exibe as credenciais ao Admin
+        if (res.user_created && res.default_password && editMember.email) {
+          setCredInfo({ email: editMember.email, password: res.default_password });
+          setCredModal(true);
+        }
       }
-      setModalOpen(false);
-      refetch();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao salvar');
     } finally { setSaving(false); }
@@ -482,6 +493,49 @@ export default function MembersPage({ user }: Props) {
             <div className="flex gap-3 pt-2">
               <Button variant="outline" onClick={() => setModalOpen(false)}>Cancelar</Button>
               <Button onClick={saveMember} loading={saving}>Salvar</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal: Credenciais do novo voluntário */}
+      <Modal open={credModal} onClose={() => setCredModal(false)} title="🔐 Acesso Criado!" size="sm">
+        {credInfo && (
+          <div className="space-y-4">
+            <p className="text-stone-400 text-sm">
+              O acesso foi criado automaticamente. Repasse as credenciais abaixo ao voluntário e oriente-o a trocar a senha no primeiro acesso.
+            </p>
+            <div className="bg-stone-800 border border-stone-700 rounded-xl p-4 space-y-3">
+              <div>
+                <p className="text-stone-500 text-xs uppercase tracking-wide mb-1">E-mail</p>
+                <p className="text-stone-200 text-sm font-medium">{credInfo.email}</p>
+              </div>
+              <div>
+                <p className="text-stone-500 text-xs uppercase tracking-wide mb-1">Senha inicial</p>
+                <div className="flex items-center justify-between gap-3">
+                  <code className="text-amber-300 font-mono text-sm">{credInfo.password}</code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(`E-mail: ${credInfo.email}\nSenha: ${credInfo.password}`);
+                    }}
+                    className="text-stone-400 hover:text-stone-200 transition-colors p-1"
+                    title="Copiar credenciais"
+                  >
+                    <Copy size={15} />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg px-3 py-2 text-xs text-amber-300">
+              ⚠️ Esta senha só é exibida uma vez. Copie e repasse ao voluntário agora.
+            </div>
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={() => setCredModal(false)}>Fechar</Button>
+              <Button onClick={() => {
+                navigator.clipboard.writeText(`E-mail: ${credInfo.email}\nSenha: ${credInfo.password}`);
+              }}>
+                <Copy size={15} /> Copiar Credenciais
+              </Button>
             </div>
           </div>
         )}
