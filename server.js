@@ -955,8 +955,10 @@ app.get('/api/settings/gmail/callback', async (req, res) => {
 
     console.log('[gmail/callback] tokens recebidos:', JSON.stringify({
       has_access_token: !!tokens.access_token,
+      access_token_preview: tokens.access_token ? tokens.access_token.substring(0, 20) + '...' : 'NULL',
       has_refresh_token: !!tokens.refresh_token,
       expiry_date: tokens.expiry_date,
+      token_type: tokens.token_type,
     }));
 
     if (!tokens.refresh_token) {
