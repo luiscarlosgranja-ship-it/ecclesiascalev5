@@ -14,7 +14,11 @@ import type { AuthUser } from './types';
 
 export type Page =
   | 'dashboard' | 'my-panel' | 'members' | 'scales'
-  | 'cults' | 'registries' | 'swaps' | 'security' | 'backup';
+  | 'cults' | 'registries' | 'swaps' | 'security' | 'backup'
+  // Cadastros separados (podem ser abas dentro de RegistriesPage ou páginas próprias)
+  | 'ministries' | 'departments' | 'sectors' | 'cult-types'
+  // Segurança
+  | 'restore' | 'activation';
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -41,6 +45,18 @@ export default function App() {
 
   if (!user) return <LoginPage onLogin={handleLogin} />;
 
+  // Páginas de Cadastros — roteadas para RegistriesPage com tab ativa
+  const registryTab =
+    page === 'ministries'  ? 'ministries'  :
+    page === 'departments' ? 'departments' :
+    page === 'sectors'     ? 'sectors'     :
+    page === 'cult-types'  ? 'cult-types'  : null;
+
+  // Páginas de Segurança adicionais — roteadas para BackupPage com tab ativa
+  const backupTab =
+    page === 'restore'    ? 'restore'    :
+    page === 'activation' ? 'activation' : null;
+
   return (
     <Layout user={user} page={page} setPage={p => setPage(p as Page)} onLogout={handleLogout}>
       {page === 'dashboard'  && <DashboardPage  user={user} setPage={p => setPage(p as Page)} />}
@@ -48,10 +64,16 @@ export default function App() {
       {page === 'members'    && <MembersPage    user={user} />}
       {page === 'scales'     && <ScalesPage     user={user} />}
       {page === 'cults'      && <CultsPage      user={user} />}
-      {page === 'registries' && <RegistriesPage user={user} />}
       {page === 'swaps'      && <SwapsPage      user={user} />}
       {page === 'security'   && <SecurityPage   user={user} />}
-      {page === 'backup'     && <BackupPage     user={user} />}
+      {/* Cadastros — RegistriesPage recebe qual aba abrir */}
+      {(page === 'registries' || registryTab) && (
+        <RegistriesPage user={user} initialTab={registryTab || undefined} />
+      )}
+      {/* Backup/Restaurar/Ativação — BackupPage recebe qual aba abrir */}
+      {(page === 'backup' || backupTab) && (
+        <BackupPage user={user} initialTab={backupTab || undefined} />
+      )}
     </Layout>
   );
 }

@@ -3,10 +3,9 @@ import { clsx } from 'clsx';
 import {
   LayoutDashboard, Users, Calendar, Repeat, Settings, LogOut, Bell,
   BookOpen, Layers, Shield, ChevronLeft, ChevronRight, Wifi, WifiOff,
-  Database, Menu, X
+  Database, Menu, X, Building2, Grid3X3, Church, RefreshCcw, KeyRound
 } from 'lucide-react';
 import type { AuthUser } from '../types';
-
 import { useNotifications } from '../hooks/useApi';
 
 type Page = string;
@@ -18,16 +17,47 @@ interface NavItem {
   roles: string[];
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { id: 'dashboard',  label: 'Dashboard',        icon: <LayoutDashboard size={18} />, roles: ['SuperAdmin','Admin','Líder','Membro'] },
-  { id: 'my-panel',   label: 'Meu Painel',        icon: <BookOpen size={18} />,        roles: ['SuperAdmin','Admin','Líder','Membro'] },
-  { id: 'scales',     label: 'Escalas',           icon: <Calendar size={18} />,        roles: ['SuperAdmin','Admin','Líder'] },
-  { id: 'cults',      label: 'Cultos / Eventos',  icon: <Layers size={18} />,          roles: ['SuperAdmin','Admin'] },
-  { id: 'members',    label: 'Voluntários',       icon: <Users size={18} />,           roles: ['SuperAdmin','Admin','Líder'] },
-  { id: 'registries', label: 'Cadastros',         icon: <Settings size={18} />,        roles: ['SuperAdmin','Admin'] },
-  { id: 'swaps',      label: 'Gerenciar Trocas',  icon: <Repeat size={18} />,          roles: ['SuperAdmin','Admin','Líder'] },
-  { id: 'security',   label: 'Segurança',         icon: <Shield size={18} />,          roles: ['SuperAdmin','Admin'] },
-  { id: 'backup',     label: 'Backup',            icon: <Database size={18} />,        roles: ['SuperAdmin','Admin','Líder'] },
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+// ─── Grupos de navegação ───────────────────────────────────────────────────────
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'Geral',
+    items: [
+      { id: 'scales',    label: 'Escalas',    icon: <Calendar size={18} />,        roles: ['SuperAdmin', 'Admin', 'Líder'] },
+      { id: 'cults',     label: 'Cultos',     icon: <Church size={18} />,          roles: ['SuperAdmin', 'Admin', 'Líder', 'Membro'] },
+      { id: 'swaps',     label: 'Trocas',     icon: <Repeat size={18} />,          roles: ['SuperAdmin', 'Admin', 'Líder', 'Membro'] },
+      { id: 'my-panel',  label: 'Meu Painel', icon: <BookOpen size={18} />,        roles: ['SuperAdmin', 'Admin', 'Líder', 'Membro'] },
+    ],
+  },
+  {
+    label: 'Cadastros',
+    items: [
+      { id: 'members',     label: 'Voluntários',    icon: <Users size={18} />,      roles: ['SuperAdmin', 'Admin', 'Líder'] },
+      { id: 'ministries',  label: 'Ministérios',    icon: <Grid3X3 size={18} />,    roles: ['SuperAdmin', 'Admin'] },
+      { id: 'departments', label: 'Departamentos',  icon: <Building2 size={18} />,  roles: ['SuperAdmin', 'Admin'] },
+      { id: 'sectors',     label: 'Setores',        icon: <Layers size={18} />,     roles: ['SuperAdmin', 'Admin'] },
+      { id: 'cult-types',  label: 'Tipos de Culto', icon: <Settings size={18} />,   roles: ['SuperAdmin', 'Admin'] },
+    ],
+  },
+  {
+    label: 'Segurança',
+    items: [
+      { id: 'security',   label: 'Reset de Senha',     icon: <Shield size={18} />,     roles: ['SuperAdmin', 'Admin'] },
+      { id: 'backup',     label: 'Backup',             icon: <Database size={18} />,   roles: ['SuperAdmin', 'Admin'] },
+      { id: 'restore',    label: 'Restaurar Backup',   icon: <RefreshCcw size={18} />, roles: ['SuperAdmin', 'Admin'] },
+      { id: 'activation', label: 'Ativação do Sistema',icon: <KeyRound size={18} />,   roles: ['SuperAdmin', 'Admin', 'Líder', 'Membro'] },
+    ],
+  },
+];
+
+// Lista plana para lookup de label na topbar
+const ALL_NAV_ITEMS = [
+  { id: 'dashboard', label: 'Dashboard' },
+  ...NAV_GROUPS.flatMap(g => g.items),
 ];
 
 interface LayoutProps {
@@ -42,23 +72,23 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // ─── Indicador de conexão real usando eventos do browser ─────────────────────
   const [online, setOnline] = useState(navigator.onLine);
   useEffect(() => {
-    const handleOnline = () => setOnline(true);
-    const handleOffline = () => setOnline(false);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
   }, []);
 
   const { unread, notifications, markRead } = useNotifications(user.member_id);
   const [notifOpen, setNotifOpen] = useState(false);
 
-  const filteredNav = NAV_ITEMS.filter(item => item.roles.includes(user.role));
+  // Filtra grupos e itens pelo role do usuário
+  const filteredGroups = NAV_GROUPS.map(group => ({
+    ...group,
+    items: group.items.filter(item => item.roles.includes(user.role)),
+  })).filter(group => group.items.length > 0);
 
   const Sidebar = ({ mobile = false }: { mobile?: boolean }) => (
     <aside className={clsx(
@@ -86,24 +116,38 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
         )}
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 py-4 px-2 space-y-0.5 overflow-y-auto">
-        {filteredNav.map(item => (
-          <button
-            key={item.id}
-            onClick={() => { setPage(item.id); if (mobile) setMobileOpen(false); }}
-            className={clsx(
-              'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
-              page === item.id
-                ? 'bg-amber-600/20 text-amber-400 border border-amber-600/30'
-                : 'text-stone-400 hover:bg-stone-800 hover:text-stone-200',
-              collapsed && !mobile && 'justify-center px-2'
+      {/* Nav com grupos */}
+      <nav className="flex-1 py-3 px-2 overflow-y-auto space-y-1">
+        {filteredGroups.map(group => (
+          <div key={group.label}>
+            {(!collapsed || mobile) && (
+              <p className="text-stone-600 text-[10px] font-semibold uppercase tracking-widest px-3 pt-3 pb-1 select-none">
+                {group.label}
+              </p>
             )}
-            title={collapsed && !mobile ? item.label : undefined}
-          >
-            {item.icon}
-            {(!collapsed || mobile) && <span>{item.label}</span>}
-          </button>
+            {collapsed && !mobile && (
+              <div className="border-t border-stone-800 my-2" />
+            )}
+            <div className="space-y-0.5">
+              {group.items.map(item => (
+                <button
+                  key={item.id}
+                  onClick={() => { setPage(item.id); if (mobile) setMobileOpen(false); }}
+                  className={clsx(
+                    'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
+                    page === item.id
+                      ? 'bg-amber-600/20 text-amber-400 border border-amber-600/30'
+                      : 'text-stone-400 hover:bg-stone-800 hover:text-stone-200',
+                    collapsed && !mobile && 'justify-center px-2'
+                  )}
+                  title={collapsed && !mobile ? item.label : undefined}
+                >
+                  {item.icon}
+                  {(!collapsed || mobile) && <span>{item.label}</span>}
+                </button>
+              ))}
+            </div>
+          </div>
         ))}
       </nav>
 
@@ -132,12 +176,10 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
 
   return (
     <div className="flex h-screen bg-stone-950 overflow-hidden">
-      {/* Desktop Sidebar */}
       <div className="hidden md:flex">
         <Sidebar />
       </div>
 
-      {/* Mobile overlay */}
       {mobileOpen && (
         <div className="md:hidden fixed inset-0 z-30">
           <div className="absolute inset-0 bg-black/60" onClick={() => setMobileOpen(false)} />
@@ -145,19 +187,16 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
         </div>
       )}
 
-      {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Topbar */}
         <header className="bg-stone-900 border-b border-stone-800 px-4 py-3 flex items-center gap-4 flex-shrink-0">
           <button className="md:hidden text-stone-400 hover:text-stone-200" onClick={() => setMobileOpen(!mobileOpen)}>
             {mobileOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
 
           <h1 className="text-stone-200 font-semibold text-sm capitalize">
-            {NAV_ITEMS.find(n => n.id === page)?.label || page}
+            {ALL_NAV_ITEMS.find(n => n.id === page)?.label || page}
           </h1>
 
-          {/* Banner offline no topo */}
           {!online && (
             <div className="hidden sm:flex items-center gap-1.5 bg-red-900/30 border border-red-700/50 rounded-lg px-3 py-1">
               <WifiOff size={12} className="text-red-400" />
@@ -166,7 +205,6 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
           )}
 
           <div className="ml-auto flex items-center gap-3">
-            {/* Notifications */}
             <div className="relative">
               <button onClick={() => setNotifOpen(!notifOpen)} className="relative text-stone-400 hover:text-stone-200 transition-colors p-1">
                 <Bell size={20} />
@@ -205,7 +243,6 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
           </div>
         </header>
 
-        {/* Page Content */}
         <main className="flex-1 overflow-y-auto p-4 md:p-6">
           {children}
         </main>
