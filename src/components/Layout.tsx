@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import type { AuthUser } from '../types';
 import { useNotifications } from '../hooks/useApi';
+import { useTrialStatus } from '../hooks/useTrialStatus';
 
 type Page = string;
 
@@ -101,6 +102,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
   function toggleTheme() { setTheme(t => t === 'dark' ? 'light' : 'dark'); }
 
   const { unread, notifications, markRead } = useNotifications(user.member_id);
+  const trial = useTrialStatus();
   const [notifOpen, setNotifOpen] = useState(false);
 
   // Filtra grupos e itens pelo role do usuário
@@ -271,6 +273,20 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-6">
+          {/* Trial Banner — visível para todos os roles */}
+          {trial.loaded && trial.isTrial && !trial.isExpired && (
+            <div className="mb-4 bg-amber-900/30 border border-amber-700 rounded-xl px-4 py-3 flex items-center gap-3">
+              <span className="text-amber-400 flex-shrink-0">⏱</span>
+              <p className="text-amber-300 text-sm">
+                <strong>Versão de Teste:</strong> {trial.daysLeft} dia(s) restante(s). Insira uma chave de ativação em Segurança para uso contínuo.
+              </p>
+            </div>
+          )}
+          {trial.loaded && trial.isExpired && (
+            <div className="mb-4 bg-red-900/30 border border-red-700 rounded-xl px-4 py-3 text-center">
+              <p className="text-red-300 font-semibold">Período de teste expirado. Acesse Segurança → Ativação para inserir sua chave.</p>
+            </div>
+          )}
           {children}
         </main>
       </div>
