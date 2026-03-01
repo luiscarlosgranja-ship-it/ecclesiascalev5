@@ -137,12 +137,35 @@ app.post('/api/register', async (req, res) => {
 
 app.post('/api/forgot-password', async (req, res) => {
   const { email } = req.body;
-  const { data: user } = await db.from('users').select('id').eq('email', email).single();
+  if (!email) return res.status(400).json({ message: 'E-mail obrigatório' });
+
+  const { data: user } = await db.from('users').select('id').eq('email', email).maybeSingle();
+  // Resposta genérica para não revelar se o e-mail existe
   if (!user) return res.json({ message: 'Se o e-mail existir, você receberá as instruções.' });
 
   const code = randomBytes(4).toString('hex').toUpperCase();
   const expires = new Date(Date.now() + 3600000).toISOString();
   await db.from('users').update({ two_factor_code: code, two_factor_expires: expires }).eq('id', user.id);
+
+  // ✅ Envia o código por e-mail (se SMTP configurado)
+  try {
+    const { transporter, user: smtpUser } = await getTransporter();
+    await transporter.sendMail({
+      from: `EcclesiaScale <${smtpUser}>`,
+      to: email,
+      subject: 'Código de Recuperação — EcclesiaScale',
+      html: `<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
+        <h2 style="color:#b45309">🔐 Recuperação de Senha</h2>
+        <p>Seu código de recuperação é:</p>
+        <div style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#b45309;background:#1c1917;padding:16px 24px;border-radius:8px;display:inline-block;margin:12px 0">${code}</div>
+        <p style="color:#666;font-size:13px">Este código expira em <strong>1 hora</strong>. Se você não solicitou isso, ignore este e-mail.</p>
+      </div>`,
+    });
+  } catch (err) {
+    // Loga mas não expõe ao usuário — o código ainda fica salvo para uso manual
+    console.error('[forgot-password] Falha ao enviar e-mail:', err.message);
+  }
+
   res.json({ message: 'Se o e-mail existir, você receberá as instruções.' });
 });
 
@@ -820,33 +843,74 @@ app.post('/api/backup', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asyn
   res.json({ message: `Backup realizado em ${new Date().toLocaleString('pt-BR')}`, data: backup });
 });
 
-// Helper: get SMTP transporter from DB settings or env
-async function getTransporter() {
+// Helper: carrega config SMTP do banco ou .env e valida antes de criar transporter
+async function getSmtpConfig() {
   const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
   const { data } = await db.from('settings').select('key,value').in('key', keys);
   const cfg = Object.fromEntries((data || []).map(r => [r.key, r.value]));
-  return nodemailer.createTransport({
-    host: cfg.smtp_host || process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: Number(cfg.smtp_port || process.env.SMTP_PORT || 587),
-    secure: false,
-    auth: {
-      user: cfg.smtp_user || process.env.SMTP_USER,
-      pass: cfg.smtp_pass || process.env.SMTP_PASS,
-    },
-  });
+
+  const host = cfg.smtp_host || process.env.SMTP_HOST;
+  const port = Number(cfg.smtp_port || process.env.SMTP_PORT || 587);
+  const user = cfg.smtp_user || process.env.SMTP_USER;
+  const pass = cfg.smtp_pass || process.env.SMTP_PASS;
+
+  return { host, port, user, pass };
 }
 
-// GET SMTP config (pass masked)
+async function getTransporter() {
+  const { host, port, user, pass } = await getSmtpConfig();
+
+  if (!host || !user || !pass) {
+    throw new Error('SMTP não configurado. Acesse Backup → Config. E-mail e preencha Host, E-mail e Senha.');
+  }
+
+  // porta 465 → SSL direto (secure:true); demais portas → STARTTLS (secure:false)
+  const secure = port === 465;
+
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: { user, pass },
+    tls: { rejectUnauthorized: false }, // aceita certs auto-assinados em dev
+  });
+
+  return { transporter, user };
+}
+
+// GET SMTP config (pass masked) — inclui flag configured para o frontend
 app.get('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
   const { data } = await db.from('settings').select('key,value').in('key', keys);
   const cfg = Object.fromEntries((data || []).map(r => [r.key, r.value]));
+  const host = cfg.smtp_host || '';
+  const user = cfg.smtp_user || '';
   res.json({
-    host: cfg.smtp_host || '',
+    host,
     port: cfg.smtp_port || '587',
-    user: cfg.smtp_user || '',
+    user,
     pass: cfg.smtp_pass ? '••••••••' : '',
+    configured: !!(host && user && cfg.smtp_pass), // ✅ flag para o frontend
   });
+});
+
+// POST /api/settings/smtp/test — verifica conexão SMTP sem enviar e-mail
+app.post('/api/settings/smtp/test', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  try {
+    const { transporter } = await getTransporter();
+    await transporter.verify(); // abre conexão e verifica autenticação
+    res.json({ message: '✅ Conexão SMTP verificada com sucesso!' });
+  } catch (err) {
+    console.error('[smtp/test]', err.message, err.code);
+    const detail =
+      err.message.includes('SMTP não configurado') ? err.message :
+      err.code === 'EAUTH'       ? 'Credenciais inválidas — verifique o e-mail e a senha/App Password.' :
+      err.code === 'ECONNECTION' ? 'Não foi possível conectar — verifique o Host e a Porta.' :
+      err.code === 'ETIMEDOUT'   ? 'Tempo esgotado — verifique o Host e a Porta.' :
+      err.code === 'ESOCKET'     ? 'Erro de socket — tente trocar a porta (587 ↔ 465).' :
+      err.message;
+    res.status(400).json({ message: detail });
+  }
 });
 
 // POST SMTP config (save to settings table)
@@ -913,37 +977,16 @@ app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin', 'Lí
   const { email } = req.body;
   if (!email) return res.status(400).json({ message: 'E-mail destinatário obrigatório' });
 
-  // ✅ Validar se SMTP está configurado antes de tentar enviar
-  const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
-  const { data: smtpRows } = await db.from('settings').select('key,value').in('key', keys);
-  const cfg = Object.fromEntries((smtpRows || []).map(r => [r.key, r.value]));
-
-  const smtpHost = cfg.smtp_host || process.env.SMTP_HOST;
-  const smtpUser = cfg.smtp_user || process.env.SMTP_USER;
-  const smtpPass = cfg.smtp_pass || process.env.SMTP_PASS;
-
-  if (!smtpHost || !smtpUser || !smtpPass) {
-    return res.status(400).json({
-      message: 'SMTP não configurado. Acesse Backup → Config. E-mail e preencha as configurações SMTP antes de enviar.'
-    });
-  }
-
   const backup = await generateBackupData();
   const json = JSON.stringify(backup, null, 2);
   const filename = `backup_ecclesiascale_${new Date().toISOString().slice(0, 10)}.json`;
 
   try {
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: Number(cfg.smtp_port || process.env.SMTP_PORT || 587),
-      secure: false,
-      auth: { user: smtpUser, pass: smtpPass },
-    });
-
+    const { transporter, user: smtpUser } = await getTransporter();
     await transporter.sendMail({
       from: `EcclesiaScale <${smtpUser}>`,
       to: email,
-      subject: `Backup EcclesiaScale - ${new Date().toLocaleDateString('pt-BR')}`,
+      subject: `Backup EcclesiaScale — ${new Date().toLocaleDateString('pt-BR')}`,
       html: `<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
         <h2 style="color:#b45309">📦 Backup EcclesiaScale</h2>
         <p>Segue em anexo o backup do sistema gerado em <strong>${new Date().toLocaleString('pt-BR')}</strong>.</p>
@@ -953,14 +996,15 @@ app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin', 'Lí
     });
     res.json({ message: `Backup enviado para ${email} com sucesso!` });
   } catch (err) {
-    console.error('Erro ao enviar e-mail:', err.message);
-    // Retorna mensagem detalhada para facilitar diagnóstico
-    const detail = err.code === 'EAUTH'
-      ? 'Credenciais inválidas. Verifique o e-mail e senha/app password.'
-      : err.code === 'ECONNECTION' || err.code === 'ETIMEDOUT'
-      ? 'Não foi possível conectar ao servidor SMTP. Verifique o host e a porta.'
-      : err.message;
-    res.status(500).json({ message: `Erro ao enviar: ${detail}` });
+    console.error('[backup/send-email] Erro:', err.message, '| code:', err.code);
+    const detail =
+      err.message.includes('SMTP não configurado') ? err.message :
+      err.code === 'EAUTH'                         ? 'Credenciais inválidas — verifique o e-mail e a senha/App Password.' :
+      err.code === 'ECONNECTION'                   ? 'Não foi possível conectar ao servidor SMTP. Verifique o Host e a Porta.' :
+      err.code === 'ETIMEDOUT'                     ? 'Tempo esgotado ao conectar ao servidor SMTP. Verifique o Host e a Porta.' :
+      err.code === 'ESOCKET'                       ? 'Erro de socket. Tente trocar a porta (587 ↔ 465) ou ative "Acesso a app menos seguro".' :
+      err.message;
+    res.status(500).json({ message: detail });
   }
 });
 

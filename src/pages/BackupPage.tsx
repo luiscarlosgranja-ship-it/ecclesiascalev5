@@ -12,7 +12,7 @@ import { isAdmin } from '../utils/permissions';
 interface Props { user: AuthUser; }
 type Tab = 'backup' | 'restore' | 'email-config';
 
-interface SmtpConfig { host: string; port: string; user: string; pass: string; }
+interface SmtpConfig { host: string; port: string; user: string; pass: string; configured?: boolean; }
 interface RestoreResult { table: string; status: 'ok' | 'error' | 'skipped'; count: number; }
 
 export default function BackupPage({ user }: Props) {
@@ -62,8 +62,14 @@ export default function BackupPage({ user }: Props) {
       .catch(() => {});
 
     if (isAdmin(user.role)) {
-      api.get<SmtpConfig>('/settings/smtp')
-        .then(res => { if (res) { setSmtp(res); setSmtpConfigured(!!(res.host && res.user)); } })
+      api.get<SmtpConfig & { configured?: boolean }>('/settings/smtp')
+        .then(res => {
+          if (res) {
+            setSmtp(res);
+            // ✅ usa flag "configured" retornada pelo servidor (host+user+pass presentes)
+            setSmtpConfigured(res.configured ?? !!(res.host && res.user));
+          }
+        })
         .catch(() => {});
     }
   }, [user.id, user.role]);
@@ -123,13 +129,19 @@ export default function BackupPage({ user }: Props) {
 
   // ─── Testar SMTP ──────────────────────────────────────────────────────────────
   async function testSmtp() {
-    if (!testEmail.trim()) { setTestMsg('Informe um e-mail para teste'); return; }
-    setTesting(true); setTestMsg('');
+    setTesting(true); setTestMsg('Verificando conexão SMTP...');
     try {
-      await api.post('/backup/send-email', { email: testEmail.trim() });
-      setTestMsg('✅ E-mail de teste enviado com sucesso!');
+      // Usa verify() — verifica autenticação sem enviar e-mail
+      const res = await api.post<{ message: string }>('/settings/smtp/test', {});
+      setTestMsg(res.message || '✅ Conexão verificada!');
+      // Se conexão ok e e-mail preenchido, envia e-mail de teste real
+      if (testEmail.trim()) {
+        setSendEmail(testEmail.trim());
+        await api.post('/backup/send-email', { email: testEmail.trim() });
+        setTestMsg('✅ Conexão verificada e e-mail de teste enviado para ' + testEmail.trim());
+      }
     } catch (e) {
-      setTestMsg('❌ ' + (e instanceof Error ? e.message : 'Falha'));
+      setTestMsg('❌ ' + (e instanceof Error ? e.message : 'Falha na conexão SMTP'));
     } finally { setTesting(false); }
   }
 
@@ -412,14 +424,15 @@ export default function BackupPage({ user }: Props) {
 
                 {smtpConfigured && (
                   <div className="border-t border-stone-700 pt-4">
-                    <p className="text-stone-400 text-xs font-medium mb-2">Testar envio</p>
+                    <p className="text-stone-400 text-xs font-medium mb-2">Testar conexão e envio</p>
+                    <p className="text-stone-600 text-xs mb-2">Deixe em branco para verificar só a conexão, ou preencha um e-mail para receber um teste.</p>
                     <div className="flex gap-2">
                       <input type="email" value={testEmail} onChange={e => setTestEmail(e.target.value)}
-                        placeholder="e-mail para teste..."
+                        placeholder="e-mail para teste (opcional)..."
                         className="flex-1 bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm placeholder-stone-500 focus:outline-none focus:border-amber-500" />
                       <Button size="sm" variant="secondary" onClick={testSmtp} loading={testing}>Testar</Button>
                     </div>
-                    {testMsg && <p className={`text-xs mt-2 ${testMsg.startsWith('✅') ? 'text-emerald-400' : 'text-red-400'}`}>{testMsg}</p>}
+                    {testMsg && <p className={`text-xs mt-2 ${testMsg.startsWith('✅') ? 'text-emerald-400' : testMsg.includes('Verificando') ? 'text-amber-400' : 'text-red-400'}`}>{testMsg}</p>}
                   </div>
                 )}
               </div>
