@@ -975,17 +975,15 @@ app.get('/api/settings/gmail/callback', async (req, res) => {
       `);
     }
 
-    oauth2Client.setCredentials({
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      expiry_date: tokens.expiry_date,
-    });
-
-    // Busca o e-mail da conta Google autorizada
-    const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
-    const { data: profile } = await oauth2.userinfo.get({
+    // Busca o e-mail da conta Google autorizada via fetch direto
+    const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
+    if (!userinfoRes.ok) {
+      const errText = await userinfoRes.text();
+      throw new Error(`Falha ao buscar perfil Google: ${errText}`);
+    }
+    const profile = await userinfoRes.json();
 
     console.log('[gmail/callback] e-mail obtido:', profile.email);
 
