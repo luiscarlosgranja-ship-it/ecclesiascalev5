@@ -246,7 +246,7 @@ export default function MembersPage({ user }: Props) {
                         </div>
                       </td>
                       <td className="p-3">
-                        <Badge label={m.role} color={m.role === 'Admin' || m.role === 'SuperAdmin' ? 'red' : m.role === 'Líder' ? 'blue' : 'gray'} />
+                        <Badge label={m.role === 'Secretária' ? 'Secretária(o)' : m.role} color={m.role === 'Admin' || m.role === 'SuperAdmin' ? 'red' : m.role === 'Líder' ? 'blue' : m.role === 'Secretária' ? 'blue' : 'gray'} />
                       </td>
                       <td className="p-3">
                         <Badge label={m.status} color={m.status === 'Ativo' ? 'green' : 'gray'} />
@@ -419,6 +419,7 @@ export default function MembersPage({ user }: Props) {
                 options={[
                   { value: 'Membro', label: 'Membro' },
                   { value: 'Líder', label: 'Líder' },
+                  { value: 'Secretária', label: 'Secretária(o)' },
                   ...(isAdmin(user.role) ? [{ value: 'Admin', label: 'Admin' }] : []),
                 ]}
               />
@@ -437,8 +438,8 @@ export default function MembersPage({ user }: Props) {
               />
             </div>
 
-            {/* Ministérios */}
-            <div>
+            {/* Ministérios — oculto para Secretária */}
+            {editMember.role !== 'Secretária' && <div>
               <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Ministérios</label>
               {(ministries || []).length === 0 ? (
                 <p className="text-stone-600 text-xs">Nenhum ministério cadastrado. Acesse Cadastros → Ministérios.</p>
@@ -465,10 +466,10 @@ export default function MembersPage({ user }: Props) {
                   })}
                 </div>
               )}
-            </div>
+            </div>}
 
-            {/* Disponibilidade */}
-            <div>
+            {/* Disponibilidade — oculta para Secretária */}
+            {editMember.role !== 'Secretária' && <div>
               <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Disponibilidade</label>
               {(cultTypes || []).length === 0 ? (
                 <p className="text-stone-600 text-xs">Nenhum tipo de culto cadastrado. Acesse Cadastros → Tipos de Culto.</p>
@@ -487,7 +488,7 @@ export default function MembersPage({ user }: Props) {
                   ))}
                 </div>
               )}
-            </div>
+            </div>}
 
             {error && <p className="text-red-400 text-xs">{error}</p>}
             <div className="flex gap-3 pt-2">
