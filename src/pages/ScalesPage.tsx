@@ -158,7 +158,27 @@ export default function ScalesPage({ user }: Props) {
 
   async function handlePrint() {
     if (!scales || !selectedCultData) return;
-    await exportScalePDF(scales, selectedCultData, `Escala - ${selectedCultData.name || selectedCultData.type_name}`);
+    await exportScalePDF(
+      scales,
+      selectedCultData,
+      `Escala — ${selectedCultData.type_name || selectedCultData.name || 'Culto'}`,
+    );
+  }
+
+  async function handlePrintMonth() {
+    const month = new Date().toISOString().slice(0, 7);
+    const monthCults = availableCults.filter(c => c.date.startsWith(month));
+    if (monthCults.length === 0) return;
+
+    const token = localStorage.getItem('token') || '';
+    const results = await Promise.all(
+      monthCults.map(c =>
+        fetch(`/api/scales?cult_id=${c.id}`, { headers: { Authorization: `Bearer ${token}` } })
+          .then(r => r.json()).then((s: Scale[]) => s).catch(() => [] as Scale[])
+      )
+    );
+    const allScales = results.flat();
+    await exportScalePDF(allScales, null, `Escalas — ${month}`, allScales, monthCults);
   }
 
   function getCultLabel(c: Cult) {
@@ -188,9 +208,12 @@ export default function ScalesPage({ user }: Props) {
           )}
           {selectedCult && scales && (
             <Button variant="outline" size="sm" onClick={handlePrint}>
-              <Printer size={16} /> Imprimir PDF
+              <Printer size={16} /> Imprimir Culto
             </Button>
           )}
+          <Button variant="outline" size="sm" onClick={handlePrintMonth}>
+            <Printer size={16} /> Imprimir Mês
+          </Button>
         </div>
       </div>
 
