@@ -891,18 +891,75 @@ async function getTransporter(userId) {
   if (refreshToken && gmailEmail) {
     const oauth2Client = getOAuth2Client();
     oauth2Client.setCredentials({ refresh_token: refreshToken });
-    const { token: accessToken } = await oauth2Client.getAccessToken();
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        type: 'OAuth2',
-        user: gmailEmail,
-        clientId: process.env.GMAIL_CLIENT_ID,
-        clientSecret: process.env.GMAIL_CLIENT_SECRET,
-        refreshToken,
-        accessToken,
-      },
-    });
+
+    // Usa Gmail API diretamente (evita bloqueio SMTP do Railway)
+    const sendMailViaGmailAPI = async (mailOptions) => {
+      const { token: accessToken } = await oauth2Client.getAccessToken();
+      // Monta o e-mail no formato RFC 2822
+      const boundary = 'boundary_' + Date.now();
+      let rawEmail;
+
+      if (mailOptions.attachments && mailOptions.attachments.length > 0) {
+        const att = mailOptions.attachments[0];
+        const attContent = typeof att.content === 'string' ? Buffer.from(att.content) : att.content;
+        const attBase64 = attContent.toString('base64');
+        rawEmail = [
+          `From: ${mailOptions.from}`,
+          `To: ${mailOptions.to}`,
+          `Subject: ${mailOptions.subject}`,
+          `MIME-Version: 1.0`,
+          `Content-Type: multipart/mixed; boundary="${boundary}"`,
+          '',
+          `--${boundary}`,
+          `Content-Type: text/html; charset=utf-8`,
+          '',
+          mailOptions.html,
+          '',
+          `--${boundary}`,
+          `Content-Type: ${att.contentType || 'application/octet-stream'}; name="${att.filename}"`,
+          `Content-Disposition: attachment; filename="${att.filename}"`,
+          `Content-Transfer-Encoding: base64`,
+          '',
+          attBase64,
+          '',
+          `--${boundary}--`,
+        ].join('\r\n');
+      } else {
+        rawEmail = [
+          `From: ${mailOptions.from}`,
+          `To: ${mailOptions.to}`,
+          `Subject: ${mailOptions.subject}`,
+          `MIME-Version: 1.0`,
+          `Content-Type: text/html; charset=utf-8`,
+          '',
+          mailOptions.html,
+        ].join('\r\n');
+      }
+
+      const encodedEmail = Buffer.from(rawEmail).toString('base64')
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+      const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ raw: encodedEmail }),
+      });
+
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`Gmail API erro: ${err}`);
+      }
+      return await response.json();
+    };
+
+    // Retorna objeto compatível com nodemailer (mesmo contrato)
+    const transporter = {
+      sendMail: sendMailViaGmailAPI,
+      verify: async () => true, // Gmail API não precisa de verify
+    };
     return { transporter, user: gmailEmail };
   }
 
