@@ -51,7 +51,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         setTempToken(data.tempToken || '');
         setView('2fa');
       } else {
-        if ((data as any).role !== 'Secretária') {
+        if ((data as any).role !== 'Secretaria') {
           setError('Acesso restrito. Use o login de voluntário.');
           return;
         }
@@ -185,7 +185,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                 <div className="border-t border-stone-800 pt-2 mt-1">
                   <button onClick={() => { setView('secretary'); setError(''); setSuccess(''); }} className="text-violet-400 hover:text-violet-300 text-xs transition-colors flex items-center justify-center gap-1.5 w-full">
                     <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
-                    Acesso Secretária
+                    Acesso Secretaria
                   </button>
                 </div>
               </div>
@@ -199,7 +199,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                 <div className="w-7 h-7 rounded-lg bg-violet-700 flex items-center justify-center flex-shrink-0">
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
                 </div>
-                <h2 className="text-stone-200 font-semibold text-lg">Acesso Secretária</h2>
+                <h2 className="text-stone-200 font-semibold text-lg">Acesso Secretaria</h2>
               </div>
               <form onSubmit={handleSecretaryLogin} className="space-y-4">
                 <div>
@@ -229,7 +229,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                 <button type="submit" disabled={loading}
                   className="w-full bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2">
                   {loading && <Loader2 size={16} className="animate-spin" />}
-                  Entrar como Secretária
+                  Entrar como Secretaria
                 </button>
               </form>
               <div className="mt-4 text-center">

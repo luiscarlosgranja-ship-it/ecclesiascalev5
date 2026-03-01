@@ -31,7 +31,7 @@ export default function App() {
       try {
         const u = JSON.parse(stored);
         setUser(u);
-        if (u.role === 'Secretária') setPage('pastoral');
+        if (u.role === 'Secretaria') setPage('pastoral');
       }
       catch { localStorage.removeItem('ecclesia_user'); }
     }
@@ -40,7 +40,7 @@ export default function App() {
   function handleLogin(u: AuthUser) {
     localStorage.setItem('ecclesia_user', JSON.stringify(u));
     setUser(u);
-    if (u.role === 'Secretária') setPage('pastoral');
+    if (u.role === 'Secretaria') setPage('pastoral');
   }
 
   function handleLogout() {

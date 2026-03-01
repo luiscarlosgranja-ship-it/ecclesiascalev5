@@ -44,7 +44,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: 'dashboard',  label: 'Dashboard',           icon: <LayoutDashboard size={18} />, roles: ['SuperAdmin','Admin','Líder','Membro'] },
   { id: 'my-panel',   label: 'Meu Painel',           icon: <BookOpen size={18} />,        roles: ['SuperAdmin','Admin','Líder','Membro'] },
-  { id: 'pastoral',   label: 'Atend. Pastoral',      icon: <CalendarClock size={18} />,   roles: ['SuperAdmin','Admin','Secretária'] },
+  { id: 'pastoral',   label: 'Atend. Pastoral',      icon: <CalendarClock size={18} />,   roles: ['SuperAdmin','Admin','Secretaria'] },
   { id: 'scales',     label: 'Escalas',              icon: <Calendar size={18} />,        roles: ['SuperAdmin','Admin','Líder'] },
   { id: 'cults',      label: 'Cultos / Eventos',     icon: <Layers size={18} />,          roles: ['SuperAdmin','Admin'] },
   { id: 'members',    label: 'Voluntários',          icon: <Users size={18} />,           roles: ['SuperAdmin','Admin','Líder'] },
@@ -97,7 +97,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
     )}>
       {/* Logo */}
       <div className={clsx('flex items-center gap-3 px-4 py-5 border-b border-stone-800', collapsed && !mobile && 'justify-center px-2')}>
-        <button onClick={() => setPage(user.role === 'Secretária' ? 'pastoral' : 'dashboard')} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+        <button onClick={() => setPage(user.role === 'Secretaria' ? 'pastoral' : 'dashboard')} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
           {logo ? (
               <div className="w-8 h-8 rounded-lg overflow-hidden bg-stone-800 border border-stone-700 flex items-center justify-center flex-shrink-0">
                 <img src={logo} alt="Logo" className="w-full h-full object-contain p-0.5" />
