@@ -129,8 +129,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         {/* Logo */}
         <div className="text-center mb-8">
           {logoUrl ? (
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl shadow-lg mb-4 overflow-hidden bg-stone-800 border border-stone-700">
-              <img src={logoUrl} alt="Logo" className="w-full h-full object-contain p-1" />
+            <div className="inline-flex items-center justify-center w-16 h-16 mb-4">
+              <img src={logoUrl} alt="Logo" className="w-16 h-16 object-contain rounded-2xl" style={{ background: 'transparent' }} />
             </div>
           ) : (
             <div className="inline-flex items-center justify-center w-16 h-16 bg-amber-600 rounded-2xl shadow-lg mb-4">

@@ -543,9 +543,7 @@ export default function BackupPage(props: Props) {
                 {/* Sidebar */}
                 <div className="bg-stone-950 border border-stone-700 rounded-xl p-3 flex flex-col items-center gap-2">
                   {logoPreview ? (
-                    <div className="w-8 h-8 rounded-lg overflow-hidden bg-stone-800 border border-stone-700">
-                      <img src={logoPreview} alt="Logo" className="w-full h-full object-contain p-0.5" />
-                    </div>
+                    <img src={logoPreview} alt="Logo" className="w-8 h-8 object-contain rounded-lg" style={{ background: 'transparent' }} />
                   ) : (
                     <div className="w-8 h-8 rounded-lg bg-amber-600 flex items-center justify-center">
                       <span className="text-white font-bold text-sm">E</span>
@@ -556,9 +554,7 @@ export default function BackupPage(props: Props) {
                 {/* Login */}
                 <div className="bg-stone-950 border border-stone-700 rounded-xl p-3 flex flex-col items-center gap-2">
                   {logoPreview ? (
-                    <div className="w-12 h-12 rounded-2xl overflow-hidden bg-stone-800 border border-stone-700">
-                      <img src={logoPreview} alt="Logo" className="w-full h-full object-contain p-1" />
-                    </div>
+                    <img src={logoPreview} alt="Logo" className="w-12 h-12 object-contain rounded-2xl" style={{ background: 'transparent' }} />
                   ) : (
                     <div className="w-12 h-12 rounded-2xl bg-amber-600 flex items-center justify-center">
                       <span className="text-white font-bold text-xl">E</span>
@@ -569,7 +565,7 @@ export default function BackupPage(props: Props) {
                 {/* PDF */}
                 <div className="bg-white border border-stone-300 rounded-xl p-3 flex flex-col items-center gap-2">
                   {logoPreview ? (
-                    <img src={logoPreview} alt="Logo" className="w-10 h-10 object-contain" />
+                    <img src={logoPreview} alt="Logo" className="w-10 h-10 object-contain" style={{ background: 'transparent' }} />
                   ) : (
                     <div className="w-10 h-10 bg-stone-900 rounded flex items-center justify-center">
                       <span className="text-white font-bold">E</span>
