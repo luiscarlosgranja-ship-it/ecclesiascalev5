@@ -977,17 +977,36 @@ app.get('/api/settings/gmail/callback', async (req, res) => {
       `);
     }
 
-    // Busca o e-mail da conta Google autorizada via fetch direto
-    const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-      headers: { Authorization: `Bearer ${tokens.access_token}` },
-    });
-    if (!userinfoRes.ok) {
-      const errText = await userinfoRes.text();
-      throw new Error(`Falha ao buscar perfil Google: ${errText}`);
+    // Tenta buscar e-mail em múltiplos endpoints
+    let profileEmail = null;
+    const endpoints = [
+      'https://www.googleapis.com/oauth2/v2/userinfo',
+      'https://openidconnect.googleapis.com/v1/userinfo',
+      'https://www.googleapis.com/userinfo/v2/me',
+    ];
+    for (const url of endpoints) {
+      console.log('[gmail/callback] tentando endpoint:', url);
+      try {
+        const r = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${tokens.access_token}`,
+            'Accept': 'application/json',
+          },
+        });
+        const body = await r.text();
+        console.log('[gmail/callback] resposta', url, r.status, body.substring(0, 200));
+        if (r.ok) {
+          const json = JSON.parse(body);
+          profileEmail = json.email;
+          break;
+        }
+      } catch(e) {
+        console.log('[gmail/callback] erro no endpoint', url, e.message);
+      }
     }
-    const profile = await userinfoRes.json();
+    if (!profileEmail) throw new Error('Não foi possível obter o e-mail do Google. Verifique os escopos e a conectividade.');
 
-    console.log('[gmail/callback] e-mail obtido:', profile.email);
+    console.log('[gmail/callback] e-mail obtido:', profileEmail);
 
     // Salva refresh_token e e-mail no banco por userId
     await db.from('settings').upsert(
@@ -995,7 +1014,7 @@ app.get('/api/settings/gmail/callback', async (req, res) => {
       { onConflict: 'key' }
     );
     await db.from('settings').upsert(
-      { key: `gmail_email_user_${userId}`, value: profile.email },
+      { key: `gmail_email_user_${userId}`, value: profileEmail },
       { onConflict: 'key' }
     );
 
