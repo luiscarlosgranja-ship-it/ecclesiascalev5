@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Plus, Edit, Trash2, CalendarClock, Clock, User, FileText, CheckCircle, XCircle, RefreshCw, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, Edit, Trash2, CalendarClock, Clock, User, FileText, CheckCircle, XCircle, RefreshCw, Loader2, KeyRound, Shield, ShieldCheck } from 'lucide-react';
 import { Card, Button, Modal, Input, Badge } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
@@ -7,7 +7,7 @@ import type { AuthUser, PastoralAppointment } from '../types';
 
 interface Props { user: AuthUser; }
 
-type Tab = 'upcoming' | 'history';
+type Tab = 'upcoming' | 'history' | 'activation';
 
 const STATUS_COLOR: Record<string, 'green' | 'yellow' | 'red' | 'blue' | 'gray'> = {
   'Agendado':   'blue',
@@ -34,6 +34,32 @@ export default function PastoralPage({ user }: Props) {
   const [newDate, setNewDate] = useState('');
   const [newTime, setNewTime] = useState('');
   const [rescheduling, setRescheduling] = useState(false);
+
+  // ─── Ativação ────────────────────────────────────────────────────────────────
+  const [activationKey, setActivationKey] = useState('');
+  const [activating, setActivating] = useState(false);
+  const [activateMsg, setActivateMsg] = useState('');
+  const [isActivated, setIsActivated] = useState(false);
+
+  // Verifica se já está ativado ao montar
+  useEffect(() => {
+    api.get<{ isActive: boolean; isTrial: boolean }>('/settings/trial')
+      .then(res => { if (res?.isActive && !res?.isTrial) setIsActivated(true); })
+      .catch(() => {});
+  }, []);
+
+  async function activateSystem() {
+    if (!activationKey.trim()) return;
+    setActivating(true); setActivateMsg('');
+    try {
+      await api.post('/activation-codes/activate', { code: activationKey.trim() });
+      setActivateMsg('✅ Sistema ativado com sucesso! Obrigado.');
+      setIsActivated(true);
+      setActivationKey('');
+    } catch (e) {
+      setActivateMsg('❌ ' + (e instanceof Error ? e.message : 'Chave inválida ou expirada'));
+    } finally { setActivating(false); }
+  }
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -152,6 +178,11 @@ export default function PastoralPage({ user }: Props) {
           <FileText size={14} /> Histórico
           <span className="text-xs opacity-60">({history.length})</span>
         </button>
+        <button onClick={() => setTab('activation')}
+          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === 'activation' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
+          <KeyRound size={14} /> Ativar Sistema
+          {isActivated && <ShieldCheck size={13} className="text-emerald-400" />}
+        </button>
       </div>
 
       {/* Lista */}
@@ -228,6 +259,69 @@ export default function PastoralPage({ user }: Props) {
           </div>
         )}
       </Card>
+
+      {/* ─── Aba: Ativar Sistema ─────────────────────────────────────────────────── */}
+      {tab === 'activation' && (
+        <div className="max-w-md space-y-4">
+          <div className="bg-stone-900 border border-stone-700 rounded-2xl p-6 space-y-5">
+
+            {/* Status atual */}
+            {isActivated ? (
+              <div className="flex items-center gap-3 bg-emerald-900/20 border border-emerald-700/40 rounded-xl px-4 py-3">
+                <ShieldCheck size={20} className="text-emerald-400 flex-shrink-0" />
+                <div>
+                  <p className="text-emerald-300 font-semibold text-sm">Sistema Ativado</p>
+                  <p className="text-emerald-600 text-xs mt-0.5">Sua licença está ativa. Nenhuma ação necessária.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 bg-amber-900/20 border border-amber-700/40 rounded-xl px-4 py-3">
+                <Shield size={20} className="text-amber-400 flex-shrink-0" />
+                <div>
+                  <p className="text-amber-300 font-semibold text-sm">Período de Teste</p>
+                  <p className="text-amber-600 text-xs mt-0.5">Insira a chave de ativação para liberar o acesso completo.</p>
+                </div>
+              </div>
+            )}
+
+            {/* Formulário de ativação */}
+            {!isActivated && (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 block flex items-center gap-1.5">
+                    <KeyRound size={12} /> Chave de Ativação
+                  </label>
+                  <input
+                    type="text"
+                    value={activationKey}
+                    onChange={e => setActivationKey(e.target.value.toUpperCase())}
+                    onKeyDown={e => e.key === 'Enter' && activateSystem()}
+                    placeholder="Cole a chave recebida aqui..."
+                    className="w-full bg-stone-800 border border-stone-600 rounded-xl px-4 py-3 text-stone-100 text-sm font-mono tracking-widest focus:outline-none focus:border-amber-500 placeholder-stone-600"
+                  />
+                </div>
+
+                {activateMsg && (
+                  <p className={`text-sm px-3 py-2 rounded-lg border ${
+                    activateMsg.startsWith('✅')
+                      ? 'text-emerald-300 bg-emerald-900/20 border-emerald-700/40'
+                      : 'text-red-300 bg-red-900/20 border-red-700/40'
+                  }`}>{activateMsg}</p>
+                )}
+
+                <Button onClick={activateSystem} loading={activating} disabled={!activationKey.trim()}>
+                  <Shield size={15} /> Ativar Sistema
+                </Button>
+              </div>
+            )}
+
+            {/* Instrução */}
+            <p className="text-stone-600 text-xs border-t border-stone-800 pt-4">
+              A chave de ativação é fornecida pelo administrador do sistema. Entre em contato caso não tenha recebido.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Modal: Novo / Editar */}
       <Modal open={modalOpen} onClose={() => setModalOpen(false)}
