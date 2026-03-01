@@ -7,6 +7,7 @@ import { randomBytes } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
+import { google } from 'googleapis';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -865,45 +866,137 @@ app.post('/api/backup', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asyn
   res.json({ message: `Backup realizado em ${new Date().toLocaleString('pt-BR')}`, data: backup });
 });
 
-// Helper: carrega config SMTP do perfil do usuário logado
-async function getSmtpConfig(userId) {
+// ─── Gmail OAuth2 helper ──────────────────────────────────────────────────────
+function getOAuth2Client() {
+  return new google.auth.OAuth2(
+    process.env.GMAIL_CLIENT_ID,
+    process.env.GMAIL_CLIENT_SECRET,
+    process.env.GMAIL_REDIRECT_URI  // ex: https://seu-app.railway.app/api/settings/gmail/callback
+  );
+}
+
+// Retorna transporter nodemailer usando Gmail API OAuth2 (se configurado)
+// ou fallback para SMTP convencional
+async function getTransporter(userId) {
+  // ── Tenta Gmail OAuth2 primeiro ──────────────────────────────────────────────
   const keys = [
+    `gmail_refresh_token_user_${userId}`,
+    `gmail_email_user_${userId}`,
+  ];
+  const { data: oauthData } = await db.from('settings').select('key,value').in('key', keys);
+  const oauthCfg = Object.fromEntries((oauthData || []).map(r => [r.key, r.value]));
+  const refreshToken = oauthCfg[`gmail_refresh_token_user_${userId}`];
+  const gmailEmail   = oauthCfg[`gmail_email_user_${userId}`];
+
+  if (refreshToken && gmailEmail) {
+    const oauth2Client = getOAuth2Client();
+    oauth2Client.setCredentials({ refresh_token: refreshToken });
+    const { token: accessToken } = await oauth2Client.getAccessToken();
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        type: 'OAuth2',
+        user: gmailEmail,
+        clientId: process.env.GMAIL_CLIENT_ID,
+        clientSecret: process.env.GMAIL_CLIENT_SECRET,
+        refreshToken,
+        accessToken,
+      },
+    });
+    return { transporter, user: gmailEmail };
+  }
+
+  // ── Fallback: SMTP convencional ───────────────────────────────────────────────
+  const smtpKeys = [
     `smtp_host_user_${userId}`,
     `smtp_port_user_${userId}`,
     `smtp_user_user_${userId}`,
     `smtp_pass_user_${userId}`,
   ];
-  const { data } = await db.from('settings').select('key,value').in('key', keys);
-  const cfg = Object.fromEntries((data || []).map(r => [r.key, r.value]));
-
+  const { data: smtpData } = await db.from('settings').select('key,value').in('key', smtpKeys);
+  const cfg = Object.fromEntries((smtpData || []).map(r => [r.key, r.value]));
   const host = cfg[`smtp_host_user_${userId}`];
   const port = Number(cfg[`smtp_port_user_${userId}`] || 587);
   const user = cfg[`smtp_user_user_${userId}`];
   const pass = cfg[`smtp_pass_user_${userId}`];
 
-  return { host, port, user, pass };
-}
-
-async function getTransporter(userId) {
-  const { host, port, user, pass } = await getSmtpConfig(userId);
-
   if (!host || !user || !pass) {
-    throw new Error('SMTP não configurado. Acesse Backup → Config. E-mail e preencha Host, E-mail e Senha.');
+    throw new Error('E-mail não configurado. Acesse Backup → Config. E-mail e conecte o Gmail ou configure o SMTP.');
   }
 
-  // porta 465 → SSL direto (secure:true); demais portas → STARTTLS (secure:false)
   const secure = port === 465;
-
   const transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure,
+    host, port, secure,
     auth: { user, pass },
     tls: { rejectUnauthorized: false },
   });
-
   return { transporter, user };
 }
+
+// ─── Gmail OAuth2 — iniciar autenticação ─────────────────────────────────────
+app.get('/api/settings/gmail/auth', auth, requireRole('SuperAdmin', 'Admin'), (req, res) => {
+  const oauth2Client = getOAuth2Client();
+  const url = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    prompt: 'consent',
+    scope: ['https://mail.google.com/'],
+    state: String(req.user.id), // passa userId para recuperar no callback
+  });
+  res.json({ url });
+});
+
+// ─── Gmail OAuth2 — callback (recebe code do Google) ─────────────────────────
+app.get('/api/settings/gmail/callback', async (req, res) => {
+  const { code, state: userId } = req.query;
+  if (!code || !userId) return res.status(400).send('Parâmetros inválidos.');
+  try {
+    const oauth2Client = getOAuth2Client();
+    const { tokens } = await oauth2Client.getToken(code);
+    oauth2Client.setCredentials(tokens);
+
+    // Busca o e-mail da conta Google autorizada
+    const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+    const { data: profile } = await oauth2.userinfo.get();
+
+    // Salva refresh_token e e-mail no banco por userId
+    await db.from('settings').upsert(
+      { key: `gmail_refresh_token_user_${userId}`, value: tokens.refresh_token },
+      { onConflict: 'key' }
+    );
+    await db.from('settings').upsert(
+      { key: `gmail_email_user_${userId}`, value: profile.email },
+      { onConflict: 'key' }
+    );
+
+    // Redireciona de volta para o painel com sucesso
+    res.send(`<script>window.close(); window.opener && window.opener.postMessage('gmail_connected', '*');</script>
+      <p>✅ Gmail conectado com sucesso! Pode fechar esta janela.</p>`);
+  } catch (err) {
+    console.error('[gmail/callback]', err.message);
+    res.status(500).send('Erro ao conectar Gmail: ' + err.message);
+  }
+});
+
+// ─── Gmail OAuth2 — status da conexão ────────────────────────────────────────
+app.get('/api/settings/gmail/status', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const userId = req.user.id;
+  const { data } = await db.from('settings').select('key,value')
+    .in('key', [`gmail_refresh_token_user_${userId}`, `gmail_email_user_${userId}`]);
+  const cfg = Object.fromEntries((data || []).map(r => [r.key, r.value]));
+  const email = cfg[`gmail_email_user_${userId}`] || null;
+  const connected = !!(cfg[`gmail_refresh_token_user_${userId}`] && email);
+  res.json({ connected, email });
+});
+
+// ─── Gmail OAuth2 — desconectar ───────────────────────────────────────────────
+app.delete('/api/settings/gmail', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const userId = req.user.id;
+  await db.from('settings').delete().in('key', [
+    `gmail_refresh_token_user_${userId}`,
+    `gmail_email_user_${userId}`,
+  ]);
+  res.json({ message: 'Gmail desconectado.' });
+});
 
 // GET SMTP config do usuário logado (pass masked)
 app.get('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
@@ -928,19 +1021,19 @@ app.get('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (r
   });
 });
 
-// POST /api/settings/smtp/test — verifica conexão SMTP sem enviar e-mail
+// POST /api/settings/smtp/test — verifica conexão (Gmail OAuth2 ou SMTP)
 app.post('/api/settings/smtp/test', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   try {
     const { transporter } = await getTransporter(req.user.id);
     await transporter.verify();
-    res.json({ message: '✅ Conexão SMTP verificada com sucesso!' });
+    res.json({ message: '✅ Conexão verificada com sucesso!' });
   } catch (err) {
     console.error('[smtp/test]', err.message, err.code);
     const detail =
-      err.message.includes('SMTP não configurado') ? err.message :
+      err.message.includes('não configurado') ? err.message :
       err.code === 'EAUTH'       ? 'Credenciais inválidas — verifique o e-mail e a senha/App Password.' :
       err.code === 'ECONNECTION' ? 'Não foi possível conectar — verifique o Host e a Porta.' :
-      err.code === 'ETIMEDOUT'   ? 'Tempo esgotado — verifique o Host e a Porta.' :
+      err.code === 'ETIMEDOUT'   ? 'Tempo esgotado — Railway bloqueia SMTP. Use a opção Conectar Gmail.' :
       err.code === 'ESOCKET'     ? 'Erro de socket — tente trocar a porta (587 ↔ 465).' :
       err.message;
     res.status(400).json({ message: detail });

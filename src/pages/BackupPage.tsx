@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Database, Download, Mail, Save, Send, CheckCircle,
   Settings, Eye, EyeOff, AlertTriangle, Upload, RotateCcw,
-  CheckSquare, XCircle,
+  CheckSquare, XCircle, Link, Link2Off, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { Card, Button, Input, Modal } from '../components/ui';
 import api from '../utils/api';
@@ -14,6 +14,7 @@ type Tab = 'backup' | 'restore' | 'email-config';
 
 interface SmtpConfig { host: string; port: string; user: string; pass: string; configured?: boolean; }
 interface RestoreResult { table: string; status: 'ok' | 'error' | 'skipped'; count: number; }
+interface GmailStatus { connected: boolean; email: string | null; }
 
 export default function BackupPage({ user }: Props) {
   const [tab, setTab] = useState<Tab>('backup');
@@ -45,6 +46,12 @@ export default function BackupPage({ user }: Props) {
   const [testing, setTesting] = useState(false);
   const [testMsg, setTestMsg] = useState('');
 
+  // ─── Gmail OAuth2 ─────────────────────────────────────────────────────────────
+  const [gmail, setGmail] = useState<GmailStatus>({ connected: false, email: null });
+  const [loadingGmail, setLoadingGmail] = useState(false);
+  const [gmailMsg, setGmailMsg] = useState('');
+  const [showSmtpFallback, setShowSmtpFallback] = useState(false);
+
   // ─── Restauração ─────────────────────────────────────────────────────────────
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [restoreData, setRestoreData] = useState<any>(null);
@@ -70,6 +77,10 @@ export default function BackupPage({ user }: Props) {
             setSmtpConfigured(res.configured ?? !!(res.host && res.user));
           }
         })
+        .catch(() => {});
+      // Carrega status Gmail OAuth2
+      api.get<GmailStatus>('/settings/gmail/status')
+        .then(res => { if (res) setGmail(res); })
         .catch(() => {});
     }
   }, [user.id, user.role]);
@@ -112,6 +123,37 @@ export default function BackupPage({ user }: Props) {
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Erro ao salvar');
     } finally { setSavingMyEmail(false); }
+  }
+
+  // ─── Conectar Gmail OAuth2 ────────────────────────────────────────────────────
+  async function connectGmail() {
+    setLoadingGmail(true); setGmailMsg('');
+    try {
+      const res = await api.get<{ url: string }>('/settings/gmail/auth');
+      if (!res?.url) throw new Error('URL de autenticação não retornada');
+      const popup = window.open(res.url, 'gmail_auth', 'width=500,height=600');
+      // Escuta mensagem de sucesso da janela popup
+      const handler = (e: MessageEvent) => {
+        if (e.data === 'gmail_connected') {
+          window.removeEventListener('message', handler);
+          popup?.close();
+          api.get<GmailStatus>('/settings/gmail/status')
+            .then(s => { if (s) { setGmail(s); setGmailMsg('✅ Gmail conectado com sucesso!'); } })
+            .catch(() => {});
+        }
+      };
+      window.addEventListener('message', handler);
+    } catch (e) {
+      setGmailMsg('❌ ' + (e instanceof Error ? e.message : 'Erro ao conectar Gmail'));
+    } finally { setLoadingGmail(false); }
+  }
+
+  async function disconnectGmail() {
+    try {
+      await api.delete('/settings/gmail');
+      setGmail({ connected: false, email: null });
+      setGmailMsg('Gmail desconectado.');
+    } catch { setGmailMsg('Erro ao desconectar.'); }
   }
 
   // ─── Salvar SMTP ──────────────────────────────────────────────────────────────
@@ -203,7 +245,7 @@ export default function BackupPage({ user }: Props) {
         {[
           { id: 'backup', label: 'Fazer Backup', icon: <Database size={14} /> },
           ...(isAdmin(user.role) ? [{ id: 'restore', label: 'Restaurar', icon: <RotateCcw size={14} /> }] : []),
-          { id: 'email-config', label: 'Config. E-mail', icon: <Mail size={14} />, alert: isAdmin(user.role) && !smtpConfigured },
+          { id: 'email-config', label: 'Config. E-mail', icon: <Mail size={14} />, alert: isAdmin(user.role) && !smtpConfigured && !gmail.connected },
         ].map((t: any) => (
           <button key={t.id} onClick={() => setTab(t.id as Tab)}
             className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === t.id ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
@@ -216,7 +258,7 @@ export default function BackupPage({ user }: Props) {
       {/* ─── Aba: Fazer Backup ──────────────────────────────────────────────────── */}
       {tab === 'backup' && (
         <div className="space-y-4 max-w-md">
-          {isAdmin(user.role) && !smtpConfigured && (
+          {isAdmin(user.role) && !smtpConfigured && !gmail.connected && (
             <div className="flex items-start gap-3 bg-amber-900/20 border border-amber-700/50 rounded-xl px-4 py-3">
               <AlertTriangle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
               <p className="text-amber-300 text-xs">
@@ -354,24 +396,64 @@ export default function BackupPage({ user }: Props) {
       {tab === 'email-config' && (
         <div className="space-y-6 max-w-lg">
 
-          {/* SMTP — apenas Admin */}
+          {/* Config. E-mail — apenas Admin */}
           {isAdmin(user.role) && (
             <Card className="p-6">
               <div className="flex items-center gap-3 mb-1">
-                <Settings className="text-amber-400" size={20} />
-                <p className="text-stone-200 font-semibold">Configuração SMTP</p>
-                {smtpConfigured && (
+                <Mail className="text-amber-400" size={20} />
+                <p className="text-stone-200 font-semibold">Configuração de E-mail</p>
+                {(gmail.connected || smtpConfigured) && (
                   <span className="ml-auto flex items-center gap-1 text-emerald-400 text-xs">
                     <CheckCircle size={13} /> Configurado
                   </span>
                 )}
               </div>
-              <p className="text-stone-500 text-xs mb-5">Servidor de e-mail para envio de backups e recuperação de senha.</p>
+              <p className="text-stone-500 text-xs mb-5">Necessário para envio de backups e recuperação de senha.</p>
 
-              <div className="space-y-4">
-                {/* Presets */}
-                <div>
-                  <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Servidor pré-configurado</label>
+              {/* Opção 1: Gmail OAuth2 */}
+              <div className="bg-stone-800/60 border border-stone-700 rounded-xl p-4 mb-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center flex-shrink-0">
+                    <svg viewBox="0 0 24 24" width="16" height="16"><path fill="#EA4335" d="M5.266 9.765A7.077 7.077 0 0 1 12 4.909c1.69 0 3.218.6 4.418 1.582L19.91 3C17.782 1.145 15.055 0 12 0 7.27 0 3.198 2.698 1.24 6.65l4.026 3.115z"/><path fill="#34A853" d="M16.04 18.013c-1.09.703-2.474 1.078-4.04 1.078a7.077 7.077 0 0 1-6.723-4.823l-4.04 3.067A11.965 11.965 0 0 0 12 24c2.933 0 5.735-1.043 7.834-3l-3.793-2.987z"/><path fill="#4A90D9" d="M19.834 21c2.195-2.048 3.62-5.096 3.62-9 0-.71-.109-1.473-.272-2.182H12v4.637h6.436c-.317 1.559-1.17 2.766-2.395 3.558L19.834 21z"/><path fill="#FBBC05" d="M5.277 14.268A7.12 7.12 0 0 1 4.909 12c0-.782.125-1.533.357-2.235L1.24 6.65A11.934 11.934 0 0 0 0 12c0 1.92.445 3.73 1.237 5.335l4.04-3.067z"/></svg>
+                  </div>
+                  <div>
+                    <p className="text-stone-200 text-sm font-medium">Conectar via Gmail</p>
+                    <p className="text-stone-500 text-xs">Recomendado — funciona no Railway sem bloqueios</p>
+                  </div>
+                  {gmail.connected && (
+                    <span className="ml-auto flex items-center gap-1 bg-emerald-900/30 border border-emerald-700/40 rounded-lg px-2 py-1 text-emerald-400 text-xs">
+                      <CheckCircle size={11} /> Conectado
+                    </span>
+                  )}
+                </div>
+                {gmail.connected && gmail.email ? (
+                  <div className="flex items-center justify-between bg-stone-900 rounded-lg px-3 py-2">
+                    <span className="text-amber-300 text-sm">{gmail.email}</span>
+                    <button onClick={disconnectGmail} className="flex items-center gap-1.5 text-red-400 hover:text-red-300 text-xs transition-colors">
+                      <Link2Off size={13} /> Desconectar
+                    </button>
+                  </div>
+                ) : (
+                  <Button onClick={connectGmail} loading={loadingGmail} size="sm">
+                    <Link size={14} /> Conectar Gmail
+                  </Button>
+                )}
+                {gmailMsg && (
+                  <p className={`text-xs mt-2 ${gmailMsg.startsWith('✅') ? 'text-emerald-400' : 'text-red-400'}`}>{gmailMsg}</p>
+                )}
+              </div>
+
+              {/* Opção 2: SMTP manual */}
+              <button
+                onClick={() => setShowSmtpFallback(v => !v)}
+                className="flex items-center gap-2 text-stone-500 hover:text-stone-300 text-xs transition-colors w-full mb-2"
+              >
+                {showSmtpFallback ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                Configuração SMTP manual (avançado)
+              </button>
+
+              {showSmtpFallback && (
+                <div className="space-y-4 border border-stone-700 rounded-xl p-4">
                   <div className="flex flex-wrap gap-2">
                     {[
                       { label: 'Gmail', host: 'smtp.gmail.com', port: '587' },
@@ -384,58 +466,48 @@ export default function BackupPage({ user }: Props) {
                       </button>
                     ))}
                   </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="col-span-2">
-                    <Input label="Host SMTP *" value={smtp.host} onChange={e => setSmtp(s => ({ ...s, host: e.target.value }))} placeholder="smtp.gmail.com" />
-                  </div>
-                  <Input label="Porta" value={smtp.port} onChange={e => setSmtp(s => ({ ...s, port: e.target.value }))} placeholder="587" />
-                </div>
-
-                <Input label="E-mail remetente *" type="email" value={smtp.user} onChange={e => setSmtp(s => ({ ...s, user: e.target.value }))} placeholder="seuemail@gmail.com" />
-
-                <div className="relative">
-                  <Input
-                    label="Senha / App Password *"
-                    type={showPass ? 'text' : 'password'}
-                    value={smtp.pass}
-                    onChange={e => setSmtp(s => ({ ...s, pass: e.target.value }))}
-                    placeholder={smtp.pass === '••••••••' ? 'Deixe em branco para manter' : 'Senha ou App Password'}
-                  />
-                  <button type="button" onClick={() => setShowPass(!showPass)}
-                    className="absolute right-3 bottom-2 text-stone-500 hover:text-stone-300 transition-colors">
-                    {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
-                  </button>
-                </div>
-
-                {smtp.host.includes('gmail') && (
-                  <div className="bg-blue-900/20 border border-blue-700/40 rounded-lg px-3 py-2 text-xs text-blue-300">
-                    💡 Para Gmail use uma <strong>App Password</strong>: Conta Google → Segurança → Verificação em 2 etapas → Senhas de app.
-                  </div>
-                )}
-
-                {smtpError && <p className="text-red-400 text-xs">{smtpError}</p>}
-
-                <div className="flex items-center gap-3 flex-wrap">
-                  <Button onClick={saveSmtp} loading={savingSmtp}><Save size={15} /> Salvar SMTP</Button>
-                  {smtpSaved && <span className="flex items-center gap-1.5 text-emerald-400 text-sm"><CheckCircle size={14} /> Salvo!</span>}
-                </div>
-
-                {smtpConfigured && (
-                  <div className="border-t border-stone-700 pt-4">
-                    <p className="text-stone-400 text-xs font-medium mb-2">Testar conexão e envio</p>
-                    <p className="text-stone-600 text-xs mb-2">Deixe em branco para verificar só a conexão, ou preencha um e-mail para receber um teste.</p>
-                    <div className="flex gap-2">
-                      <input type="email" value={testEmail} onChange={e => setTestEmail(e.target.value)}
-                        placeholder="e-mail para teste (opcional)..."
-                        className="flex-1 bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm placeholder-stone-500 focus:outline-none focus:border-amber-500" />
-                      <Button size="sm" variant="secondary" onClick={testSmtp} loading={testing}>Testar</Button>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="col-span-2">
+                      <Input label="Host SMTP *" value={smtp.host} onChange={e => setSmtp(s => ({ ...s, host: e.target.value }))} placeholder="smtp.gmail.com" />
                     </div>
-                    {testMsg && <p className={`text-xs mt-2 ${testMsg.startsWith('✅') ? 'text-emerald-400' : testMsg.includes('Verificando') ? 'text-amber-400' : 'text-red-400'}`}>{testMsg}</p>}
+                    <Input label="Porta" value={smtp.port} onChange={e => setSmtp(s => ({ ...s, port: e.target.value }))} placeholder="587" />
                   </div>
-                )}
-              </div>
+                  <Input label="E-mail remetente *" type="email" value={smtp.user} onChange={e => setSmtp(s => ({ ...s, user: e.target.value }))} placeholder="seuemail@gmail.com" />
+                  <div className="relative">
+                    <Input
+                      label="Senha / App Password *"
+                      type={showPass ? 'text' : 'password'}
+                      value={smtp.pass}
+                      onChange={e => setSmtp(s => ({ ...s, pass: e.target.value }))}
+                      placeholder={smtp.pass === '••••••••' ? 'Deixe em branco para manter' : 'Senha ou App Password'}
+                    />
+                    <button type="button" onClick={() => setShowPass(!showPass)}
+                      className="absolute right-3 bottom-2 text-stone-500 hover:text-stone-300 transition-colors">
+                      {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  </div>
+                  {smtpError && <p className="text-red-400 text-xs">{smtpError}</p>}
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <Button onClick={saveSmtp} loading={savingSmtp}><Save size={15} /> Salvar SMTP</Button>
+                    {smtpSaved && <span className="flex items-center gap-1.5 text-emerald-400 text-sm"><CheckCircle size={14} /> Salvo!</span>}
+                  </div>
+                </div>
+              )}
+
+              {/* Testar conexão */}
+              {(gmail.connected || smtpConfigured) && (
+                <div className="border-t border-stone-700 pt-4 mt-4">
+                  <p className="text-stone-400 text-xs font-medium mb-2">Testar conexão e envio</p>
+                  <p className="text-stone-600 text-xs mb-2">Deixe em branco para verificar só a conexão, ou preencha um e-mail para receber um teste.</p>
+                  <div className="flex gap-2">
+                    <input type="email" value={testEmail} onChange={e => setTestEmail(e.target.value)}
+                      placeholder="e-mail para teste (opcional)..."
+                      className="flex-1 bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm placeholder-stone-500 focus:outline-none focus:border-amber-500" />
+                    <Button size="sm" variant="secondary" onClick={testSmtp} loading={testing}>Testar</Button>
+                  </div>
+                  {testMsg && <p className={`text-xs mt-2 ${testMsg.startsWith('✅') ? 'text-emerald-400' : testMsg.includes('Verificando') ? 'text-amber-400' : 'text-red-400'}`}>{testMsg}</p>}
+                </div>
+              )}
             </Card>
           )}
 
@@ -469,7 +541,7 @@ export default function BackupPage({ user }: Props) {
         <div className="space-y-4">
           <p className="text-stone-400 text-sm">Backup gerado! Confirme o e-mail para envio:</p>
           <Input label="E-mail destinatário *" type="email" value={sendEmail} onChange={e => setSendEmail(e.target.value)} placeholder="seuemail@exemplo.com" />
-          {isAdmin(user.role) && !smtpConfigured && (
+          {isAdmin(user.role) && !smtpConfigured && !gmail.connected && (
             <div className="flex items-center gap-2 bg-amber-900/20 border border-amber-700/40 rounded-lg px-3 py-2">
               <AlertTriangle size={13} className="text-amber-400" />
               <p className="text-amber-300 text-xs">SMTP não configurado. O envio irá falhar.</p>
