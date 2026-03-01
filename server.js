@@ -7,7 +7,6 @@ import { randomBytes } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
-import { google } from 'googleapis';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -24,28 +23,6 @@ const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 const PORT = process.env.PORT || 3000;
-
-// ─── Auto-inicializa trial se não existir ─────────────────────────────────────
-async function ensureTrialInitialized() {
-  try {
-    const { data: activated } = await db.from('settings').select('value').eq('key', 'activated').single();
-    if (activated?.value === '1') return; // já ativado, não precisa checar trial
-
-    const { data: trial } = await db.from('settings').select('value').eq('key', 'trial_expires').single();
-    if (!trial) {
-      const trialEnd = new Date();
-      trialEnd.setDate(trialEnd.getDate() + 7);
-      await db.from('settings').insert({ key: 'trial_expires', value: trialEnd.toISOString() });
-      console.log('\u23f1\ufe0f  Trial de 7 dias iniciado. Expira em:', trialEnd.toLocaleDateString('pt-BR'));
-    } else {
-      const expires = new Date(trial.value);
-      const daysLeft = Math.max(0, Math.ceil((expires - new Date()) / 86400000));
-      console.log(`\u23f1\ufe0f  Trial: ${daysLeft} dia(s) restante(s) (expira ${expires.toLocaleDateString('pt-BR')})`);
-    }
-  } catch (e) {
-    console.warn('⚠️  Não foi possível verificar trial (Supabase indisponível?):', e.message);
-  }
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function auth(req, res, next) {
@@ -138,46 +115,12 @@ app.post('/api/register', async (req, res) => {
 
 app.post('/api/forgot-password', async (req, res) => {
   const { email } = req.body;
-  if (!email) return res.status(400).json({ message: 'E-mail obrigatório' });
-
-  const { data: user } = await db.from('users').select('id').eq('email', email).maybeSingle();
-  // Resposta genérica para não revelar se o e-mail existe
+  const { data: user } = await db.from('users').select('id').eq('email', email).single();
   if (!user) return res.json({ message: 'Se o e-mail existir, você receberá as instruções.' });
 
   const code = randomBytes(4).toString('hex').toUpperCase();
   const expires = new Date(Date.now() + 3600000).toISOString();
   await db.from('users').update({ two_factor_code: code, two_factor_expires: expires }).eq('id', user.id);
-
-  // ✅ Envia o código por e-mail (usa SMTP do primeiro SuperAdmin/Admin com SMTP configurado)
-  try {
-    // Busca o id do primeiro admin com SMTP configurado
-    const { data: adminUsers } = await db.from('users').select('id').in('role', ['SuperAdmin', 'Admin']);
-    let transporter, smtpUser;
-    for (const admin of (adminUsers || [])) {
-      try {
-        const result = await getTransporter(admin.id);
-        transporter = result.transporter;
-        smtpUser = result.user;
-        break;
-      } catch { /* sem SMTP, tenta próximo */ }
-    }
-    if (!transporter) throw new Error('Nenhum admin com SMTP configurado encontrado.');
-    await transporter.sendMail({
-      from: `EcclesiaScale <${smtpUser}>`,
-      to: email,
-      subject: 'Código de Recuperação — EcclesiaScale',
-      html: `<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
-        <h2 style="color:#b45309">🔐 Recuperação de Senha</h2>
-        <p>Seu código de recuperação é:</p>
-        <div style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#b45309;background:#1c1917;padding:16px 24px;border-radius:8px;display:inline-block;margin:12px 0">${code}</div>
-        <p style="color:#666;font-size:13px">Este código expira em <strong>1 hora</strong>. Se você não solicitou isso, ignore este e-mail.</p>
-      </div>`,
-    });
-  } catch (err) {
-    // Loga mas não expõe ao usuário — o código ainda fica salvo para uso manual
-    console.error('[forgot-password] Falha ao enviar e-mail:', err.message);
-  }
-
   res.json({ message: 'Se o e-mail existir, você receberá as instruções.' });
 });
 
@@ -201,13 +144,7 @@ app.get('/api/settings/trial', async (req, res) => {
   if (activated?.value === '1') return res.json({ isActive: true, isTrial: false, daysLeft: 999, isExpired: false, message: 'Ativo' });
 
   const { data: trial } = await db.from('settings').select('value').eq('key', 'trial_expires').single();
-  // Se não existe registro de trial, cria agora com 7 dias e retorna como trial ativo
-  if (!trial) {
-    const trialEnd = new Date();
-    trialEnd.setDate(trialEnd.getDate() + 7);
-    await db.from('settings').insert({ key: 'trial_expires', value: trialEnd.toISOString() });
-    return res.json({ isActive: true, isTrial: true, daysLeft: 7, isExpired: false, message: '7 dia(s) restante(s)' });
-  }
+  if (!trial) return res.json({ isActive: true, isTrial: false, daysLeft: 999, isExpired: false, message: '' });
 
   const expires = new Date(trial.value);
   const now = new Date();
@@ -288,17 +225,12 @@ app.post('/api/members', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asy
 
   if (error) return res.status(500).json({ message: error.message });
 
-  let defaultPassword = null;
-  let userCreated = false;
-
   if (email) {
+    // ✅ CORREÇÃO: Verifica se usuário já existe antes de criar, evitando sobrescrever senha
     const { data: existingUser } = await db.from('users').select('id').eq('email', email).maybeSingle();
     if (!existingUser) {
-      // ✅ Gera senha padrão e retorna ao Admin para informar ao membro
-      defaultPassword = 'EcclesiaScale@' + member.id;
-      const hash = bcrypt.hashSync(defaultPassword, 10);
+      const hash = bcrypt.hashSync('EcclesiaScale@' + member.id, 10);
       await db.from('users').insert({ email, password: hash, role: role || 'Membro', member_id: member.id });
-      userCreated = true;
     }
   }
 
@@ -306,15 +238,7 @@ app.post('/api/members', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asy
     await db.from('member_ministries').upsert(ministries.map(min => ({ member_id: member.id, ministry_id: min.id })), { ignoreDuplicates: true });
   }
 
-  res.json({
-    id: member.id,
-    message: 'Membro criado',
-    user_created: userCreated,
-    default_password: defaultPassword,
-    login_info: userCreated
-      ? `Acesso criado! E-mail: ${email} | Senha inicial: ${defaultPassword} | Oriente o voluntário a trocar a senha no primeiro acesso.`
-      : null,
-  });
+  res.json({ id: member.id, message: 'Membro criado' });
 });
 
 app.put('/api/members/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
@@ -326,19 +250,11 @@ app.put('/api/members/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), 
     role, department_id: department_id || null, status, is_active: is_active ?? true
   }).eq('id', req.params.id);
 
-  // ✅ Atualiza usuário existente OU cria se e-mail foi adicionado agora
+  // ✅ CORREÇÃO: Atualiza apenas role e is_active do usuário, NUNCA a senha
   if (email && role) {
     const { data: existingUser } = await db.from('users').select('id').eq('email', email).maybeSingle();
     if (existingUser) {
-      // Usuário já existe: atualiza role e status, NUNCA a senha
       await db.from('users').update({ role, is_active: is_active ?? true }).eq('id', existingUser.id);
-    } else {
-      // ✅ Novo e-mail adicionado ao membro: cria acesso com senha padrão
-      const memberId = req.params.id;
-      const defaultPassword = 'EcclesiaScale@' + memberId;
-      const hash = bcrypt.hashSync(defaultPassword, 10);
-      await db.from('users').insert({ email, password: hash, role: role || 'Membro', member_id: Number(memberId), is_active: is_active ?? true });
-      console.log(`[users] Acesso criado para membro ${memberId} via PUT. Senha inicial: ${defaultPassword}`);
     }
   }
 
@@ -353,9 +269,22 @@ app.put('/api/members/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), 
 });
 
 // ─── Users ────────────────────────────────────────────────────────────────────
-app.put('/api/users/:id/password', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+app.put('/api/users/:id/password', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { password } = req.body;
   if (!password || password.length < 8) return res.status(400).json({ message: 'Senha deve ter mínimo 8 caracteres' });
+
+  // Líder só pode alterar senha de membros do seu próprio departamento
+  if (req.user.role === 'Líder') {
+    const { data: leaderMember } = await db.from('members').select('department_id').eq('id', req.user.member_id).single();
+    const { data: targetUser } = await db.from('users').select('member_id').eq('id', req.params.id).single();
+    if (targetUser?.member_id) {
+      const { data: targetMember } = await db.from('members').select('department_id').eq('id', targetUser.member_id).single();
+      if (!leaderMember || !targetMember || leaderMember.department_id !== targetMember.department_id) {
+        return res.status(403).json({ message: 'Você só pode alterar a senha de membros do seu departamento' });
+      }
+    }
+  }
+
   const hash = bcrypt.hashSync(password, 10);
   await db.from('users').update({ password: hash }).eq('id', req.params.id);
   res.json({ message: 'Senha alterada' });
@@ -563,7 +492,6 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
   const { type, cult_id, month } = req.body;
   const today = new Date().toISOString().slice(0, 10);
 
-  // ─── Busca cultos conforme o tipo de geração ──────────────────────────────────
   let cultsQuery = db.from('cults').select('*').eq('status', 'Agendado');
   if (type === 'month' && month) cultsQuery = cultsQuery.like('date', `${month}%`);
   else if (cult_id) cultsQuery = cultsQuery.eq('id', cult_id);
@@ -574,89 +502,29 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
   const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
 
   let created = 0;
-  let skippedUnavailable = 0;
 
   for (const cult of cults || []) {
     const monthStr = cult.date.slice(0, 7);
-
-    // ✅ Descobre o dia da semana do culto (0=Dom, 1=Seg ... 6=Sab)
-    // Usa UTC para evitar problemas de fuso horário ao parsear 'YYYY-MM-DD'
-    const [cy, cm, cd] = cult.date.split('-').map(Number);
-    const cultDayOfWeek = new Date(Date.UTC(cy, cm - 1, cd)).getUTCDay();
-
     for (const sector of sectors || []) {
       for (const member of members || []) {
-        // ── Verifica se já está escalado neste culto ──────────────────────────
-        const { data: alreadyInCult } = await db.from('scales')
-          .select('id').eq('cult_id', cult.id).eq('member_id', member.id).maybeSingle();
+        const { data: alreadyInCult } = await db.from('scales').select('id').eq('cult_id', cult.id).eq('member_id', member.id).maybeSingle();
         if (alreadyInCult) continue;
 
-        // ✅ Verifica disponibilidade do membro para o dia da semana do culto
-        // availability é um objeto { [cult_type_id ou day_of_week]: boolean }
-        // O campo armazenado pode ser string (JSON) ou objeto — normaliza aqui
-        let availability = member.availability;
-        if (typeof availability === 'string') {
-          try { availability = JSON.parse(availability); } catch { availability = {}; }
-        }
-        availability = availability || {};
-
-        // Verifica disponibilidade pelo type_id do culto (se existir)
-        // E também pelo dia da semana como fallback
-        const availableByType = cult.type_id != null
-          ? availability[cult.type_id] === true || availability[String(cult.type_id)] === true
-          : true;
-
-        const availableByDay = availability[cultDayOfWeek] === true
-          || availability[String(cultDayOfWeek)] === true;
-
-        // Se a disponibilidade foi cadastrada por tipo de culto, usa o tipo.
-        // Se foi por dia da semana, usa o dia. Se o objeto estiver vazio,
-        // considera disponível (membro sem restrição cadastrada).
-        const hasAnyAvailability = Object.keys(availability).length > 0;
-
-        if (hasAnyAvailability) {
-          // Tenta primeiro pelo type_id; se não tiver type_id, tenta pelo dia
-          const isAvailable = cult.type_id != null ? availableByType : availableByDay;
-          if (!isAvailable) {
-            skippedUnavailable++;
-            continue; // ← pula membro indisponível
-          }
-        }
-        // Se availability estiver vazio ({}) → sem restrição → pode ser escalado
-
-        // ── Verifica limite mensal (máx 3x por mês) ───────────────────────────
         const { count: monthCount } = await db.from('scales')
           .select('*, cults!inner(date)', { count: 'exact', head: true })
           .eq('member_id', member.id)
-          .neq('status', 'Recusado')
           .like('cults.date', `${monthStr}%`);
 
         if (monthCount >= 3) continue;
 
-        // ── Escala o membro ───────────────────────────────────────────────────
         await db.from('scales').insert({ cult_id: cult.id, member_id: member.id, sector_id: sector.id });
-
-        // ── Notifica o voluntário escalado
-        const { data: userToNotify } = await db.from('users').select('id').eq('member_id', member.id).maybeSingle();
-        if (userToNotify) {
-          const sectorName = sector.name || 'setor';
-          const cultDate = cult.date || '';
-          const cultTime = cult.time ? ' às ' + cult.time : '';
-          const cultName = cult.name || 'culto';
-          await notify(userToNotify.id, 'Nova Escala',
-            `Você foi escalado para ${sectorName} no culto "${cultName}" em ${cultDate}${cultTime}`);
-        }
         created++;
-        break; // um membro por setor por culto
+        break; // one member per sector per cult
       }
     }
   }
 
-  res.json({
-    message: `${created} escala(s) gerada(s)${skippedUnavailable > 0 ? ` · ${skippedUnavailable} voluntário(s) pulado(s) por indisponibilidade` : ''}`,
-    created,
-    skipped_unavailable: skippedUnavailable,
-  });
+  res.json({ message: `${created} escala(s) gerada(s)` });
 });
 
 // ─── Swaps ────────────────────────────────────────────────────────────────────
@@ -829,336 +697,53 @@ async function generateBackupData() {
   return backup;
 }
 
-// ─── Backup Email Config (por usuário) ───────────────────────────────────────
-// GET  /api/settings/backup-email?user_id=X  → retorna e-mail configurado
-app.get('/api/settings/backup-email', auth, async (req, res) => {
-  const { user_id } = req.query;
-  if (!user_id) return res.status(400).json({ message: 'user_id obrigatório' });
-
-  // Apenas o próprio usuário ou admin pode ver
-  if (Number(user_id) !== req.user.id && !isAdmin(req.user.role)) {
-    return res.status(403).json({ message: 'Acesso negado' });
-  }
-
-  const key = `backup_email_user_${user_id}`;
-  const { data } = await db.from('settings').select('value').eq('key', key).maybeSingle();
-  res.json({ value: data?.value || null });
-});
-
-// POST /api/settings/backup-email  → salva e-mail do usuário
-app.post('/api/settings/backup-email', auth, async (req, res) => {
-  const { user_id, email } = req.body;
-  if (!user_id || !email) return res.status(400).json({ message: 'user_id e email obrigatórios' });
-
-  // Apenas o próprio usuário ou admin pode salvar
-  if (Number(user_id) !== req.user.id && !isAdmin(req.user.role)) {
-    return res.status(403).json({ message: 'Acesso negado' });
-  }
-
-  const key = `backup_email_user_${user_id}`;
-  await db.from('settings').upsert({ key, value: email }, { onConflict: 'key' });
-  res.json({ message: 'E-mail salvo com sucesso!' });
-});
-
 // ─── Backup ───────────────────────────────────────────────────────────────────
 app.post('/api/backup', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const backup = await generateBackupData();
   res.json({ message: `Backup realizado em ${new Date().toLocaleString('pt-BR')}`, data: backup });
 });
 
-// ─── Gmail OAuth2 helper ──────────────────────────────────────────────────────
-function getOAuth2Client() {
-  return new google.auth.OAuth2(
-    process.env.GMAIL_CLIENT_ID,
-    process.env.GMAIL_CLIENT_SECRET,
-    process.env.GMAIL_REDIRECT_URI  // ex: https://seu-app.railway.app/api/settings/gmail/callback
-  );
-}
-
-// Retorna transporter nodemailer usando Gmail API OAuth2 (se configurado)
-// ou fallback para SMTP convencional
-async function getTransporter(userId) {
-  // ── Tenta Gmail OAuth2 primeiro ──────────────────────────────────────────────
-  const keys = [
-    `gmail_refresh_token_user_${userId}`,
-    `gmail_email_user_${userId}`,
-  ];
-  const { data: oauthData } = await db.from('settings').select('key,value').in('key', keys);
-  const oauthCfg = Object.fromEntries((oauthData || []).map(r => [r.key, r.value]));
-  const refreshToken = oauthCfg[`gmail_refresh_token_user_${userId}`];
-  const gmailEmail   = oauthCfg[`gmail_email_user_${userId}`];
-
-  if (refreshToken && gmailEmail) {
-    const oauth2Client = getOAuth2Client();
-    oauth2Client.setCredentials({ refresh_token: refreshToken });
-
-    // Usa Gmail API diretamente (evita bloqueio SMTP do Railway)
-    const sendMailViaGmailAPI = async (mailOptions) => {
-      const { token: accessToken } = await oauth2Client.getAccessToken();
-      // Monta o e-mail no formato RFC 2822
-      const boundary = 'boundary_' + Date.now();
-      let rawEmail;
-
-      if (mailOptions.attachments && mailOptions.attachments.length > 0) {
-        const att = mailOptions.attachments[0];
-        const attContent = typeof att.content === 'string' ? Buffer.from(att.content) : att.content;
-        const attBase64 = attContent.toString('base64');
-        rawEmail = [
-          `From: ${mailOptions.from}`,
-          `To: ${mailOptions.to}`,
-          `Subject: ${mailOptions.subject}`,
-          `MIME-Version: 1.0`,
-          `Content-Type: multipart/mixed; boundary="${boundary}"`,
-          '',
-          `--${boundary}`,
-          `Content-Type: text/html; charset=utf-8`,
-          '',
-          mailOptions.html,
-          '',
-          `--${boundary}`,
-          `Content-Type: ${att.contentType || 'application/octet-stream'}; name="${att.filename}"`,
-          `Content-Disposition: attachment; filename="${att.filename}"`,
-          `Content-Transfer-Encoding: base64`,
-          '',
-          attBase64,
-          '',
-          `--${boundary}--`,
-        ].join('\r\n');
-      } else {
-        rawEmail = [
-          `From: ${mailOptions.from}`,
-          `To: ${mailOptions.to}`,
-          `Subject: ${mailOptions.subject}`,
-          `MIME-Version: 1.0`,
-          `Content-Type: text/html; charset=utf-8`,
-          '',
-          mailOptions.html,
-        ].join('\r\n');
-      }
-
-      const encodedEmail = Buffer.from(rawEmail).toString('base64')
-        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-
-      const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ raw: encodedEmail }),
-      });
-
-      if (!response.ok) {
-        const err = await response.text();
-        throw new Error(`Gmail API erro: ${err}`);
-      }
-      return await response.json();
-    };
-
-    // Retorna objeto compatível com nodemailer (mesmo contrato)
-    const transporter = {
-      sendMail: sendMailViaGmailAPI,
-      verify: async () => true, // Gmail API não precisa de verify
-    };
-    return { transporter, user: gmailEmail };
-  }
-
-  // ── Fallback: SMTP convencional ───────────────────────────────────────────────
-  const smtpKeys = [
-    `smtp_host_user_${userId}`,
-    `smtp_port_user_${userId}`,
-    `smtp_user_user_${userId}`,
-    `smtp_pass_user_${userId}`,
-  ];
-  const { data: smtpData } = await db.from('settings').select('key,value').in('key', smtpKeys);
-  const cfg = Object.fromEntries((smtpData || []).map(r => [r.key, r.value]));
-  const host = cfg[`smtp_host_user_${userId}`];
-  const port = Number(cfg[`smtp_port_user_${userId}`] || 587);
-  const user = cfg[`smtp_user_user_${userId}`];
-  const pass = cfg[`smtp_pass_user_${userId}`];
-
-  if (!host || !user || !pass) {
-    throw new Error('E-mail não configurado. Acesse Backup → Config. E-mail e conecte o Gmail ou configure o SMTP.');
-  }
-
-  const secure = port === 465;
-  const transporter = nodemailer.createTransport({
-    host, port, secure,
-    auth: { user, pass },
-    tls: { rejectUnauthorized: false },
-  });
-  return { transporter, user };
-}
-
-// ─── Gmail OAuth2 — iniciar autenticação ─────────────────────────────────────
-app.get('/api/settings/gmail/auth', auth, requireRole('SuperAdmin', 'Admin'), (req, res) => {
-  const oauth2Client = getOAuth2Client();
-  const url = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
-    prompt: 'consent',
-    scope: ['https://mail.google.com/', 'openid', 'email', 'profile'],
-    state: String(req.user.id), // passa userId para recuperar no callback
-  });
-  res.json({ url });
-});
-
-// ─── Gmail OAuth2 — callback (recebe code do Google) ─────────────────────────
-app.get('/api/settings/gmail/callback', async (req, res) => {
-  const { code, state: userId } = req.query;
-  if (!code || !userId) return res.status(400).send('Parâmetros inválidos.');
-  try {
-    const oauth2Client = getOAuth2Client();
-    const { tokens } = await oauth2Client.getToken(code);
-
-    console.log('[gmail/callback] tokens recebidos:', JSON.stringify({
-      has_access_token: !!tokens.access_token,
-      access_token_preview: tokens.access_token ? tokens.access_token.substring(0, 20) + '...' : 'NULL',
-      has_refresh_token: !!tokens.refresh_token,
-      has_id_token: !!tokens.id_token,
-      id_token_preview: tokens.id_token ? tokens.id_token.substring(0, 30) + '...' : 'NULL',
-      expiry_date: tokens.expiry_date,
-      token_type: tokens.token_type,
-      scope: tokens.scope,
-    }));
-
-    if (!tokens.refresh_token) {
-      return res.status(400).send(`
-        <html><body style="font-family:sans-serif;max-width:480px;margin:40px auto;padding:24px">
-          <h2 style="color:#b45309">⚠️ Erro ao conectar Gmail</h2>
-          <p>O Google não retornou o token de autenticação necessário.</p>
-          <p>Para resolver:</p>
-          <ol>
-            <li>Acesse <a href="https://myaccount.google.com/permissions" target="_blank">myaccount.google.com/permissions</a></li>
-            <li>Encontre e remova o acesso do app <strong>EcclesiaScale</strong></li>
-            <li>Volte ao painel e tente conectar o Gmail novamente</li>
-          </ol>
-          <p><button onclick="window.close()">Fechar</button></p>
-        </html>
-      `);
-    }
-
-    // Extrai e-mail do id_token (JWT) sem precisar de requisição externa
-    let profileEmail = null;
-    if (tokens.id_token) {
-      try {
-        const payload = JSON.parse(Buffer.from(tokens.id_token.split('.')[1], 'base64').toString('utf8'));
-        profileEmail = payload.email;
-        console.log('[gmail/callback] e-mail extraído do id_token:', profileEmail);
-      } catch(e) {
-        console.log('[gmail/callback] erro ao decodificar id_token:', e.message);
-      }
-    }
-    // Fallback: tenta userinfo se id_token não tiver e-mail
-    if (!profileEmail) {
-      try {
-        const r = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-          headers: { Authorization: `Bearer ${tokens.access_token}` },
-        });
-        if (r.ok) {
-          const json = await r.json();
-          profileEmail = json.email;
-        }
-      } catch(e) {
-        console.log('[gmail/callback] userinfo fallback falhou:', e.message);
-      }
-    }
-    if (!profileEmail) throw new Error('Não foi possível obter o e-mail do Google.');
-    console.log('[gmail/callback] e-mail obtido:', profileEmail);
-
-    // Salva refresh_token e e-mail no banco por userId
-    await db.from('settings').upsert(
-      { key: `gmail_refresh_token_user_${userId}`, value: tokens.refresh_token },
-      { onConflict: 'key' }
-    );
-    await db.from('settings').upsert(
-      { key: `gmail_email_user_${userId}`, value: profileEmail },
-      { onConflict: 'key' }
-    );
-
-    // Redireciona de volta para o painel com sucesso
-    res.send(`<script>window.close(); window.opener && window.opener.postMessage('gmail_connected', '*');</script>
-      <p>✅ Gmail conectado com sucesso! Pode fechar esta janela.</p>`);
-  } catch (err) {
-    console.error('[gmail/callback] ERRO:', err.message, err.stack);
-    res.status(500).send('Erro ao conectar Gmail: ' + err.message);
-  }
-});
-
-// ─── Gmail OAuth2 — status da conexão ────────────────────────────────────────
-app.get('/api/settings/gmail/status', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
-  const userId = req.user.id;
-  const { data } = await db.from('settings').select('key,value')
-    .in('key', [`gmail_refresh_token_user_${userId}`, `gmail_email_user_${userId}`]);
-  const cfg = Object.fromEntries((data || []).map(r => [r.key, r.value]));
-  const email = cfg[`gmail_email_user_${userId}`] || null;
-  const connected = !!(cfg[`gmail_refresh_token_user_${userId}`] && email);
-  res.json({ connected, email });
-});
-
-// ─── Gmail OAuth2 — desconectar ───────────────────────────────────────────────
-app.delete('/api/settings/gmail', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
-  const userId = req.user.id;
-  await db.from('settings').delete().in('key', [
-    `gmail_refresh_token_user_${userId}`,
-    `gmail_email_user_${userId}`,
-  ]);
-  res.json({ message: 'Gmail desconectado.' });
-});
-
-// GET SMTP config do usuário logado (pass masked)
-app.get('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
-  const userId = req.user.id;
-  const keys = [
-    `smtp_host_user_${userId}`,
-    `smtp_port_user_${userId}`,
-    `smtp_user_user_${userId}`,
-    `smtp_pass_user_${userId}`,
-  ];
+// Helper: get SMTP transporter from DB settings or env
+async function getTransporter() {
+  const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
   const { data } = await db.from('settings').select('key,value').in('key', keys);
   const cfg = Object.fromEntries((data || []).map(r => [r.key, r.value]));
-  const host = cfg[`smtp_host_user_${userId}`] || '';
-  const user = cfg[`smtp_user_user_${userId}`] || '';
-  const pass = cfg[`smtp_pass_user_${userId}`];
+  return nodemailer.createTransport({
+    host: cfg.smtp_host || process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: Number(cfg.smtp_port || process.env.SMTP_PORT || 587),
+    secure: false,
+    auth: {
+      user: cfg.smtp_user || process.env.SMTP_USER,
+      pass: cfg.smtp_pass || process.env.SMTP_PASS,
+    },
+  });
+}
+
+// GET SMTP config (pass masked)
+app.get('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
+  const { data } = await db.from('settings').select('key,value').in('key', keys);
+  const cfg = Object.fromEntries((data || []).map(r => [r.key, r.value]));
   res.json({
-    host,
-    port: cfg[`smtp_port_user_${userId}`] || '587',
-    user,
-    pass: pass ? '••••••••' : '',
-    configured: !!(host && user && pass),
+    host: cfg.smtp_host || '',
+    port: cfg.smtp_port || '587',
+    user: cfg.smtp_user || '',
+    pass: cfg.smtp_pass ? '••••••••' : '',
   });
 });
 
-// POST /api/settings/smtp/test — verifica conexão (Gmail OAuth2 ou SMTP)
-app.post('/api/settings/smtp/test', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
-  try {
-    const { transporter } = await getTransporter(req.user.id);
-    await transporter.verify();
-    res.json({ message: '✅ Conexão verificada com sucesso!' });
-  } catch (err) {
-    console.error('[smtp/test]', err.message, err.code);
-    const detail =
-      err.message.includes('não configurado') ? err.message :
-      err.code === 'EAUTH'       ? 'Credenciais inválidas — verifique o e-mail e a senha/App Password.' :
-      err.code === 'ECONNECTION' ? 'Não foi possível conectar — verifique o Host e a Porta.' :
-      err.code === 'ETIMEDOUT'   ? 'Tempo esgotado — Railway bloqueia SMTP. Use a opção Conectar Gmail.' :
-      err.code === 'ESOCKET'     ? 'Erro de socket — tente trocar a porta (587 ↔ 465).' :
-      err.message;
-    res.status(400).json({ message: detail });
-  }
-});
-
-// POST SMTP config (salva por usuário logado)
+// POST SMTP config (save to settings table)
 app.post('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const { host, port, user, pass } = req.body;
-  const userId = req.user.id;
   if (!host || !user) return res.status(400).json({ message: 'Host e e-mail são obrigatórios' });
 
   const entries = [
-    { key: `smtp_host_user_${userId}`, value: host },
-    { key: `smtp_port_user_${userId}`, value: String(port || '587') },
-    { key: `smtp_user_user_${userId}`, value: user },
+    { key: 'smtp_host', value: host },
+    { key: 'smtp_port', value: String(port || '587') },
+    { key: 'smtp_user', value: user },
   ];
-  if (pass && pass !== '••••••••') entries.push({ key: `smtp_pass_user_${userId}`, value: pass });
+  // Only update pass if a real value was sent (not the masked placeholder)
+  if (pass && pass !== '••••••••') entries.push({ key: 'smtp_pass', value: pass });
 
   for (const entry of entries) {
     await db.from('settings').upsert(entry, { onConflict: 'key' });
@@ -1206,8 +791,8 @@ app.post('/api/backup/restore', auth, requireRole('SuperAdmin', 'Admin'), async 
   });
 });
 
-// POST send backup by email — aberto para SuperAdmin, Admin e Líder
-app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
+// POST send backup by email
+app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ message: 'E-mail destinatário obrigatório' });
 
@@ -1215,13 +800,17 @@ app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin', 'Lí
   const json = JSON.stringify(backup, null, 2);
   const filename = `backup_ecclesiascale_${new Date().toISOString().slice(0, 10)}.json`;
 
+  // Get SMTP user for "from" field before creating transporter
+  const { data: smtpCfg } = await db.from('settings').select('key,value').in('key', ['smtp_user']);
+  const fromEmail = smtpCfg?.[0]?.value || process.env.SMTP_USER || '';
+
   try {
-    const { transporter, user: smtpUser } = await getTransporter(req.user.id);
+    const transporter = await getTransporter();
     await transporter.sendMail({
-      from: `EcclesiaScale <${smtpUser}>`,
+      from: `EcclesiaScale <${fromEmail}>`,
       to: email,
-      subject: `Backup EcclesiaScale — ${new Date().toLocaleDateString('pt-BR')}`,
-      html: `<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
+      subject: `Backup EcclesiaScale - ${new Date().toLocaleDateString('pt-BR')}`,
+      html: `<div style="font-family:sans-serif;max-width:480px;margin:auto">
         <h2 style="color:#b45309">📦 Backup EcclesiaScale</h2>
         <p>Segue em anexo o backup do sistema gerado em <strong>${new Date().toLocaleString('pt-BR')}</strong>.</p>
         <p style="color:#666;font-size:13px">Este e-mail foi enviado automaticamente. Guarde o arquivo em local seguro.</p>
@@ -1230,15 +819,8 @@ app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin', 'Lí
     });
     res.json({ message: `Backup enviado para ${email} com sucesso!` });
   } catch (err) {
-    console.error('[backup/send-email] Erro:', err.message, '| code:', err.code);
-    const detail =
-      err.message.includes('SMTP não configurado') ? err.message :
-      err.code === 'EAUTH'                         ? 'Credenciais inválidas — verifique o e-mail e a senha/App Password.' :
-      err.code === 'ECONNECTION'                   ? 'Não foi possível conectar ao servidor SMTP. Verifique o Host e a Porta.' :
-      err.code === 'ETIMEDOUT'                     ? 'Tempo esgotado ao conectar ao servidor SMTP. Verifique o Host e a Porta.' :
-      err.code === 'ESOCKET'                       ? 'Erro de socket. Tente trocar a porta (587 ↔ 465) ou ative "Acesso a app menos seguro".' :
-      err.message;
-    res.status(500).json({ message: detail });
+    console.error('Erro ao enviar e-mail:', err);
+    res.status(500).json({ message: 'Erro ao enviar e-mail. Verifique as configurações SMTP na aba Config. E-mail.' });
   }
 });
 
@@ -1246,17 +828,13 @@ app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin', 'Lí
 if (process.env.NODE_ENV === 'production') {
   const distPath = path.join(__dirname, 'dist');
   app.use(express.static(distPath));
-  // Compatível com Express 4 e 5
-  app.use((req, res, next) => {
-    if (req.path.startsWith('/api')) return next();
-    res.sendFile(path.join(distPath, 'index.html'));
+  app.get('/*path', (req, res) => {
+    if (!req.path.startsWith('/api')) res.sendFile(path.join(distPath, 'index.html'));
   });
 }
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
   console.log(`\n🚀 EcclesiaScale API rodando em http://localhost:${PORT}`);
-  console.log(`   Supabase: ${SUPABASE_URL}`);
-  await ensureTrialInitialized();
-  console.log('');
+  console.log(`   Supabase: ${SUPABASE_URL}\n`);
 });

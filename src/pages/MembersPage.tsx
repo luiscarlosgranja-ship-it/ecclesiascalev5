@@ -222,7 +222,7 @@ export default function MembersPage({ user }: Props) {
                     <th className="text-left p-3 text-stone-400 font-medium text-xs hidden lg:table-cell">Ministérios</th>
                     <th className="text-left p-3 text-stone-400 font-medium text-xs">Nível</th>
                     <th className="text-left p-3 text-stone-400 font-medium text-xs">Status</th>
-                    {isAdmin(user.role) && <th className="text-left p-3 text-stone-400 font-medium text-xs">Cadastro</th>}
+                    {(isAdmin(user.role) || isLeader(user.role)) && <th className="text-left p-3 text-stone-400 font-medium text-xs">Cadastro</th>}
                     <th className="text-right p-3 text-stone-400 font-medium text-xs">Ações</th>
                   </tr>
                 </thead>
@@ -251,7 +251,7 @@ export default function MembersPage({ user }: Props) {
                       <td className="p-3">
                         <Badge label={m.status} color={m.status === 'Ativo' ? 'green' : 'gray'} />
                       </td>
-                      {isAdmin(user.role) && (
+                      {(isAdmin(user.role) || isLeader(user.role)) && (
                         <td className="p-3 text-stone-500 text-xs">{m.created_at?.slice(0, 10) || '—'}</td>
                       )}
                       <td className="p-3">
@@ -267,7 +267,7 @@ export default function MembersPage({ user }: Props) {
                               <button onClick={() => askToggleActive(m)} title="Desativar" className="text-red-400 hover:text-red-300 p-1 transition-colors"><UserX size={15} /></button>
                             </>
                           )}
-                          {isAdmin(user.role) && (
+                          {(isAdmin(user.role) || isLeader(user.role)) && (
                             <button onClick={() => { setPwModal(m.id); setError(''); }} className="text-blue-400 hover:text-blue-300 p-1 transition-colors" title="Alterar senha"><KeyRound size={15} /></button>
                           )}
                         </div>
