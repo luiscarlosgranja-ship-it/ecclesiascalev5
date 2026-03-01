@@ -634,6 +634,17 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
 
         // ── Escala o membro ───────────────────────────────────────────────────
         await db.from('scales').insert({ cult_id: cult.id, member_id: member.id, sector_id: sector.id });
+
+        // ── Notifica o voluntário escalado
+        const { data: userToNotify } = await db.from('users').select('id').eq('member_id', member.id).maybeSingle();
+        if (userToNotify) {
+          const sectorName = sector.name || 'setor';
+          const cultDate = cult.date || '';
+          const cultTime = cult.time ? ' às ' + cult.time : '';
+          const cultName = cult.name || 'culto';
+          await notify(userToNotify.id, 'Nova Escala',
+            `Você foi escalado para ${sectorName} no culto "${cultName}" em ${cultDate}${cultTime}`);
+        }
         created++;
         break; // um membro por setor por culto
       }
