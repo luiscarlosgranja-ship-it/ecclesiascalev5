@@ -71,7 +71,7 @@ export default function App() {
       {page === 'cults'      && <CultsPage      user={user} />}
       {page === 'swaps'      && <SwapsPage      user={user} />}
       {page === 'security'   && <SecurityPage   user={user} />}
-      {page === 'activation'  && <SecurityPage   user={user} />}
+      {page === 'activation'  && <SecurityPage   user={user} initialTab='activate' />}
       {/* Cadastros — RegistriesPage recebe qual aba abrir */}
       {(page === 'registries' || registryTab) && (
         <RegistriesPage user={user} initialTab={registryTab || undefined} />

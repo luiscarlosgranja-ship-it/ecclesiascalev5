@@ -6,10 +6,11 @@ import api from '../utils/api';
 import type { AuthUser, ActivationCode } from '../types';
 import { isSuperAdmin, isAdmin } from '../utils/permissions';
 
-interface Props { user: AuthUser; }
+interface Props { user: AuthUser; initialTab?: 'activation' | 'reset' | 'activate'; }
 
-export default function SecurityPage({ user }: Props) {
-  const [tab, setTab] = useState<'activation' | 'reset' | 'activate'>('activation');
+export default function SecurityPage({ user, initialTab }: Props) {
+  const defaultTab = initialTab || (isSuperAdmin(user.role) ? 'activation' : 'activate');
+  const [tab, setTab] = useState<'activation' | 'reset' | 'activate'>(defaultTab);
   const [institution, setInstitution] = useState('');
   const [expiryDays, setExpiryDays] = useState('365');
   const [generatedCode, setGeneratedCode] = useState('');
