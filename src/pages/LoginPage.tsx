@@ -23,11 +23,11 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
   // Carrega departamentos e tipos de culto para o formulário de cadastro
   useEffect(() => {
-    fetch('/api/departments')
+    fetch('/api/public/departments')
       .then(r => r.ok ? r.json() : [])
       .then(data => setDepartments(Array.isArray(data) ? data : []))
       .catch(() => {});
-    fetch('/api/cult_types')
+    fetch('/api/public/cult_types')
       .then(r => r.ok ? r.json() : [])
       .then(data => setCultTypes(Array.isArray(data) ? data : []))
       .catch(() => {});

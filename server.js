@@ -71,6 +71,20 @@ async function checkTrial(res) {
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
+// ─── Rotas públicas (sem autenticação) ────────────────────────────────────────
+// Usadas na tela de cadastro antes do login
+app.get('/api/public/departments', async (req, res) => {
+  const { data, error } = await db.from('departments').select('id, name').order('name');
+  if (error) return res.status(500).json({ message: error.message });
+  res.json(data);
+});
+
+app.get('/api/public/cult_types', async (req, res) => {
+  const { data, error } = await db.from('cult_types').select('id, name').order('name');
+  if (error) return res.status(500).json({ message: error.message });
+  res.json(data);
+});
+
 // ─── Auth Routes ──────────────────────────────────────────────────────────────
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
@@ -93,14 +107,12 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.post('/api/register', async (req, res) => {
-  const { name, email, password, department_id, availability } = req.body;
+  const { name, email, password } = req.body;
   if (!email || !password || !name) return res.status(400).json({ message: 'Dados obrigatórios' });
   if (password.length < 8) return res.status(400).json({ message: 'Senha deve ter mínimo 8 caracteres' });
 
   const hash = bcrypt.hashSync(password, 10);
-  const memberData = { name, email, role: 'Membro', is_active: true, availability: availability || {} };
-  if (department_id) memberData.department_id = Number(department_id);
-  const { data: member, error: memberError } = await db.from('members').insert(memberData).select().single();
+  const { data: member, error: memberError } = await db.from('members').insert({ name, email, role: 'Membro', is_active: true }).select().single();
   if (memberError) {
     if (memberError.code === '23505') return res.status(409).json({ message: 'E-mail já cadastrado' });
     return res.status(500).json({ message: 'Erro ao criar conta' });
