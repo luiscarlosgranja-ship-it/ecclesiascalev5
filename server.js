@@ -957,8 +957,11 @@ app.get('/api/settings/gmail/callback', async (req, res) => {
       has_access_token: !!tokens.access_token,
       access_token_preview: tokens.access_token ? tokens.access_token.substring(0, 20) + '...' : 'NULL',
       has_refresh_token: !!tokens.refresh_token,
+      has_id_token: !!tokens.id_token,
+      id_token_preview: tokens.id_token ? tokens.id_token.substring(0, 30) + '...' : 'NULL',
       expiry_date: tokens.expiry_date,
       token_type: tokens.token_type,
+      scope: tokens.scope,
     }));
 
     if (!tokens.refresh_token) {
