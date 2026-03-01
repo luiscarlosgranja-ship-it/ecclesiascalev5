@@ -147,9 +147,20 @@ app.post('/api/forgot-password', async (req, res) => {
   const expires = new Date(Date.now() + 3600000).toISOString();
   await db.from('users').update({ two_factor_code: code, two_factor_expires: expires }).eq('id', user.id);
 
-  // ✅ Envia o código por e-mail (se SMTP configurado)
+  // ✅ Envia o código por e-mail (usa SMTP do primeiro SuperAdmin/Admin com SMTP configurado)
   try {
-    const { transporter, user: smtpUser } = await getTransporter();
+    // Busca o id do primeiro admin com SMTP configurado
+    const { data: adminUsers } = await db.from('users').select('id').in('role', ['SuperAdmin', 'Admin']);
+    let transporter, smtpUser;
+    for (const admin of (adminUsers || [])) {
+      try {
+        const result = await getTransporter(admin.id);
+        transporter = result.transporter;
+        smtpUser = result.user;
+        break;
+      } catch { /* sem SMTP, tenta próximo */ }
+    }
+    if (!transporter) throw new Error('Nenhum admin com SMTP configurado encontrado.');
     await transporter.sendMail({
       from: `EcclesiaScale <${smtpUser}>`,
       to: email,
@@ -843,22 +854,27 @@ app.post('/api/backup', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asyn
   res.json({ message: `Backup realizado em ${new Date().toLocaleString('pt-BR')}`, data: backup });
 });
 
-// Helper: carrega config SMTP do banco ou .env e valida antes de criar transporter
-async function getSmtpConfig() {
-  const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
+// Helper: carrega config SMTP do perfil do usuário logado
+async function getSmtpConfig(userId) {
+  const keys = [
+    `smtp_host_user_${userId}`,
+    `smtp_port_user_${userId}`,
+    `smtp_user_user_${userId}`,
+    `smtp_pass_user_${userId}`,
+  ];
   const { data } = await db.from('settings').select('key,value').in('key', keys);
   const cfg = Object.fromEntries((data || []).map(r => [r.key, r.value]));
 
-  const host = cfg.smtp_host || process.env.SMTP_HOST;
-  const port = Number(cfg.smtp_port || process.env.SMTP_PORT || 587);
-  const user = cfg.smtp_user || process.env.SMTP_USER;
-  const pass = cfg.smtp_pass || process.env.SMTP_PASS;
+  const host = cfg[`smtp_host_user_${userId}`];
+  const port = Number(cfg[`smtp_port_user_${userId}`] || 587);
+  const user = cfg[`smtp_user_user_${userId}`];
+  const pass = cfg[`smtp_pass_user_${userId}`];
 
   return { host, port, user, pass };
 }
 
-async function getTransporter() {
-  const { host, port, user, pass } = await getSmtpConfig();
+async function getTransporter(userId) {
+  const { host, port, user, pass } = await getSmtpConfig(userId);
 
   if (!host || !user || !pass) {
     throw new Error('SMTP não configurado. Acesse Backup → Config. E-mail e preencha Host, E-mail e Senha.');
@@ -872,33 +888,40 @@ async function getTransporter() {
     port,
     secure,
     auth: { user, pass },
-    tls: { rejectUnauthorized: false }, // aceita certs auto-assinados em dev
+    tls: { rejectUnauthorized: false },
   });
 
   return { transporter, user };
 }
 
-// GET SMTP config (pass masked) — inclui flag configured para o frontend
+// GET SMTP config do usuário logado (pass masked)
 app.get('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
-  const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
+  const userId = req.user.id;
+  const keys = [
+    `smtp_host_user_${userId}`,
+    `smtp_port_user_${userId}`,
+    `smtp_user_user_${userId}`,
+    `smtp_pass_user_${userId}`,
+  ];
   const { data } = await db.from('settings').select('key,value').in('key', keys);
   const cfg = Object.fromEntries((data || []).map(r => [r.key, r.value]));
-  const host = cfg.smtp_host || '';
-  const user = cfg.smtp_user || '';
+  const host = cfg[`smtp_host_user_${userId}`] || '';
+  const user = cfg[`smtp_user_user_${userId}`] || '';
+  const pass = cfg[`smtp_pass_user_${userId}`];
   res.json({
     host,
-    port: cfg.smtp_port || '587',
+    port: cfg[`smtp_port_user_${userId}`] || '587',
     user,
-    pass: cfg.smtp_pass ? '••••••••' : '',
-    configured: !!(host && user && cfg.smtp_pass), // ✅ flag para o frontend
+    pass: pass ? '••••••••' : '',
+    configured: !!(host && user && pass),
   });
 });
 
 // POST /api/settings/smtp/test — verifica conexão SMTP sem enviar e-mail
 app.post('/api/settings/smtp/test', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   try {
-    const { transporter } = await getTransporter();
-    await transporter.verify(); // abre conexão e verifica autenticação
+    const { transporter } = await getTransporter(req.user.id);
+    await transporter.verify();
     res.json({ message: '✅ Conexão SMTP verificada com sucesso!' });
   } catch (err) {
     console.error('[smtp/test]', err.message, err.code);
@@ -913,18 +936,18 @@ app.post('/api/settings/smtp/test', auth, requireRole('SuperAdmin', 'Admin'), as
   }
 });
 
-// POST SMTP config (save to settings table)
+// POST SMTP config (salva por usuário logado)
 app.post('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const { host, port, user, pass } = req.body;
+  const userId = req.user.id;
   if (!host || !user) return res.status(400).json({ message: 'Host e e-mail são obrigatórios' });
 
   const entries = [
-    { key: 'smtp_host', value: host },
-    { key: 'smtp_port', value: String(port || '587') },
-    { key: 'smtp_user', value: user },
+    { key: `smtp_host_user_${userId}`, value: host },
+    { key: `smtp_port_user_${userId}`, value: String(port || '587') },
+    { key: `smtp_user_user_${userId}`, value: user },
   ];
-  // Only update pass if a real value was sent (not the masked placeholder)
-  if (pass && pass !== '••••••••') entries.push({ key: 'smtp_pass', value: pass });
+  if (pass && pass !== '••••••••') entries.push({ key: `smtp_pass_user_${userId}`, value: pass });
 
   for (const entry of entries) {
     await db.from('settings').upsert(entry, { onConflict: 'key' });
@@ -982,7 +1005,7 @@ app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin', 'Lí
   const filename = `backup_ecclesiascale_${new Date().toISOString().slice(0, 10)}.json`;
 
   try {
-    const { transporter, user: smtpUser } = await getTransporter();
+    const { transporter, user: smtpUser } = await getTransporter(req.user.id);
     await transporter.sendMail({
       from: `EcclesiaScale <${smtpUser}>`,
       to: email,
