@@ -3,7 +3,7 @@ import { Plus, Printer, Zap, Trash2, CheckCircle, Repeat, Calendar } from 'lucid
 import { Card, Button, Modal, Badge, Select, Spinner, Input } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
-import { supabase } from '../utils/supabaseClient';
+import { getSupabase } from '../utils/supabaseClient';
 import type { AuthUser, Scale, Cult, Member, Sector, CultType } from '../types';
 import { isAdmin, isLeader } from '../utils/permissions';
 import { exportScalePDF } from '../utils/pdf';
@@ -42,7 +42,10 @@ export default function ScalesPage({ user }: Props) {
 
   // ─── Supabase Realtime ───────────────────────────────────────────────────────
   useEffect(() => {
-    const channel = supabase
+    const sb = getSupabase();
+    if (!sb) return; // Realtime desativado se env vars não configuradas
+
+    const channel = sb
       .channel('scales-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'scales' }, () => {
         refetchScales();
@@ -52,7 +55,7 @@ export default function ScalesPage({ user }: Props) {
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { sb.removeChannel(channel); };
   }, [refetchScales, refetchCults]);
 
   // ─── Auto gerar escala ───────────────────────────────────────────────────────

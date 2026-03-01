@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { CheckCircle, XCircle, History } from 'lucide-react';
 import { Card, Button, Badge } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
+import { getSupabase } from '../utils/supabaseClient';
 import type { AuthUser, Swap } from '../types';
 import { isAdmin } from '../utils/permissions';
 
@@ -11,6 +12,21 @@ interface Props { user: AuthUser; }
 export default function SwapsPage({ user }: Props) {
   const [tab, setTab] = useState<'pending' | 'history'>('pending');
   const { data: swaps, refetch } = useApi<Swap[]>('/swaps');
+
+  // ─── Supabase Realtime ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const sb = getSupabase();
+    if (!sb) return; // Realtime desativado se env vars não configuradas
+
+    const channel = sb
+      .channel('swaps-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'swaps' }, () => {
+        refetch();
+      })
+      .subscribe();
+
+    return () => { sb.removeChannel(channel); };
+  }, [refetch]);
 
   const pending = (swaps || []).filter(s => s.status === 'Pendente');
   const history = (swaps || []).filter(s => s.status !== 'Pendente');

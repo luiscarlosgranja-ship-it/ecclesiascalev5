@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '../utils/api';
-import { supabase } from '../utils/supabaseClient';
+import { getSupabase } from '../utils/supabaseClient';
 
 export function useApi<T>(path: string | null, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -46,7 +46,10 @@ export function useNotifications(userId: number | null) {
 
     fetchNotifications();
 
-    const channel = supabase
+    const sb = getSupabase();
+    if (!sb) return; // Realtime desativado se env vars não configuradas
+
+    const channel = sb
       .channel(`notifications-${userId}`)
       .on(
         'postgres_changes',
@@ -55,7 +58,7 @@ export function useNotifications(userId: number | null) {
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { sb.removeChannel(channel); };
   }, [userId, fetchNotifications]);
 
   const markRead = useCallback(async (id: number) => {
