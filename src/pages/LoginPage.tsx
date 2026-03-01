@@ -70,7 +70,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     setError(''); setLoading(true);
     try {
       await api.post('/register', { name: form.name, email: form.email, password: form.password, department_id: form.department_id || undefined, availability });
-      setSuccess('Conta criada! Verifique seu e-mail para ativar.');
+      setSuccess('Conta criada com sucesso! Faça login para entrar.');
       setAvailability({});
       setView('login');
     } catch (e) {
