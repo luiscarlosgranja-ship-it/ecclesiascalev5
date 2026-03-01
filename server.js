@@ -952,11 +952,36 @@ app.get('/api/settings/gmail/callback', async (req, res) => {
   try {
     const oauth2Client = getOAuth2Client();
     const { tokens } = await oauth2Client.getToken(code);
+
+    console.log('[gmail/callback] tokens recebidos:', JSON.stringify({
+      has_access_token: !!tokens.access_token,
+      has_refresh_token: !!tokens.refresh_token,
+      expiry_date: tokens.expiry_date,
+    }));
+
+    if (!tokens.refresh_token) {
+      return res.status(400).send(`
+        <html><body style="font-family:sans-serif;max-width:480px;margin:40px auto;padding:24px">
+          <h2 style="color:#b45309">⚠️ Erro ao conectar Gmail</h2>
+          <p>O Google não retornou o token de autenticação necessário.</p>
+          <p>Para resolver:</p>
+          <ol>
+            <li>Acesse <a href="https://myaccount.google.com/permissions" target="_blank">myaccount.google.com/permissions</a></li>
+            <li>Encontre e remova o acesso do app <strong>EcclesiaScale</strong></li>
+            <li>Volte ao painel e tente conectar o Gmail novamente</li>
+          </ol>
+          <p><button onclick="window.close()">Fechar</button></p>
+        </html>
+      `);
+    }
+
     oauth2Client.setCredentials(tokens);
 
     // Busca o e-mail da conta Google autorizada
     const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
     const { data: profile } = await oauth2.userinfo.get();
+
+    console.log('[gmail/callback] e-mail obtido:', profile.email);
 
     // Salva refresh_token e e-mail no banco por userId
     await db.from('settings').upsert(
@@ -972,7 +997,7 @@ app.get('/api/settings/gmail/callback', async (req, res) => {
     res.send(`<script>window.close(); window.opener && window.opener.postMessage('gmail_connected', '*');</script>
       <p>✅ Gmail conectado com sucesso! Pode fechar esta janela.</p>`);
   } catch (err) {
-    console.error('[gmail/callback]', err.message);
+    console.error('[gmail/callback] ERRO:', err.message, err.stack);
     res.status(500).send('Erro ao conectar Gmail: ' + err.message);
   }
 });
