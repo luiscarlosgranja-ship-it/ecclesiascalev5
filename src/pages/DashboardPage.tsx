@@ -3,7 +3,7 @@ import { Users, Calendar, CheckCircle, Clock, Repeat, Settings, Eye, EyeOff } fr
 import { Card, Badge, Spinner } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import { useTrialStatus } from '../hooks/useTrialStatus';
-import { supabase } from '../utils/supabaseClient';
+import { getSupabase } from '../utils/supabaseClient';
 import type { AuthUser, DashboardStats, DashboardWidget, Scale, Cult } from '../types';
 import { isAdmin, isLeader } from '../utils/permissions';
 import { format } from 'date-fns';
@@ -30,15 +30,19 @@ export default function DashboardPage({ user, setPage }: DashboardPageProps) {
   const [widgets, setWidgets] = useState<DashboardWidget[]>(DEFAULT_WIDGETS);
 
   const trial = useTrialStatus();
+  // Só mostra o banner quando o status foi carregado do servidor (evita flash falso)
   const { data: stats, loading: statsLoading, refetch: refetchStats } = useApi<DashboardStats>('/dashboard/stats');
   const { data: upcomingCults, refetch: refetchCults } = useApi<Cult[]>('/cults?status=Agendado&limit=5');
   const { data: myScales, refetch: refetchScales } = useApi<Scale[]>(
     user.member_id ? `/scales?member_id=${user.member_id}&limit=5` : null
   );
 
-  // ─── Supabase Realtime para atualizar dashboard automaticamente ───────────────
+  // ─── Supabase Realtime (opcional) ────────────────────────────────────────────
   useEffect(() => {
-    const channel = supabase
+    const sb = getSupabase();
+    if (!sb) return; // Realtime desativado se env vars não configuradas
+
+    const channel = sb
       .channel('dashboard-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cults' }, () => {
         refetchCults();
@@ -53,7 +57,7 @@ export default function DashboardPage({ user, setPage }: DashboardPageProps) {
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { sb.removeChannel(channel); };
   }, [refetchCults, refetchScales, refetchStats]);
 
   const toggleWidget = (id: string) => {
@@ -65,7 +69,7 @@ export default function DashboardPage({ user, setPage }: DashboardPageProps) {
   return (
     <div className="space-y-6">
       {/* Trial Banner */}
-      {trial.isTrial && !trial.isExpired && (
+      {trial.loaded && trial.isTrial && !trial.isExpired && (
         <div className="bg-amber-900/30 border border-amber-700 rounded-xl px-4 py-3 flex items-center gap-3">
           <Clock className="text-amber-400 flex-shrink-0" size={18} />
           <p className="text-amber-300 text-sm">
@@ -74,7 +78,7 @@ export default function DashboardPage({ user, setPage }: DashboardPageProps) {
         </div>
       )}
 
-      {trial.isExpired && (
+      {trial.loaded && trial.isExpired && (
         <div className="bg-red-900/30 border border-red-700 rounded-xl px-4 py-3 text-center">
           <p className="text-red-300 font-semibold">Período de teste expirado. Acesse Segurança → Ativação para inserir sua chave.</p>
         </div>
@@ -249,16 +253,19 @@ function MyScalesWidget({ scales }: { scales: Scale[] }) {
 function PendingSwapsWidget({ userId, role }: { userId: number; role: string }) {
   const { data: swaps, refetch } = useApi<import('../types').Swap[]>('/swaps?status=Pendente&limit=5');
 
-  // Realtime para trocas pendentes
+  // Realtime para trocas pendentes (opcional)
   useEffect(() => {
-    const channel = supabase
+    const sb = getSupabase();
+    if (!sb) return;
+
+    const channel = sb
       .channel('swaps-dashboard')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'swaps' }, () => {
         refetch();
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { sb.removeChannel(channel); };
   }, [refetch]);
 
   return (

@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 import { randomBytes } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import nodemailer from 'nodemailer';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -22,6 +23,28 @@ const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 const PORT = process.env.PORT || 3000;
+
+// ─── Auto-inicializa trial se não existir ─────────────────────────────────────
+async function ensureTrialInitialized() {
+  try {
+    const { data: activated } = await db.from('settings').select('value').eq('key', 'activated').single();
+    if (activated?.value === '1') return; // já ativado, não precisa checar trial
+
+    const { data: trial } = await db.from('settings').select('value').eq('key', 'trial_expires').single();
+    if (!trial) {
+      const trialEnd = new Date();
+      trialEnd.setDate(trialEnd.getDate() + 7);
+      await db.from('settings').insert({ key: 'trial_expires', value: trialEnd.toISOString() });
+      console.log('\u23f1\ufe0f  Trial de 7 dias iniciado. Expira em:', trialEnd.toLocaleDateString('pt-BR'));
+    } else {
+      const expires = new Date(trial.value);
+      const daysLeft = Math.max(0, Math.ceil((expires - new Date()) / 86400000));
+      console.log(`\u23f1\ufe0f  Trial: ${daysLeft} dia(s) restante(s) (expira ${expires.toLocaleDateString('pt-BR')})`);
+    }
+  } catch (e) {
+    console.warn('⚠️  Não foi possível verificar trial (Supabase indisponível?):', e.message);
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function auth(req, res, next) {
@@ -143,7 +166,13 @@ app.get('/api/settings/trial', async (req, res) => {
   if (activated?.value === '1') return res.json({ isActive: true, isTrial: false, daysLeft: 999, isExpired: false, message: 'Ativo' });
 
   const { data: trial } = await db.from('settings').select('value').eq('key', 'trial_expires').single();
-  if (!trial) return res.json({ isActive: true, isTrial: false, daysLeft: 999, isExpired: false, message: '' });
+  // Se não existe registro de trial, cria agora com 7 dias e retorna como trial ativo
+  if (!trial) {
+    const trialEnd = new Date();
+    trialEnd.setDate(trialEnd.getDate() + 7);
+    await db.from('settings').insert({ key: 'trial_expires', value: trialEnd.toISOString() });
+    return res.json({ isActive: true, isTrial: true, daysLeft: 7, isExpired: false, message: '7 dia(s) restante(s)' });
+  }
 
   const expires = new Date(trial.value);
   const now = new Date();
@@ -671,29 +700,160 @@ app.post('/api/activation-codes/activate', auth, async (req, res) => {
   res.json({ message: 'Sistema ativado com sucesso!' });
 });
 
-// ─── Backup ───────────────────────────────────────────────────────────────────
-app.post('/api/backup', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
-  const tables = ['members', 'cults', 'scales', 'swaps', 'notifications', 'departments', 'sectors', 'ministries'];
+// Helper: generate backup data (single source of truth)
+const BACKUP_TABLES = ['departments', 'ministries', 'sectors', 'cult_types', 'members', 'member_ministries', 'cults', 'scales', 'swaps', 'notifications'];
+async function generateBackupData() {
   const backup = {};
-  for (const t of tables) {
+  for (const t of BACKUP_TABLES) {
     const { data } = await db.from(t).select('*');
     backup[t] = data || [];
   }
   backup.exported_at = new Date().toISOString();
+  return backup;
+}
+
+// ─── Backup ───────────────────────────────────────────────────────────────────
+app.post('/api/backup', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
+  const backup = await generateBackupData();
   res.json({ message: `Backup realizado em ${new Date().toLocaleString('pt-BR')}`, data: backup });
+});
+
+// Helper: get SMTP transporter from DB settings or env
+async function getTransporter() {
+  const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
+  const { data } = await db.from('settings').select('key,value').in('key', keys);
+  const cfg = Object.fromEntries((data || []).map(r => [r.key, r.value]));
+  return nodemailer.createTransport({
+    host: cfg.smtp_host || process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: Number(cfg.smtp_port || process.env.SMTP_PORT || 587),
+    secure: false,
+    auth: {
+      user: cfg.smtp_user || process.env.SMTP_USER,
+      pass: cfg.smtp_pass || process.env.SMTP_PASS,
+    },
+  });
+}
+
+// GET SMTP config (pass masked)
+app.get('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
+  const { data } = await db.from('settings').select('key,value').in('key', keys);
+  const cfg = Object.fromEntries((data || []).map(r => [r.key, r.value]));
+  res.json({
+    host: cfg.smtp_host || '',
+    port: cfg.smtp_port || '587',
+    user: cfg.smtp_user || '',
+    pass: cfg.smtp_pass ? '••••••••' : '',
+  });
+});
+
+// POST SMTP config (save to settings table)
+app.post('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const { host, port, user, pass } = req.body;
+  if (!host || !user) return res.status(400).json({ message: 'Host e e-mail são obrigatórios' });
+
+  const entries = [
+    { key: 'smtp_host', value: host },
+    { key: 'smtp_port', value: String(port || '587') },
+    { key: 'smtp_user', value: user },
+  ];
+  // Only update pass if a real value was sent (not the masked placeholder)
+  if (pass && pass !== '••••••••') entries.push({ key: 'smtp_pass', value: pass });
+
+  for (const entry of entries) {
+    await db.from('settings').upsert(entry, { onConflict: 'key' });
+  }
+  res.json({ message: 'Configurações salvas com sucesso!' });
+});
+
+// POST restore from backup
+app.post('/api/backup/restore', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const { data: backupJson, confirm } = req.body;
+  if (!backupJson) return res.status(400).json({ message: 'Dados de backup obrigatórios' });
+  if (confirm !== true) return res.status(400).json({ message: 'Confirmação obrigatória (confirm: true)' });
+
+  const results = [];
+  const errors = [];
+
+  for (const table of BACKUP_TABLES) {
+    const rows = backupJson[table];
+    if (!Array.isArray(rows) || rows.length === 0) {
+      results.push({ table, status: 'skipped', count: 0 });
+      continue;
+    }
+    try {
+      const { error } = await db.from(table).upsert(rows, { ignoreDuplicates: false });
+      if (error) {
+        errors.push({ table, error: error.message });
+        results.push({ table, status: 'error', count: 0 });
+      } else {
+        results.push({ table, status: 'ok', count: rows.length });
+      }
+    } catch (e) {
+      errors.push({ table, error: e.message });
+      results.push({ table, status: 'error', count: 0 });
+    }
+  }
+
+  const hasErrors = errors.length > 0;
+  res.status(hasErrors ? 207 : 200).json({
+    message: hasErrors
+      ? `Restauração concluída com ${errors.length} erro(s). Verifique os detalhes.`
+      : `Restauração concluída! ${results.filter(r => r.status === 'ok').length} tabela(s) restaurada(s).`,
+    results,
+    errors: hasErrors ? errors : undefined,
+    restored_at: new Date().toISOString(),
+  });
+});
+
+// POST send backup by email
+app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ message: 'E-mail destinatário obrigatório' });
+
+  const backup = await generateBackupData();
+  const json = JSON.stringify(backup, null, 2);
+  const filename = `backup_ecclesiascale_${new Date().toISOString().slice(0, 10)}.json`;
+
+  // Get SMTP user for "from" field before creating transporter
+  const { data: smtpCfg } = await db.from('settings').select('key,value').in('key', ['smtp_user']);
+  const fromEmail = smtpCfg?.[0]?.value || process.env.SMTP_USER || '';
+
+  try {
+    const transporter = await getTransporter();
+    await transporter.sendMail({
+      from: `EcclesiaScale <${fromEmail}>`,
+      to: email,
+      subject: `Backup EcclesiaScale - ${new Date().toLocaleDateString('pt-BR')}`,
+      html: `<div style="font-family:sans-serif;max-width:480px;margin:auto">
+        <h2 style="color:#b45309">📦 Backup EcclesiaScale</h2>
+        <p>Segue em anexo o backup do sistema gerado em <strong>${new Date().toLocaleString('pt-BR')}</strong>.</p>
+        <p style="color:#666;font-size:13px">Este e-mail foi enviado automaticamente. Guarde o arquivo em local seguro.</p>
+      </div>`,
+      attachments: [{ filename, content: json, contentType: 'application/json' }],
+    });
+    res.json({ message: `Backup enviado para ${email} com sucesso!` });
+  } catch (err) {
+    console.error('Erro ao enviar e-mail:', err);
+    res.status(500).json({ message: 'Erro ao enviar e-mail. Verifique as configurações SMTP na aba Config. E-mail.' });
+  }
 });
 
 // ─── Static (production) ──────────────────────────────────────────────────────
 if (process.env.NODE_ENV === 'production') {
   const distPath = path.join(__dirname, 'dist');
   app.use(express.static(distPath));
-  app.get('/*path', (req, res) => {
-    if (!req.path.startsWith('/api')) res.sendFile(path.join(distPath, 'index.html'));
+  // Compatível com Express 4 e 5
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(distPath, 'index.html'));
   });
 }
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`\n🚀 EcclesiaScale API rodando em http://localhost:${PORT}`);
-  console.log(`   Supabase: ${SUPABASE_URL}\n`);
+  console.log(`   Supabase: ${SUPABASE_URL}`);
+  await ensureTrialInitialized();
+  console.log('');
 });
