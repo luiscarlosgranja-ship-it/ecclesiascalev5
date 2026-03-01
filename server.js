@@ -977,35 +977,32 @@ app.get('/api/settings/gmail/callback', async (req, res) => {
       `);
     }
 
-    // Tenta buscar e-mail em múltiplos endpoints
+    // Extrai e-mail do id_token (JWT) sem precisar de requisição externa
     let profileEmail = null;
-    const endpoints = [
-      'https://www.googleapis.com/oauth2/v2/userinfo',
-      'https://openidconnect.googleapis.com/v1/userinfo',
-      'https://www.googleapis.com/userinfo/v2/me',
-    ];
-    for (const url of endpoints) {
-      console.log('[gmail/callback] tentando endpoint:', url);
+    if (tokens.id_token) {
       try {
-        const r = await fetch(url, {
-          headers: {
-            'Authorization': `Bearer ${tokens.access_token}`,
-            'Accept': 'application/json',
-          },
-        });
-        const body = await r.text();
-        console.log('[gmail/callback] resposta', url, r.status, body.substring(0, 200));
-        if (r.ok) {
-          const json = JSON.parse(body);
-          profileEmail = json.email;
-          break;
-        }
+        const payload = JSON.parse(Buffer.from(tokens.id_token.split('.')[1], 'base64').toString('utf8'));
+        profileEmail = payload.email;
+        console.log('[gmail/callback] e-mail extraído do id_token:', profileEmail);
       } catch(e) {
-        console.log('[gmail/callback] erro no endpoint', url, e.message);
+        console.log('[gmail/callback] erro ao decodificar id_token:', e.message);
       }
     }
-    if (!profileEmail) throw new Error('Não foi possível obter o e-mail do Google. Verifique os escopos e a conectividade.');
-
+    // Fallback: tenta userinfo se id_token não tiver e-mail
+    if (!profileEmail) {
+      try {
+        const r = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+          headers: { Authorization: `Bearer ${tokens.access_token}` },
+        });
+        if (r.ok) {
+          const json = await r.json();
+          profileEmail = json.email;
+        }
+      } catch(e) {
+        console.log('[gmail/callback] userinfo fallback falhou:', e.message);
+      }
+    }
+    if (!profileEmail) throw new Error('Não foi possível obter o e-mail do Google.');
     console.log('[gmail/callback] e-mail obtido:', profileEmail);
 
     // Salva refresh_token e e-mail no banco por userId
