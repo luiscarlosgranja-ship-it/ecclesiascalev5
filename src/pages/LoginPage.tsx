@@ -7,11 +7,11 @@ interface LoginPageProps {
   onLogin: (user: AuthUser) => void;
 }
 
-type View = 'login' | 'register' | 'forgot' | '2fa';
+type View = 'login' | 'register' | 'forgot' | '2fa' | 'secretary';
 
 export default function LoginPage({ onLogin }: LoginPageProps) {
   const [view, setView] = useState<View>('login');
-  const [form, setForm] = useState({ email: '', password: '', name: '', confirmPassword: '', code: '', department_id: '' });
+  const [form, setForm] = useState({ email: '', password: '', name: '', confirmPassword: '', code: '', department_id: '', secEmail: '', secPassword: '' });
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -34,6 +34,28 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   }, []);
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+
+  async function handleSecretaryLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setError(''); setLoading(true);
+    try {
+      const data = await api.post<{ requires2FA?: boolean; tempToken?: string } & AuthUser>('/login', {
+        email: form.secEmail.trim(), password: form.secPassword,
+      });
+      if (data.requires2FA) {
+        setTempToken(data.tempToken || '');
+        setView('2fa');
+      } else {
+        if ((data as any).role !== 'Secretária') {
+          setError('Acesso restrito. Use o login de voluntário.');
+          return;
+        }
+        onLogin(data as unknown as AuthUser);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Credenciais inválidas');
+    } finally { setLoading(false); }
+  }
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -148,6 +170,61 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                 </button>
                 <button onClick={() => { setView('forgot'); setError(''); }} className="text-stone-500 hover:text-stone-400 text-xs transition-colors">
                   Esqueci minha senha
+                </button>
+                <div className="border-t border-stone-800 pt-2 mt-1">
+                  <button onClick={() => { setView('secretary'); setError(''); setSuccess(''); }} className="text-violet-400 hover:text-violet-300 text-xs transition-colors flex items-center justify-center gap-1.5 w-full">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+                    Acesso Secretária
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Secretary Login */}
+          {view === 'secretary' && (
+            <>
+              <div className="flex items-center gap-2 mb-6">
+                <div className="w-7 h-7 rounded-lg bg-violet-700 flex items-center justify-center flex-shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+                </div>
+                <h2 className="text-stone-200 font-semibold text-lg">Acesso Secretária</h2>
+              </div>
+              <form onSubmit={handleSecretaryLogin} className="space-y-4">
+                <div>
+                  <label className="text-xs text-stone-400 uppercase tracking-wide mb-1 block">E-mail</label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" size={16} />
+                    <input type="email" value={form.secEmail} onChange={e => set('secEmail', e.target.value)} required
+                      autoComplete="username"
+                      className="w-full bg-stone-800 border border-stone-600 rounded-lg pl-9 pr-4 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-violet-500 placeholder-stone-500"
+                      placeholder="secretaria@email.com" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-stone-400 uppercase tracking-wide mb-1 block">Senha</label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" size={16} />
+                    <input type={showPw ? 'text' : 'password'} value={form.secPassword} onChange={e => set('secPassword', e.target.value)} required
+                      autoComplete="current-password"
+                      className="w-full bg-stone-800 border border-stone-600 rounded-lg pl-9 pr-10 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-violet-500 placeholder-stone-500"
+                      placeholder="••••••••" />
+                    <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-300">
+                      {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+                {error && <p className="text-red-400 text-xs bg-red-900/20 border border-red-800 rounded-lg px-3 py-2">{error}</p>}
+                <button type="submit" disabled={loading}
+                  className="w-full bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2">
+                  {loading && <Loader2 size={16} className="animate-spin" />}
+                  Entrar como Secretária
+                </button>
+              </form>
+              <div className="mt-4 text-center">
+                <button onClick={() => { setView('login'); setError(''); }}
+                  className="text-stone-500 hover:text-stone-400 text-xs transition-colors">
+                  ← Voltar ao login
                 </button>
               </div>
             </>
