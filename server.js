@@ -93,12 +93,12 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.post('/api/register', async (req, res) => {
-  const { name, email, password, department_id } = req.body;
+  const { name, email, password, department_id, availability } = req.body;
   if (!email || !password || !name) return res.status(400).json({ message: 'Dados obrigatórios' });
   if (password.length < 8) return res.status(400).json({ message: 'Senha deve ter mínimo 8 caracteres' });
 
   const hash = bcrypt.hashSync(password, 10);
-  const memberData = { name, email, role: 'Membro', is_active: true };
+  const memberData = { name, email, role: 'Membro', is_active: true, availability: availability || {} };
   if (department_id) memberData.department_id = Number(department_id);
   const { data: member, error: memberError } = await db.from('members').insert(memberData).select().single();
   if (memberError) {

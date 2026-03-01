@@ -18,12 +18,18 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [success, setSuccess] = useState('');
   const [tempToken, setTempToken] = useState('');
   const [departments, setDepartments] = useState<{ id: number; name: string }[]>([]);
+  const [cultTypes, setCultTypes] = useState<{ id: number; name: string }[]>([]);
+  const [availability, setAvailability] = useState<Record<number, boolean>>({});
 
-  // Carrega departamentos para o formulário de cadastro
+  // Carrega departamentos e tipos de culto para o formulário de cadastro
   useEffect(() => {
     fetch('/api/departments')
       .then(r => r.ok ? r.json() : [])
       .then(data => setDepartments(Array.isArray(data) ? data : []))
+      .catch(() => {});
+    fetch('/api/cult_types')
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setCultTypes(Array.isArray(data) ? data : []))
       .catch(() => {});
   }, []);
 
@@ -63,8 +69,9 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     if (form.password !== form.confirmPassword) { setError('Senhas não coincidem'); return; }
     setError(''); setLoading(true);
     try {
-      await api.post('/register', { name: form.name, email: form.email, password: form.password, department_id: form.department_id || undefined });
+      await api.post('/register', { name: form.name, email: form.email, password: form.password, department_id: form.department_id || undefined, availability });
       setSuccess('Conta criada! Verifique seu e-mail para ativar.');
+      setAvailability({});
       setView('login');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao criar conta');
@@ -187,6 +194,26 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                   <input type="password" value={form.confirmPassword} onChange={e => set('confirmPassword', e.target.value)} required
                     className="w-full bg-stone-800 border border-stone-600 rounded-lg px-4 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500" />
                 </div>
+                {cultTypes.length > 0 && (
+                  <div>
+                    <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">
+                      Disponibilidade <span className="text-stone-600 normal-case">(marque quando pode servir)</span>
+                    </label>
+                    <div className="grid grid-cols-1 gap-1.5">
+                      {cultTypes.map(ct => (
+                        <label key={ct.id} className="flex items-center gap-3 cursor-pointer bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 hover:border-amber-600/50 transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={!!availability[ct.id]}
+                            onChange={e => setAvailability(prev => ({ ...prev, [ct.id]: e.target.checked }))}
+                            className="w-4 h-4 accent-amber-500 flex-shrink-0"
+                          />
+                          <span className="text-stone-300 text-xs leading-tight">{ct.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {error && <p className="text-red-400 text-xs">{error}</p>}
                 <button type="submit" disabled={loading} className="w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2">
                   {loading && <Loader2 size={16} className="animate-spin" />}
