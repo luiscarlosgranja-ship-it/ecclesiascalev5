@@ -28,7 +28,11 @@ export default function App() {
   useEffect(() => {
     const stored = localStorage.getItem('ecclesia_user');
     if (stored) {
-      try { setUser(JSON.parse(stored)); }
+      try {
+        const u = JSON.parse(stored);
+        setUser(u);
+        if (u.role === 'Secretária') setPage('pastoral');
+      }
       catch { localStorage.removeItem('ecclesia_user'); }
     }
   }, []);
@@ -36,6 +40,7 @@ export default function App() {
   function handleLogin(u: AuthUser) {
     localStorage.setItem('ecclesia_user', JSON.stringify(u));
     setUser(u);
+    if (u.role === 'Secretária') setPage('pastoral');
   }
 
   function handleLogout() {
