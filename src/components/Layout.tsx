@@ -108,10 +108,15 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
   function toggleTheme() { setTheme(t => t === 'dark' ? 'light' : 'dark'); }
 
   const [churchName, setChurchName] = useState('');
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
   useEffect(() => {
     fetch('/api/public/church-name')
       .then(r => r.ok ? r.json() : {})
       .then(d => { if (d.name) setChurchName(d.name); })
+      .catch(() => {});
+    fetch('/api/settings/logo')
+      .then(r => r.ok ? r.json() : {})
+      .then(d => { if (d.logo) setLogoUrl(d.logo); })
       .catch(() => {});
     // Atualiza quando salvar os dados da igreja
     const handler = (e: any) => { if (e.detail?.name) setChurchName(e.detail.name); };
@@ -138,9 +143,13 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
       {/* Logo */}
       <div className={clsx('flex items-center gap-3 px-4 py-5 border-b border-stone-800', collapsed && !mobile && 'justify-center px-2')}>
         <button onClick={() => setPage('dashboard')} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-          <div className="w-8 h-8 rounded-lg bg-amber-600 flex items-center justify-center flex-shrink-0">
-            <span className="text-white font-bold text-sm">E</span>
-          </div>
+          {logoUrl ? (
+            <img src={logoUrl} alt="Logo" className="w-8 h-8 rounded-lg object-contain flex-shrink-0" />
+          ) : (
+            <div className="w-8 h-8 rounded-lg bg-amber-600 flex items-center justify-center flex-shrink-0">
+              <span className="text-white font-bold text-sm">{(churchName || 'E')[0].toUpperCase()}</span>
+            </div>
+          )}
           {(!collapsed || mobile) && (
             <div>
               <p className="text-amber-400 font-bold text-sm leading-none">{churchName || 'EcclesiaScale'}</p>
