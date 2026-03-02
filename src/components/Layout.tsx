@@ -109,7 +109,9 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
   function toggleTheme() { setTheme(t => t === 'dark' ? 'light' : 'dark'); }
 
   const [churchName, setChurchName] = useState('');
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>(() => {
+    return localStorage.getItem('ecclesia_logo') || null;
+  });
   useEffect(() => {
     fetch('/api/public/church-name')
       .then(r => r.ok ? r.json() : {})
@@ -117,7 +119,12 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
       .catch(() => {});
     fetch('/api/settings/logo')
       .then(r => r.ok ? r.json() : {})
-      .then(d => { if (d.logo) setLogoUrl(d.logo); })
+      .then(d => {
+        if (d.logo) {
+          setLogoUrl(d.logo);
+          localStorage.setItem('ecclesia_logo', d.logo);
+        }
+      })
       .catch(() => {});
     // Atualiza quando salvar os dados da igreja
     const handler = (e: any) => { if (e.detail?.name) setChurchName(e.detail.name); };
