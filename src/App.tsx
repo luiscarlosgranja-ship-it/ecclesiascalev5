@@ -20,7 +20,8 @@ export type Page =
   // Cadastros separados (podem ser abas dentro de RegistriesPage ou páginas próprias)
   | 'ministries' | 'departments' | 'sectors' | 'cult-types'
   // Segurança
-  | 'restore' | 'activation' | 'pastoral' | 'church';
+  | 'restore' | 'activation' | 'pastoral' | 'church'
+  | 'email-config' | 'logo';
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -59,9 +60,6 @@ export default function App() {
     page === 'sectors'     ? 'sectors'     :
     page === 'cult-types'  ? 'cult-types'  : null;
 
-  // Páginas de Segurança adicionais — roteadas para BackupPage com tab ativa
-  const backupTab =
-    page === 'restore' ? 'restore' : null;
 
   return (
     <Layout user={user} page={page} setPage={p => setPage(p as Page)} onLogout={handleLogout}>
@@ -78,11 +76,11 @@ export default function App() {
       {(page === 'registries' || registryTab) && (
         <RegistriesPage user={user} initialTab={registryTab || undefined} />
       )}
-      {/* Backup/Restaurar/Ativação — BackupPage recebe qual aba abrir */}
-      {page === 'pastoral'  && <PastoralPage user={user} />}
-      {(page === 'backup' || backupTab) && (
-        <BackupPage user={user} initialTab={backupTab || undefined} />
-      )}
+      {page === 'pastoral'     && <PastoralPage user={user} />}
+      {page === 'backup'       && <BackupPage user={user} initialTab='backup'       hideTabs />}
+      {page === 'restore'      && <BackupPage user={user} initialTab='restore'      hideTabs />}
+      {page === 'email-config' && <BackupPage user={user} initialTab='email-config' hideTabs />}
+      {page === 'logo'         && <BackupPage user={user} initialTab='logo'         hideTabs />}
     </Layout>
   );
 }

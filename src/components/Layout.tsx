@@ -4,11 +4,10 @@ import {
   LayoutDashboard, Users, Calendar, Repeat, Settings, LogOut, Bell,
   BookOpen, Layers, Shield, ChevronLeft, ChevronRight, Wifi, WifiOff,
   Database, Menu, X, Building2, Grid3X3, Church, RefreshCcw, KeyRound,
-  Sun, Moon, HeartHandshake, Phone
+  Sun, Moon, HeartHandshake, Phone, Mail, Image
 } from 'lucide-react';
 import type { AuthUser } from '../types';
 import { useNotifications } from '../hooks/useApi';
-import api from '../utils/api';
 
 type Page = string;
 
@@ -53,17 +52,13 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Backup',
-    items: [
-      { id: 'backup',  label: 'Backup',           icon: <Database size={18} />,   roles: ['SuperAdmin', 'Admin'] },
-      { id: 'restore', label: 'Restaurar Backup', icon: <RefreshCcw size={18} />, roles: ['SuperAdmin', 'Admin'] },
-    ],
-  },
-  {
     label: 'Segurança',
     items: [
+      { id: 'activation', label: 'Ativação do Sistema', icon: <KeyRound size={18} />, roles: ['Secretaria'] },
       { id: 'security',   label: 'Reset de Senha',      icon: <Shield size={18} />,   roles: ['SuperAdmin', 'Admin'] },
-      { id: 'activation', label: 'Ativação do Sistema', icon: <KeyRound size={18} />, roles: ['SuperAdmin', 'Admin', 'Líder', 'Membro', 'Secretaria'] },
+      { id: 'backup',     label: 'Backup',              icon: <Database size={18} />, roles: ['SuperAdmin', 'Admin'] },
+      { id: 'restore',    label: 'Restaurar Backup',    icon: <RefreshCcw size={18} />, roles: ['SuperAdmin', 'Admin'] },
+      { id: 'activation', label: 'Ativação do Sistema', icon: <KeyRound size={18} />, roles: ['SuperAdmin', 'Admin', 'Líder', 'Membro'] },
     ],
   },
 ];
@@ -71,7 +66,9 @@ const NAV_GROUPS: NavGroup[] = [
 // Lista plana para lookup de label na topbar
 const ALL_NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard' },
-  { id: 'church', label: 'Dados da Igreja' },
+  { id: 'church',       label: 'Dados da Igreja' },
+  { id: 'email-config', label: 'Config. E-mail' },
+  { id: 'logo',         label: 'Logotipo' },
   ...NAV_GROUPS.flatMap(g => g.items),
 ];
 
@@ -109,22 +106,10 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
   function toggleTheme() { setTheme(t => t === 'dark' ? 'light' : 'dark'); }
 
   const [churchName, setChurchName] = useState('');
-  const [logoUrl, setLogoUrl] = useState<string | null>(() => {
-    return localStorage.getItem('ecclesia_logo') || null;
-  });
   useEffect(() => {
     fetch('/api/public/church-name')
       .then(r => r.ok ? r.json() : {})
       .then(d => { if (d.name) setChurchName(d.name); })
-      .catch(() => {});
-    fetch('/api/settings/logo')
-      .then(r => r.ok ? r.json() : {})
-      .then(d => {
-        if (d.logo) {
-          setLogoUrl(d.logo);
-          localStorage.setItem('ecclesia_logo', d.logo);
-        }
-      })
       .catch(() => {});
     // Atualiza quando salvar os dados da igreja
     const handler = (e: any) => { if (e.detail?.name) setChurchName(e.detail.name); };
@@ -151,13 +136,9 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
       {/* Logo */}
       <div className={clsx('flex items-center gap-3 px-4 py-5 border-b border-stone-800', collapsed && !mobile && 'justify-center px-2')}>
         <button onClick={() => setPage('dashboard')} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-          {logoUrl ? (
-            <img src={logoUrl} alt="Logo" className="w-8 h-8 rounded-lg object-contain flex-shrink-0" />
-          ) : (
-            <div className="w-8 h-8 rounded-lg bg-amber-600 flex items-center justify-center flex-shrink-0">
-              <span className="text-white font-bold text-sm">{(churchName || 'E')[0].toUpperCase()}</span>
-            </div>
-          )}
+          <div className="w-8 h-8 rounded-lg bg-amber-600 flex items-center justify-center flex-shrink-0">
+            <span className="text-white font-bold text-sm">E</span>
+          </div>
           {(!collapsed || mobile) && (
             <div>
               <p className="text-amber-400 font-bold text-sm leading-none">{churchName || 'EcclesiaScale'}</p>

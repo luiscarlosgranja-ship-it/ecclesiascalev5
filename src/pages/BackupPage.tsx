@@ -9,13 +9,14 @@ import api from '../utils/api';
 import type { AuthUser } from '../types';
 import { isAdmin } from '../utils/permissions';
 
-interface Props { user: AuthUser; initialTab?: Tab; }
+interface Props { user: AuthUser; initialTab?: Tab; hideTabs?: boolean; }
 type Tab = 'backup' | 'restore' | 'email-config' | 'logo';
 
 interface SmtpConfig { host: string; port: string; user: string; pass: string; configured?: boolean; }
 interface RestoreResult { table: string; status: 'ok' | 'error' | 'skipped'; count: number; }
 
 export default function BackupPage(props: Props) {
+  const hideTabs = props.hideTabs ?? false;
   const { user } = props;
   const [tab, setTab] = useState<Tab>(props.initialTab || 'backup');
 
@@ -255,10 +256,17 @@ export default function BackupPage(props: Props) {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-xl font-bold text-stone-100">Backup</h1>
+      <h1 className="text-xl font-bold text-stone-100">
+        {hideTabs
+          ? tab === 'backup'       ? 'Fazer Backup'
+          : tab === 'restore'      ? 'Restaurar Backup'
+          : tab === 'email-config' ? 'Config. E-mail'
+          : 'Logotipo'
+          : 'Backup'}
+      </h1>
 
       {/* Tabs */}
-      <div className="flex border-b border-stone-700 flex-wrap">
+      {!hideTabs && <div className="flex border-b border-stone-700 flex-wrap">
         {[
           { id: 'backup', label: 'Fazer Backup', icon: <Database size={14} /> },
           ...(isAdmin(user.role) ? [{ id: 'restore', label: 'Restaurar', icon: <RotateCcw size={14} /> }] : []),
@@ -271,7 +279,7 @@ export default function BackupPage(props: Props) {
             {t.alert && <AlertTriangle size={13} className="text-amber-400" />}
           </button>
         ))}
-      </div>
+      </div>}
 
       {/* ─── Aba: Fazer Backup ──────────────────────────────────────────────────── */}
       {tab === 'backup' && (
