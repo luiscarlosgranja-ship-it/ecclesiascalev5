@@ -52,13 +52,17 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: 'Backup',
+    items: [
+      { id: 'backup',  label: 'Backup',           icon: <Database size={18} />,   roles: ['SuperAdmin', 'Admin'] },
+      { id: 'restore', label: 'Restaurar Backup', icon: <RefreshCcw size={18} />, roles: ['SuperAdmin', 'Admin'] },
+    ],
+  },
+  {
     label: 'Segurança',
     items: [
-      { id: 'activation', label: 'Ativação do Sistema', icon: <KeyRound size={18} />, roles: ['Secretaria'] },
       { id: 'security',   label: 'Reset de Senha',      icon: <Shield size={18} />,   roles: ['SuperAdmin', 'Admin'] },
-      { id: 'backup',     label: 'Backup',              icon: <Database size={18} />, roles: ['SuperAdmin', 'Admin'] },
-      { id: 'restore',    label: 'Restaurar Backup',    icon: <RefreshCcw size={18} />, roles: ['SuperAdmin', 'Admin'] },
-      { id: 'activation', label: 'Ativação do Sistema', icon: <KeyRound size={18} />, roles: ['SuperAdmin', 'Admin', 'Líder', 'Membro'] },
+      { id: 'activation', label: 'Ativação do Sistema', icon: <KeyRound size={18} />, roles: ['SuperAdmin', 'Admin', 'Líder', 'Membro', 'Secretaria'] },
     ],
   },
 ];
@@ -119,8 +123,9 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
   const [notifOpen, setNotifOpen] = useState(false);
 
   // Filtra grupos e itens pelo role do usuário
-  const filteredGroups = NAV_GROUPS.map(group => ({
+  const filteredGroups = NAV_GROUPS.map((group, idx) => ({
     ...group,
+    _key: `${group.label}-${idx}`,
     items: group.items.filter(item => item.roles.includes(user.role)),
   })).filter(group => group.items.length > 0);
 
@@ -153,7 +158,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
       {/* Nav com grupos */}
       <nav className="flex-1 py-3 px-2 overflow-y-auto space-y-1">
         {filteredGroups.map(group => (
-          <div key={group.label}>
+          <div key={group._key}>
             {(!collapsed || mobile) && (
               <p className="text-stone-600 text-[10px] font-semibold uppercase tracking-widest px-3 pt-3 pb-1 select-none">
                 {group.label}
