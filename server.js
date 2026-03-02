@@ -722,6 +722,91 @@ app.get('/api/public/church-name', async (req, res) => {
   res.json({ name: data?.value || '' });
 });
 
+// ─── Logo ─────────────────────────────────────────────────────────────────────
+app.get('/api/settings/logo', async (req, res) => {
+  const { data } = await db.from('settings').select('value').eq('key', 'church_logo').single();
+  res.json({ logo: data?.value || null });
+});
+
+app.put('/api/settings/logo', auth, requireRole('SuperAdmin'), async (req, res) => {
+  const { logo } = req.body;
+  if (!logo) return res.status(400).json({ message: 'Logo obrigatório' });
+  await db.from('settings').upsert({ key: 'church_logo', value: logo }, { onConflict: 'key' });
+  res.json({ message: 'Logo salvo com sucesso' });
+});
+
+app.delete('/api/settings/logo', auth, requireRole('SuperAdmin'), async (req, res) => {
+  await db.from('settings').delete().eq('key', 'church_logo');
+  res.json({ message: 'Logo removido' });
+});
+
+// ─── Pastoral Appointments ────────────────────────────────────────────────────
+app.get('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
+  const { data, error } = await db
+    .from('pastoral_appointments')
+    .select('*, users(email)')
+    .order('date', { ascending: true })
+    .order('time', { ascending: true });
+  if (error) return res.status(500).json({ message: error.message });
+  const result = (data || []).map(a => ({
+    ...a,
+    created_by_name: a.users?.email || null,
+    users: undefined,
+  }));
+  res.json(result);
+});
+
+app.post('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
+  const { name, date, time, notes, status } = req.body;
+  if (!name?.trim() || !date || !time) return res.status(400).json({ message: 'Nome, data e hora são obrigatórios' });
+
+  const { data: conflict } = await db.from('pastoral_appointments')
+    .select('id, name')
+    .eq('date', date)
+    .eq('time', time)
+    .not('status', 'in', '("Cancelado")')
+    .maybeSingle();
+  if (conflict) return res.status(409).json({ message: `Horário já ocupado por ${conflict.name} neste dia. Escolha outro horário.` });
+
+  const { data, error } = await db.from('pastoral_appointments').insert({
+    name: name.trim(), date, time,
+    notes: notes || null,
+    status: status || 'Agendado',
+    created_by: req.user.id,
+  }).select().single();
+  if (error) return res.status(500).json({ message: error.message });
+  res.json(data);
+});
+
+app.put('/api/pastoral/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
+  const { name, date, time, notes, status } = req.body;
+  if (!name?.trim() || !date || !time) return res.status(400).json({ message: 'Nome, data e hora são obrigatórios' });
+
+  const { data: conflict } = await db.from('pastoral_appointments')
+    .select('id, name')
+    .eq('date', date)
+    .eq('time', time)
+    .not('status', 'in', '("Cancelado")')
+    .neq('id', req.params.id)
+    .maybeSingle();
+  if (conflict) return res.status(409).json({ message: `Horário já ocupado por ${conflict.name} neste dia. Escolha outro horário.` });
+
+  const { error } = await db.from('pastoral_appointments').update({
+    name: name.trim(), date, time,
+    notes: notes || null,
+    status: status || 'Agendado',
+    updated_at: new Date().toISOString(),
+  }).eq('id', req.params.id);
+  if (error) return res.status(500).json({ message: error.message });
+  res.json({ message: 'Atualizado' });
+});
+
+app.delete('/api/pastoral/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
+  const { error } = await db.from('pastoral_appointments').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ message: error.message });
+  res.json({ message: 'Excluído' });
+});
+
 // Helper: generate backup data (single source of truth)
 const BACKUP_TABLES = ['departments', 'ministries', 'sectors', 'cult_types', 'members', 'member_ministries', 'cults', 'scales', 'swaps', 'notifications'];
 async function generateBackupData() {
