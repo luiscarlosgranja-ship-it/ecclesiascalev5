@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Calendar, Repeat, Settings, LogOut, Bell,
   BookOpen, Layers, Shield, ChevronLeft, ChevronRight, Wifi, WifiOff,
   Database, Menu, X, Building2, Grid3X3, Church, RefreshCcw, KeyRound,
-  Sun, Moon, HeartHandshake
+  Sun, Moon, HeartHandshake, Phone
 } from 'lucide-react';
 import type { AuthUser } from '../types';
 import { useNotifications } from '../hooks/useApi';
@@ -42,6 +42,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'departments', label: 'Departamentos',  icon: <Building2 size={18} />,  roles: ['SuperAdmin', 'Admin'] },
       { id: 'sectors',     label: 'Setores',        icon: <Layers size={18} />,     roles: ['SuperAdmin', 'Admin'] },
       { id: 'cult-types',  label: 'Tipos de Culto', icon: <Settings size={18} />,   roles: ['SuperAdmin', 'Admin'] },
+      { id: 'church',      label: 'Dados da Igreja', icon: <Church size={18} />,      roles: ['SuperAdmin', 'Admin'] },
     ],
   },
   {
@@ -70,6 +71,7 @@ const NAV_GROUPS: NavGroup[] = [
 // Lista plana para lookup de label na topbar
 const ALL_NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard' },
+  { id: 'church', label: 'Dados da Igreja' },
   ...NAV_GROUPS.flatMap(g => g.items),
 ];
 
@@ -106,6 +108,18 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
   }, [theme]);
   function toggleTheme() { setTheme(t => t === 'dark' ? 'light' : 'dark'); }
 
+  const [churchName, setChurchName] = useState('');
+  useEffect(() => {
+    fetch('/api/public/church-name')
+      .then(r => r.ok ? r.json() : {})
+      .then(d => { if (d.name) setChurchName(d.name); })
+      .catch(() => {});
+    // Atualiza quando salvar os dados da igreja
+    const handler = (e: any) => { if (e.detail?.name) setChurchName(e.detail.name); };
+    window.addEventListener('church-updated', handler);
+    return () => window.removeEventListener('church-updated', handler);
+  }, []);
+
   const { unread, notifications, markRead } = useNotifications(user.member_id);
   const [notifOpen, setNotifOpen] = useState(false);
 
@@ -129,7 +143,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
           </div>
           {(!collapsed || mobile) && (
             <div>
-              <p className="text-amber-400 font-bold text-sm leading-none">EcclesiaScale</p>
+              <p className="text-amber-400 font-bold text-sm leading-none">{churchName || 'EcclesiaScale'}</p>
               <p className="text-stone-500 text-xs mt-0.5">{user.role}</p>
             </div>
           )}
@@ -188,6 +202,16 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
             </span>
           )}
         </div>
+        {(!collapsed || mobile) && (
+          <div className="mb-2 px-1 py-2 bg-stone-900 rounded-lg border border-stone-800">
+            <p className="text-stone-600 text-[10px] text-center leading-tight">EcclesiaScale v5.0</p>
+            <div className="flex items-center justify-center gap-1 mt-0.5">
+              <Phone size={9} className="text-stone-600" />
+              <p className="text-stone-600 text-[10px] text-center leading-tight">21970031043</p>
+            </div>
+            <p className="text-stone-700 text-[9px] text-center leading-tight">Contato EcclesiaScale</p>
+          </div>
+        )}
         <button
           onClick={onLogout}
           className={clsx('w-full flex items-center gap-2 px-3 py-2 rounded-lg text-stone-400 hover:bg-red-900/20 hover:text-red-400 text-sm transition-all', collapsed && !mobile && 'justify-center')}

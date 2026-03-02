@@ -10,6 +10,7 @@ import SecurityPage from './pages/SecurityPage';
 import BackupPage from './pages/BackupPage';
 import PastoralPage from './pages/PastoralPage';
 import MyPanelPage from './pages/MyPanelPage';
+import ChurchPage from './pages/ChurchPage';
 import Layout from './components/Layout';
 import type { AuthUser } from './types';
 
@@ -19,7 +20,7 @@ export type Page =
   // Cadastros separados (podem ser abas dentro de RegistriesPage ou páginas próprias)
   | 'ministries' | 'departments' | 'sectors' | 'cult-types'
   // Segurança
-  | 'restore' | 'activation' | 'pastoral';
+  | 'restore' | 'activation' | 'pastoral' | 'church';
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -71,6 +72,7 @@ export default function App() {
       {page === 'cults'      && <CultsPage      user={user} />}
       {page === 'swaps'      && <SwapsPage      user={user} />}
       {page === 'security'   && <SecurityPage   user={user} />}
+      {page === 'church'     && <ChurchPage     user={user} />}
       {page === 'activation'  && <SecurityPage   user={user} initialTab='activate' />}
       {/* Cadastros — RegistriesPage recebe qual aba abrir */}
       {(page === 'registries' || registryTab) && (

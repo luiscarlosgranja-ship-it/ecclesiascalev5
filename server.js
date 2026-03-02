@@ -686,78 +686,40 @@ app.post('/api/activation-codes/activate', auth, async (req, res) => {
   res.json({ message: 'Sistema ativado com sucesso!' });
 });
 
-// ─── Pastoral Appointments ───────────────────────────────────────────────────
-app.get('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
-  const { data, error } = await db
-    .from('pastoral_appointments')
-    .select('*, users(email)')
-    .order('date', { ascending: true })
-    .order('time', { ascending: true });
-  if (error) return res.status(500).json({ message: error.message });
+// ─── Church Settings ─────────────────────────────────────────────────────────
+const CHURCH_FIELDS = ['church_name','church_cnpj','church_address','church_neighborhood','church_city','church_zip','church_phone','church_pastor_dirigente','church_pastor_presidente'];
 
-  const result = (data || []).map(a => ({
-    ...a,
-    created_by_name: a.users?.email || null,
-    users: undefined,
-  }));
+app.get('/api/church', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const { data } = await db.from('settings').select('key, value').in('key', CHURCH_FIELDS);
+  const result = {};
+  (data || []).forEach(r => {
+    const k = r.key.replace('church_', '');
+    result[k === 'church_name' ? 'name' : k] = r.value || '';
+  });
+  // map church_name -> name
+  if (!result.name) {
+    const nameRow = (data || []).find(r => r.key === 'church_name');
+    result.name = nameRow?.value || '';
+  }
   res.json(result);
 });
 
-app.post('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
-  const { name, date, time, notes, status } = req.body;
-  if (!name?.trim() || !date || !time) return res.status(400).json({ message: 'Nome, data e hora são obrigatórios' });
+app.put('/api/church', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const { name, cnpj, address, neighborhood, city, zip, phone, pastor_dirigente, pastor_presidente } = req.body;
+  if (!name?.trim()) return res.status(400).json({ message: 'Nome da igreja é obrigatório' });
 
-  // Verifica conflito de horário no mesmo dia
-  const { data: conflict } = await db.from('pastoral_appointments')
-    .select('id, name')
-    .eq('date', date)
-    .eq('time', time)
-    .not('status', 'in', '("Cancelado")')
-    .maybeSingle();
-  if (conflict) return res.status(409).json({ message: `Horário já ocupado por ${conflict.name} neste dia. Escolha outro horário.` });
+  const fields = { church_name: name, church_cnpj: cnpj || '', church_address: address || '', church_neighborhood: neighborhood || '', church_city: city || '', church_zip: zip || '', church_phone: phone || '', church_pastor_dirigente: pastor_dirigente || '', church_pastor_presidente: pastor_presidente || '' };
 
-  const { data, error } = await db.from('pastoral_appointments').insert({
-    name: name.trim(),
-    date,
-    time,
-    notes: notes || null,
-    status: status || 'Agendado',
-    created_by: req.user.id,
-  }).select().single();
-
-  if (error) return res.status(500).json({ message: error.message });
-  res.json(data);
+  for (const [key, value] of Object.entries(fields)) {
+    await db.from('settings').upsert({ key, value }, { onConflict: 'key' });
+  }
+  res.json({ message: 'Dados salvos com sucesso' });
 });
 
-app.put('/api/pastoral/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
-  const { name, date, time, notes, status } = req.body;
-  if (!name?.trim() || !date || !time) return res.status(400).json({ message: 'Nome, data e hora são obrigatórios' });
-
-  // Verifica conflito de horário (excluindo o próprio registro)
-  const { data: conflict } = await db.from('pastoral_appointments')
-    .select('id, name')
-    .eq('date', date)
-    .eq('time', time)
-    .not('status', 'in', '("Cancelado")')
-    .neq('id', req.params.id)
-    .maybeSingle();
-  if (conflict) return res.status(409).json({ message: `Horário já ocupado por ${conflict.name} neste dia. Escolha outro horário.` });
-
-  const { error } = await db.from('pastoral_appointments').update({
-    name: name.trim(), date, time,
-    notes: notes || null,
-    status: status || 'Agendado',
-    updated_at: new Date().toISOString(),
-  }).eq('id', req.params.id);
-
-  if (error) return res.status(500).json({ message: error.message });
-  res.json({ message: 'Atualizado' });
-});
-
-app.delete('/api/pastoral/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
-  const { error } = await db.from('pastoral_appointments').delete().eq('id', req.params.id);
-  if (error) return res.status(500).json({ message: error.message });
-  res.json({ message: 'Excluído' });
+// Rota pública para exibir nome da igreja no sistema
+app.get('/api/public/church-name', async (req, res) => {
+  const { data } = await db.from('settings').select('value').eq('key', 'church_name').single();
+  res.json({ name: data?.value || '' });
 });
 
 // Helper: generate backup data (single source of truth)
