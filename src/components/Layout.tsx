@@ -55,15 +55,10 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Segurança',
     items: [
       { id: 'activation', label: 'Ativação do Sistema', icon: <KeyRound size={18} />, roles: ['Secretaria'] },
-    ],
-  },
-  {
-    label: 'Segurança',
-    items: [
-      { id: 'security',   label: 'Reset de Senha',     icon: <Shield size={18} />,     roles: ['SuperAdmin', 'Admin'] },
-      { id: 'backup',     label: 'Backup',             icon: <Database size={18} />,   roles: ['SuperAdmin', 'Admin'] },
-      { id: 'restore',    label: 'Restaurar Backup',   icon: <RefreshCcw size={18} />, roles: ['SuperAdmin', 'Admin'] },
-      { id: 'activation', label: 'Ativação do Sistema',icon: <KeyRound size={18} />,   roles: ['SuperAdmin', 'Admin', 'Líder', 'Membro'] },
+      { id: 'security',   label: 'Reset de Senha',      icon: <Shield size={18} />,   roles: ['SuperAdmin', 'Admin'] },
+      { id: 'backup',     label: 'Backup',              icon: <Database size={18} />, roles: ['SuperAdmin', 'Admin'] },
+      { id: 'restore',    label: 'Restaurar Backup',    icon: <RefreshCcw size={18} />, roles: ['SuperAdmin', 'Admin'] },
+      { id: 'activation', label: 'Ativação do Sistema', icon: <KeyRound size={18} />, roles: ['SuperAdmin', 'Admin', 'Líder', 'Membro'] },
     ],
   },
 ];
