@@ -283,22 +283,33 @@ app.put('/api/members/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), 
 });
 
 // ─── Users ────────────────────────────────────────────────────────────────────
-app.put('/api/users/:id/password', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+app.put('/api/users/:id/password', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { password } = req.body;
   if (!password || password.length < 8) return res.status(400).json({ message: 'Senha deve ter mínimo 8 caracteres' });
+
+  // :id pode ser o id do membro (vindo de MembersPage) ou id do usuário
+  // Tenta primeiro por member_id, depois por id direto
+  const memberId = Number(req.params.id);
+  let { data: userByMember } = await db.from('users').select('id').eq('member_id', memberId).single();
+
   const hash = bcrypt.hashSync(password, 10);
-  await db.from('users').update({ password: hash }).eq('id', req.params.id);
+  if (userByMember) {
+    await db.from('users').update({ password: hash }).eq('id', userByMember.id);
+  } else {
+    await db.from('users').update({ password: hash }).eq('id', memberId);
+  }
   res.json({ message: 'Senha alterada' });
 });
 
 app.post('/api/users/reset-password', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const { email, new_password } = req.body;
   if (!email || !new_password) return res.status(400).json({ message: 'Dados obrigatórios' });
-  const { data: user } = await db.from('users').select('id').eq('email', email).single();
+  if (new_password.length < 8) return res.status(400).json({ message: 'Senha deve ter mínimo 8 caracteres' });
+  const { data: user } = await db.from('users').select('id').eq('email', email.toLowerCase().trim()).single();
   if (!user) return res.status(404).json({ message: 'Usuário não encontrado' });
   const hash = bcrypt.hashSync(new_password, 10);
   await db.from('users').update({ password: hash }).eq('id', user.id);
-  res.json({ message: 'Senha redefinida' });
+  res.json({ message: 'Senha redefinida com sucesso' });
 });
 
 // ─── Generic CRUD: ministries / departments / sectors / cult_types ────────────
