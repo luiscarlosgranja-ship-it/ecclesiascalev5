@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Church, Save, Loader2 } from 'lucide-react';
+import { Church, Save, Loader2, Lock } from 'lucide-react';
+import { isSuperAdmin } from '../utils/permissions';
 import { Card, Button, Input } from '../components/ui';
 import api from '../utils/api';
 import type { AuthUser } from '../types';
@@ -38,6 +39,7 @@ export default function ChurchPage({ user }: Props) {
   }, []);
 
   const set = (k: keyof ChurchData, v: string) => setData(p => ({ ...p, [k]: v }));
+  const readOnly = !isSuperAdmin(user.role);
 
   async function save() {
     if (!data.name.trim()) { setError('Nome da igreja é obrigatório'); return; }
@@ -67,6 +69,12 @@ export default function ChurchPage({ user }: Props) {
         <h1 className="text-xl font-bold text-stone-100">Dados da Igreja</h1>
       </div>
 
+      {readOnly && (
+        <div className="flex items-center gap-2 bg-stone-800 border border-stone-700 rounded-xl px-4 py-3">
+          <Lock size={14} className="text-stone-400 flex-shrink-0" />
+          <p className="text-stone-400 text-sm">Somente o <strong className="text-stone-200">SuperAdmin</strong> pode editar os dados da igreja.</p>
+        </div>
+      )}
       <Card className="p-6 space-y-5">
         {/* Identificação */}
         <div>
@@ -78,6 +86,7 @@ export default function ChurchPage({ user }: Props) {
                 value={data.name}
                 onChange={e => set('name', e.target.value)}
                 placeholder="Ex: Igreja Batista Central"
+                disabled={readOnly}
               />
             </div>
             <Input
@@ -151,9 +160,11 @@ export default function ChurchPage({ user }: Props) {
         {error && <p className="text-red-400 text-sm">{error}</p>}
 
         <div className="pt-1">
-          <Button onClick={save} loading={saving}>
-            <Save size={15} /> Salvar Dados
-          </Button>
+          {!readOnly && (
+            <Button onClick={save} loading={saving}>
+              <Save size={15} /> Salvar Dados
+            </Button>
+          )}
         </div>
       </Card>
     </div>

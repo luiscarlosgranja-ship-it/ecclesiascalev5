@@ -689,7 +689,7 @@ app.post('/api/activation-codes/activate', auth, async (req, res) => {
 // ─── Church Settings ─────────────────────────────────────────────────────────
 const CHURCH_FIELDS = ['church_name','church_cnpj','church_address','church_neighborhood','church_city','church_zip','church_phone','church_pastor_dirigente','church_pastor_presidente'];
 
-app.get('/api/church', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+app.get('/api/church', auth, async (req, res) => {
   const { data } = await db.from('settings').select('key, value').in('key', CHURCH_FIELDS);
   const result = {};
   (data || []).forEach(r => {
@@ -704,7 +704,7 @@ app.get('/api/church', auth, requireRole('SuperAdmin', 'Admin'), async (req, res
   res.json(result);
 });
 
-app.put('/api/church', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+app.put('/api/church', auth, requireRole('SuperAdmin'), async (req, res) => {
   const { name, cnpj, address, neighborhood, city, zip, phone, pastor_dirigente, pastor_presidente } = req.body;
   if (!name?.trim()) return res.status(400).json({ message: 'Nome da igreja é obrigatório' });
 
