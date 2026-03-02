@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import type { AuthUser } from '../types';
 import { useNotifications } from '../hooks/useApi';
+import api from '../utils/api';
 
 type Page = string;
 
@@ -114,8 +115,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
       .then(r => r.ok ? r.json() : {})
       .then(d => { if (d.name) setChurchName(d.name); })
       .catch(() => {});
-    fetch('/api/settings/logo')
-      .then(r => r.ok ? r.json() : {})
+    api.get<{ logo: string | null }>('/settings/logo')
       .then(d => { if (d.logo) setLogoUrl(d.logo); })
       .catch(() => {});
     // Atualiza quando salvar os dados da igreja
