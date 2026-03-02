@@ -115,7 +115,8 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
       .then(r => r.ok ? r.json() : {})
       .then(d => { if (d.name) setChurchName(d.name); })
       .catch(() => {});
-    api.get<{ logo: string | null }>('/settings/logo')
+    fetch('/api/settings/logo')
+      .then(r => r.ok ? r.json() : {})
       .then(d => { 
         console.log('LOGO:', d); 
         if (d.logo) setLogoUrl(d.logo); 
