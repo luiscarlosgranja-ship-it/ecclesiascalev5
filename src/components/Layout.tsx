@@ -116,8 +116,11 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
       .then(d => { if (d.name) setChurchName(d.name); })
       .catch(() => {});
     api.get<{ logo: string | null }>('/settings/logo')
-      .then(d => { if (d.logo) setLogoUrl(d.logo); })
-      .catch(() => {});
+      .then(d => { 
+        console.log('LOGO:', d); 
+        if (d.logo) setLogoUrl(d.logo); 
+      })
+      .catch((err) => { console.error('ERRO LOGO:', err); });
     // Atualiza quando salvar os dados da igreja
     const handler = (e: any) => { if (e.detail?.name) setChurchName(e.detail.name); };
     window.addEventListener('church-updated', handler);
