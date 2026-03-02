@@ -707,6 +707,15 @@ app.post('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria')
   const { name, date, time, notes, status } = req.body;
   if (!name?.trim() || !date || !time) return res.status(400).json({ message: 'Nome, data e hora são obrigatórios' });
 
+  // Verifica conflito de horário no mesmo dia
+  const { data: conflict } = await db.from('pastoral_appointments')
+    .select('id, name')
+    .eq('date', date)
+    .eq('time', time)
+    .not('status', 'in', '("Cancelado")')
+    .maybeSingle();
+  if (conflict) return res.status(409).json({ message: `Horário já ocupado por ${conflict.name} neste dia. Escolha outro horário.` });
+
   const { data, error } = await db.from('pastoral_appointments').insert({
     name: name.trim(),
     date,
@@ -723,6 +732,16 @@ app.post('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria')
 app.put('/api/pastoral/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
   const { name, date, time, notes, status } = req.body;
   if (!name?.trim() || !date || !time) return res.status(400).json({ message: 'Nome, data e hora são obrigatórios' });
+
+  // Verifica conflito de horário (excluindo o próprio registro)
+  const { data: conflict } = await db.from('pastoral_appointments')
+    .select('id, name')
+    .eq('date', date)
+    .eq('time', time)
+    .not('status', 'in', '("Cancelado")')
+    .neq('id', req.params.id)
+    .maybeSingle();
+  if (conflict) return res.status(409).json({ message: `Horário já ocupado por ${conflict.name} neste dia. Escolha outro horário.` });
 
   const { error } = await db.from('pastoral_appointments').update({
     name: name.trim(), date, time,
