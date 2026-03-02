@@ -728,9 +728,22 @@ app.get('/api/settings/logo', async (req, res) => {
   res.json({ logo: data?.value || null });
 });
 
-app.put('/api/settings/logo', auth, requireRole('SuperAdmin'), async (req, res) => {
+app.put('/api/settings/logo', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const { logo } = req.body;
-  if (!logo) return res.status(400).json({ message: 'Logo obrigatório' });
+  if (logo === null || logo === undefined) {
+    await db.from('settings').delete().eq('key', 'church_logo');
+    return res.json({ message: 'Logo removido' });
+  }
+  await db.from('settings').upsert({ key: 'church_logo', value: logo }, { onConflict: 'key' });
+  res.json({ message: 'Logo salvo com sucesso' });
+});
+
+app.post('/api/settings/logo', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const { logo } = req.body;
+  if (logo === null || logo === undefined) {
+    await db.from('settings').delete().eq('key', 'church_logo');
+    return res.json({ message: 'Logo removido' });
+  }
   await db.from('settings').upsert({ key: 'church_logo', value: logo }, { onConflict: 'key' });
   res.json({ message: 'Logo salvo com sucesso' });
 });
