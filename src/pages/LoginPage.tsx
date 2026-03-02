@@ -21,6 +21,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [cultTypes, setCultTypes] = useState<{ id: number; name: string }[]>([]);
   const [availability, setAvailability] = useState<Record<number, boolean>>({});
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [churchName, setChurchName] = useState('');
 
   useEffect(() => {
     fetch('/api/public/departments')
@@ -35,6 +36,11 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     fetch('/api/settings/logo')
       .then(r => r.ok ? r.json() : {})
       .then(data => { if (data.logo) setLogoUrl(data.logo); })
+      .catch(() => {});
+    // ✅ Busca nome da igreja
+    fetch('/api/public/church-name')
+      .then(r => r.ok ? r.json() : {})
+      .then(data => { if (data.name) setChurchName(data.name); })
       .catch(() => {});
   }, []);
 
@@ -134,10 +140,10 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             </div>
           ) : (
             <div className="inline-flex items-center justify-center w-16 h-16 bg-amber-600 rounded-2xl shadow-lg mb-4">
-              <span className="text-white font-bold text-2xl">E</span>
+              <span className="text-white font-bold text-2xl">{(churchName || 'E')[0].toUpperCase()}</span>
             </div>
           )}
-          <h1 className="text-2xl font-bold text-stone-100">EcclesiaScale</h1>
+          <h1 className="text-2xl font-bold text-stone-100">{churchName || 'EcclesiaScale'}</h1>
           <p className="text-stone-500 text-sm mt-1">Gestão de Escalas para Igrejas</p>
         </div>
 
