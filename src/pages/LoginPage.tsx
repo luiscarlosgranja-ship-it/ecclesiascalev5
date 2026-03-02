@@ -33,14 +33,13 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       .then(data => setCultTypes(Array.isArray(data) ? data : []))
       .catch(() => {});
     // ✅ Busca logo customizado
-    fetch('/api/settings/logo')
-      .then(r => r.ok ? r.json() : {})
-      .then(data => { if (data.logo) setLogoUrl(data.logo); })
-      .catch(() => {});
-    // ✅ Busca nome da igreja
     fetch('/api/public/church-name')
       .then(r => r.ok ? r.json() : {})
       .then(data => { if (data.name) setChurchName(data.name); })
+      .catch(() => {});
+    fetch('/api/settings/logo')
+      .then(r => r.ok ? r.json() : {})
+      .then(data => { if (data.logo) setLogoUrl(data.logo); })
       .catch(() => {});
   }, []);
 
@@ -145,6 +144,11 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           )}
           <h1 className="text-2xl font-bold text-stone-100">{churchName || 'EcclesiaScale'}</h1>
           <p className="text-stone-500 text-sm mt-1">Gestão de Escalas para Igrejas</p>
+          <div className="flex items-center justify-center gap-2 mt-2">
+            <span className="text-stone-600 text-xs">EcclesiaScale v5.0</span>
+            <span className="text-stone-700 text-xs">•</span>
+            <span className="text-stone-600 text-xs">📞 21970031043</span>
+          </div>
         </div>
 
         <div className="bg-stone-900 border border-stone-700 rounded-2xl p-8 shadow-2xl">
