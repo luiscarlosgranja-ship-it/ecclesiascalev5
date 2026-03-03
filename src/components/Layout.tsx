@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Calendar, Repeat, Settings, LogOut, Bell,
   BookOpen, Layers, Shield, ChevronLeft, ChevronRight, Wifi, WifiOff,
   Database, Menu, X, Building2, Grid3X3, Church, RefreshCcw, KeyRound,
-  Sun, Moon, HeartHandshake, Phone
+  Sun, Moon, HeartHandshake, Phone, Mail, Image
 } from 'lucide-react';
 import type { AuthUser } from '../types';
 import { useNotifications } from '../hooks/useApi';
