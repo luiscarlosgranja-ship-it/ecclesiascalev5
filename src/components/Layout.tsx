@@ -394,7 +394,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
               </div>
           }
           <span style={{ fontFamily: "'Lora', serif", fontWeight: 700, fontSize: 15, color: 'var(--text-primary)', whiteSpace: 'nowrap', letterSpacing: -.2 }}>
-            {churchName || 'Ecclesia'}<span style={{ color: '#b45309' }}>Scale</span>
+            {churchName || 'EcclesiaScale'}
           </span>
         </button>
 
