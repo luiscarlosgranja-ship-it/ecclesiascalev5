@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Calendar, Repeat, Settings, LogOut, Bell,
   BookOpen, Layers, Shield, ChevronLeft, ChevronRight, Wifi, WifiOff,
   Database, Menu, X, Building2, Grid3X3, Church, RefreshCcw, KeyRound,
-  Sun, Moon, HeartHandshake, Phone, Mail, Image
+  Sun, Moon, HeartHandshake, Phone
 } from 'lucide-react';
 import type { AuthUser } from '../types';
 import { useNotifications } from '../hooks/useApi';
@@ -66,9 +66,7 @@ const NAV_GROUPS: NavGroup[] = [
 // Lista plana para lookup de label na topbar
 const ALL_NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard' },
-  { id: 'church',       label: 'Dados da Igreja' },
-  { id: 'email-config', label: 'Config. E-mail' },
-  { id: 'logo',         label: 'Logotipo' },
+  { id: 'church', label: 'Dados da Igreja' },
   ...NAV_GROUPS.flatMap(g => g.items),
 ];
 
@@ -106,7 +104,12 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
   function toggleTheme() { setTheme(t => t === 'dark' ? 'light' : 'dark'); }
 
   const [churchName, setChurchName] = useState('');
+  const [isActivated, setIsActivated] = useState<boolean | null>(null);
   useEffect(() => {
+    fetch('/api/settings/trial')
+      .then(r => r.ok ? r.json() : {})
+      .then(d => setIsActivated(d.isActive === true && d.isTrial !== true))
+      .catch(() => {});
     fetch('/api/public/church-name')
       .then(r => r.ok ? r.json() : {})
       .then(d => { if (d.name) setChurchName(d.name); })
@@ -121,9 +124,8 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
   const [notifOpen, setNotifOpen] = useState(false);
 
   // Filtra grupos e itens pelo role do usuário
-  const filteredGroups = NAV_GROUPS.map((group, idx) => ({
+  const filteredGroups = NAV_GROUPS.map(group => ({
     ...group,
-    _key: `${group.label}-${idx}`,
     items: group.items.filter(item => item.roles.includes(user.role)),
   })).filter(group => group.items.length > 0);
 
@@ -156,7 +158,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
       {/* Nav com grupos */}
       <nav className="flex-1 py-3 px-2 overflow-y-auto space-y-1">
         {filteredGroups.map(group => (
-          <div key={group._key}>
+          <div key={group.label}>
             {(!collapsed || mobile) && (
               <p className="text-stone-600 text-[10px] font-semibold uppercase tracking-widest px-3 pt-3 pb-1 select-none">
                 {group.label}
@@ -208,6 +210,14 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
               <p className="text-stone-600 text-[10px] text-center leading-tight">21970031043</p>
             </div>
             <p className="text-stone-700 text-[9px] text-center leading-tight">Contato EcclesiaScale</p>
+            {isActivated !== null && (
+              <div className={`flex items-center justify-center gap-1 mt-1 pt-1 border-t border-stone-800`}>
+                {isActivated
+                  ? <><span className="text-[9px] text-emerald-500">● Sistema Ativado</span></>
+                  : <><span className="text-[9px] text-amber-500">● Trial Ativo</span></>
+                }
+              </div>
+            )}
           </div>
         )}
         <button

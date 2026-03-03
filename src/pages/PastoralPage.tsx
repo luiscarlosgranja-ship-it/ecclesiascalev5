@@ -4,6 +4,7 @@ import { Card, Button, Modal, Input, Badge } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
 import type { AuthUser, PastoralAppointment } from '../types';
+import { isSuperAdmin, isAdmin } from '../utils/permissions';
 
 interface Props { user: AuthUser; }
 
@@ -178,11 +179,13 @@ export default function PastoralPage({ user }: Props) {
           <FileText size={14} /> Histórico
           <span className="text-xs opacity-60">({history.length})</span>
         </button>
-        <button onClick={() => setTab('activation')}
-          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === 'activation' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
-          <KeyRound size={14} /> Ativar Sistema
-          {isActivated && <ShieldCheck size={13} className="text-emerald-400" />}
-        </button>
+        {!isSuperAdmin(user.role) && !isAdmin(user.role) && (
+          <button onClick={() => setTab('activation')}
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === 'activation' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
+            <KeyRound size={14} /> Ativar Sistema
+            {isActivated && <ShieldCheck size={13} className="text-emerald-400" />}
+          </button>
+        )}
       </div>
 
       {/* Lista */}
