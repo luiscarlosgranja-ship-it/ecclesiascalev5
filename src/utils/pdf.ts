@@ -267,7 +267,8 @@ async function exportSingleCultBlocksPDF(
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...statusColor(scale.status));
         doc.setFontSize(5);
-        doc.text(scale.status, bx + c1w + c2w + blockPadding, rowY + 2.5, { maxWidth: c3w - blockPadding * 2 });
+        const statusText = typeof scale.status === 'object' ? 'Pendente' : scale.status;
+        doc.text(statusText, bx + c1w + c2w + blockPadding, rowY + 2.5, { maxWidth: c3w - blockPadding * 2 });
 
         rowY += rowH;
       });
@@ -432,13 +433,15 @@ async function exportMonthGridPDF(
       const maxLines = Math.floor((mbh - 2.5) / 1.5);
       
       deptGroup.scales.slice(0, maxLines).forEach((scale, idx) => {
-        const name = (scale.member_name || '—').substring(0, 15);
-        const status = scale.status === 'Confirmado' ? '✓' : 
-                       scale.status === 'Pendente' ? '○' : 
-                       scale.status === 'Troca' ? '⇄' : '✗';
+        const name = (scale.member_name || '—').substring(0, 12);
+        const statusSymbol = scale.status === 'Confirmado' ? '✓' : 
+                             scale.status === 'Pendente' ? '○' : 
+                             scale.status === 'Troca' ? '⇄' : '✗';
         
         doc.setTextColor(...statusColor(scale.status));
-        doc.text(`${status} ${name}`, mbx + 1.5, miniY, { maxWidth: mbw - 3 });
+        doc.setFont('helvetica', 'normal');
+        doc.text(`${statusSymbol}`, mbx + 1, miniY);
+        doc.text(`${name}`, mbx + 2.5, miniY, { maxWidth: mbw - 4 });
         miniY += 1.5;
       });
 
