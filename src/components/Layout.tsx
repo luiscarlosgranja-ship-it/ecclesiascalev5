@@ -117,20 +117,16 @@ function GroupDropdown({ group, page, setPage, accent, light, border }: {
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasActive = group.items.some(i => i.id === page);
 
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    if (open) document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
+  function openMenu()  { if (closeTimer.current) clearTimeout(closeTimer.current); setOpen(true); }
+  function closeMenu() { closeTimer.current = setTimeout(() => setOpen(false), 150); }
 
   return (
-    <div ref={ref} style={{ position: 'relative', height: '100%' }}>
+    <div ref={ref} style={{ position: 'relative', height: '100%' }}
+      onMouseEnter={openMenu} onMouseLeave={closeMenu}>
       <button
-        onClick={() => setOpen(o => !o)}
         style={{
           height: '100%', padding: '0 14px', background: 'transparent', border: 'none',
           borderBottom: hasActive ? `2px solid ${accent}` : open ? `2px solid ${border}` : '2px solid transparent',
@@ -141,8 +137,6 @@ function GroupDropdown({ group, page, setPage, accent, light, border }: {
           fontFamily: "'Plus Jakarta Sans', sans-serif",
           transition: 'all .15s', whiteSpace: 'nowrap',
         }}
-        onMouseEnter={e => { if (!hasActive && !open) e.currentTarget.style.color = 'var(--text-primary)'; }}
-        onMouseLeave={e => { if (!hasActive && !open) e.currentTarget.style.color = 'var(--text-muted)'; }}
       >
         {group.label}
         <ChevronDown
@@ -153,7 +147,7 @@ function GroupDropdown({ group, page, setPage, accent, light, border }: {
       </button>
 
       {open && (
-        <div style={{
+        <div onMouseEnter={openMenu} onMouseLeave={closeMenu} style={{
           position: 'absolute', top: 'calc(100% + 1px)', left: 0, minWidth: 220,
           background: 'var(--bg-surface)',
           border: '1px solid var(--border-soft)',
