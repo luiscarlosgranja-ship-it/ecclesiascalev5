@@ -92,6 +92,10 @@ export default function ScalesPage({ user }: Props) {
   const refetchScalesRef = useRef(refetchScales);
   const fetchDeptBlocksRef = useRef(fetchDeptBlocks);
   const refetchCultsRef = useRef(refetchCults);
+  // Flag para suprimir o Realtime durante operações de deleção de culto
+  // Sem isso, o Realtime detecta o DELETE nas scales e rebusca os dados,
+  // fazendo a escala "ressurgir" logo após ser deletada.
+  const suppressRealtimeRef = useRef(false);
 
   useEffect(() => { refetchScalesRef.current = refetchScales; }, [refetchScales]);
   useEffect(() => { fetchDeptBlocksRef.current = fetchDeptBlocks; }, [fetchDeptBlocks]);
@@ -104,6 +108,8 @@ export default function ScalesPage({ user }: Props) {
     const channel = sb
       .channel('scales-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'scales' }, () => {
+        // Se estamos no meio de uma deleção de culto, ignorar o evento
+        if (suppressRealtimeRef.current) return;
         // Debounce para evitar múltiplas chamadas em inserções bulk (auto-generate)
         if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
         realtimeDebounceRef.current = setTimeout(() => {
@@ -112,6 +118,7 @@ export default function ScalesPage({ user }: Props) {
         }, 800);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cults' }, () => {
+        if (suppressRealtimeRef.current) return;
         refetchCultsRef.current();
       })
       .subscribe();
@@ -193,41 +200,80 @@ export default function ScalesPage({ user }: Props) {
   // ─── Remove scale member ─────────────────────────────────────────────────────
   async function removeScale(id: number) {
     if (!confirm('Remover desta escala? O membro ficará disponível novamente.')) return;
-    await api.delete(`/scales/${id}`);
-    // Verifica se era o último membro — se sim, desfaz a escala (deleta o culto)
+
+    // Calcula membros restantes ANTES de deletar (estado local ainda tem todos)
     const remaining = (scales || []).filter(s => s.id !== id);
-    if (remaining.length === 0 && selectedCult) {
-      await api.delete(`/cults/${selectedCult}`);
+    const cultToDelete = remaining.length === 0 ? selectedCult : null;
+
+    if (cultToDelete) {
+      // Último membro: suprime o Realtime para evitar que o DELETE das scales
+      // dispare um refetch e "ressuscite" a escala na tela
+      suppressRealtimeRef.current = true;
+      // Limpa estado local imediatamente — antes de qualquer chamada de rede
       setSelectedCult(null);
-      refetchCults();
-      return;
+      setDeptBlocks([]);
     }
-    refetchScales(); fetchDeptBlocks();
+
+    try {
+      await api.delete(`/scales/${id}`);
+
+      if (cultToDelete) {
+        await api.delete(`/cults/${cultToDelete}`);
+        // Agora pode atualizar a lista de cultos
+        await refetchCults();
+      } else {
+        refetchScales();
+        fetchDeptBlocks();
+      }
+    } catch (e) {
+      // Em caso de erro, restaura o estado
+      if (cultToDelete) {
+        setSelectedCult(cultToDelete);
+      }
+      alert(e instanceof Error ? e.message : 'Erro ao remover membro');
+    } finally {
+      // Libera o Realtime após 1.5s (tempo suficiente para o DB propagar os DELETEs)
+      if (cultToDelete) {
+        setTimeout(() => { suppressRealtimeRef.current = false; }, 1500);
+      }
+    }
   }
 
   // ─── Delete entire scale ──────────────────────────────────────────────────────
   async function deleteEntireScale() {
     if (!selectedCult) return;
     setDeletingScale(true);
+
+    // Suprime Realtime antes de qualquer deleção para evitar ressurreição de dados
+    suppressRealtimeRef.current = true;
+    const cultToDelete = selectedCult;
+
+    // Limpa estado local imediatamente
+    setDeleteScaleModal(false);
+    setSelectedCult(null);
+    setDeptBlocks([]);
+
     try {
-      // Remove todos os membros da escala e depois o culto
-      await api.delete(`/cults/${selectedCult}/scale`);
-      setDeleteScaleModal(false);
-      setSelectedCult(null);
-      refetchCults();
-    } catch (e) {
-      // Fallback: tenta deletar o culto diretamente (backend pode cascade)
+      // Tenta rota dedicada (cascade no backend)
+      await api.delete(`/cults/${cultToDelete}/scale`);
+    } catch {
+      // Fallback: deleta o culto diretamente
       try {
-        await api.delete(`/cults/${selectedCult}`);
-        setDeleteScaleModal(false);
-        setSelectedCult(null);
-        refetchCults();
+        await api.delete(`/cults/${cultToDelete}`);
       } catch {
         alert('Erro ao remover escala');
+        // Restaura em caso de falha total
+        setSelectedCult(cultToDelete);
+        suppressRealtimeRef.current = false;
+        setDeletingScale(false);
+        return;
       }
-    } finally {
-      setDeletingScale(false);
     }
+
+    await refetchCults();
+    setDeletingScale(false);
+    // Libera o Realtime após propagar os DELETEs
+    setTimeout(() => { suppressRealtimeRef.current = false; }, 1500);
   }
 
   // ─── Add to scale ────────────────────────────────────────────────────────────
