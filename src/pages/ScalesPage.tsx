@@ -248,7 +248,7 @@ export default function ScalesPage({ user }: Props) {
 
     try {
       // 1) Busca scales direto da API — não usa estado React
-      //    (bug anterior: setSelectedCult(null) limpava scales ANTES do Promise.all)
+      //    (bug: setSelectedCult(null) limpava scales ANTES do Promise.all rodar)
       const freshScales = await api.get<{ id: number }[]>(`/scales?cult_id=${cultToDelete}`);
 
       // 2) Suprime Realtime antes de deletar
