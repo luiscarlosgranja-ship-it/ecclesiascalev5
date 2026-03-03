@@ -69,9 +69,9 @@ export default function App() {
       {page === 'scales'     && <ScalesPage     user={user} />}
       {page === 'cults'      && <CultsPage      user={user} />}
       {page === 'swaps'      && <SwapsPage      user={user} />}
-      {page === 'security'   && <SecurityPage   user={user} />}
-      {page === 'church'     && <ChurchPage     user={user} />}
-      {page === 'activation'  && <SecurityPage   user={user} initialTab='activate' />}
+      {page === 'security'   && <SecurityPage user={user} initialTab='reset'    hideTabs />}
+      {page === 'church'     && <ChurchPage   user={user} />}
+      {page === 'activation' && <SecurityPage user={user} initialTab='activate' hideTabs />}
       {/* Cadastros — RegistriesPage recebe qual aba abrir */}
       {(page === 'registries' || registryTab) && (
         <RegistriesPage user={user} initialTab={registryTab || undefined} />

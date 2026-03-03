@@ -6,9 +6,9 @@ import api from '../utils/api';
 import type { AuthUser, ActivationCode } from '../types';
 import { isSuperAdmin, isAdmin } from '../utils/permissions';
 
-interface Props { user: AuthUser; initialTab?: 'activation' | 'reset' | 'activate'; }
+interface Props { user: AuthUser; initialTab?: 'activation' | 'reset' | 'activate'; hideTabs?: boolean; }
 
-export default function SecurityPage({ user, initialTab }: Props) {
+export default function SecurityPage({ user, initialTab, hideTabs }: Props) {
   const defaultTab = initialTab || (isSuperAdmin(user.role) ? 'activation' : 'activate');
   const [tab, setTab] = useState<'activation' | 'reset' | 'activate'>(defaultTab);
   const [institution, setInstitution] = useState('');
@@ -77,16 +77,22 @@ export default function SecurityPage({ user, initialTab }: Props) {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-xl font-bold text-stone-100">Segurança</h1>
+      <h1 className="text-xl font-bold text-stone-100">
+        {hideTabs
+          ? tab === 'reset'       ? 'Reset de Senha'
+          : tab === 'activate'    ? 'Ativar Sistema'
+          : 'Gerador de Chaves'
+          : 'Segurança'}
+      </h1>
 
-      <div className="flex border-b border-stone-700">
+      {!hideTabs && <div className="flex border-b border-stone-700">
         {TABS.map(t => (
           <button key={t.id} onClick={() => setTab(t.id as any)}
             className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${tab === t.id ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
             {t.label}
           </button>
         ))}
-      </div>
+      </div>}
 
       {/* Activation Code Generator — SuperAdmin only */}
       {tab === 'activation' && isSuperAdmin(user.role) && (

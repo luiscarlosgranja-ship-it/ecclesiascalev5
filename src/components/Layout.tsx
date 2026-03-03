@@ -52,13 +52,19 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: 'Backup',
+    items: [
+      { id: 'backup',       label: 'Fazer Backup',     icon: <Database size={18} />,   roles: ['SuperAdmin', 'Admin'] },
+      { id: 'restore',      label: 'Restaurar Backup', icon: <RefreshCcw size={18} />, roles: ['SuperAdmin', 'Admin'] },
+      { id: 'email-config', label: 'Config. E-mail',   icon: <Mail size={18} />,       roles: ['SuperAdmin', 'Admin'] },
+      { id: 'logo',         label: 'Logotipo',         icon: <Image size={18} />,      roles: ['SuperAdmin', 'Admin'] },
+    ],
+  },
+  {
     label: 'Segurança',
     items: [
-      { id: 'activation', label: 'Ativação do Sistema', icon: <KeyRound size={18} />, roles: ['Secretaria'] },
       { id: 'security',   label: 'Reset de Senha',      icon: <Shield size={18} />,   roles: ['SuperAdmin', 'Admin'] },
-      { id: 'backup',     label: 'Backup',              icon: <Database size={18} />, roles: ['SuperAdmin', 'Admin'] },
-      { id: 'restore',    label: 'Restaurar Backup',    icon: <RefreshCcw size={18} />, roles: ['SuperAdmin', 'Admin'] },
-      { id: 'activation', label: 'Ativação do Sistema', icon: <KeyRound size={18} />, roles: ['SuperAdmin', 'Admin', 'Líder', 'Membro'] },
+      { id: 'activation', label: 'Ativação do Sistema', icon: <KeyRound size={18} />, roles: ['SuperAdmin', 'Admin', 'Líder', 'Membro', 'Secretaria'] },
     ],
   },
 ];
