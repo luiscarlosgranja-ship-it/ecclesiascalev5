@@ -560,21 +560,16 @@ app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líd
   if (!cult) return res.status(404).json({ message: 'Culto não encontrado' });
   const monthStr = cult.date.slice(0, 7);
 
-  // Departamento padrão do culto = Diáconos / Obreiros (id = 8)
-  // Setores que pertencem a este departamento (padrão do culto)
+  // Departamento Diáconos/Obreiros (id=8) — dono dos setores padrão do culto
   const DEPT_DIACONOS_ID = 8;
-  const SETORES_DIACONOS = ['setor 1', 'setor 2', 'setor 3', 'setor 4', 'recepção', 'externo', 'máquinas de cartão'];
-  // Setores de outros departamentos — não entram na montagem automática padrão
-  const SETORES_OUTROS_DEPTS = ['som', 'iluminação', 'iluminacao', 'foto', 'filmagem', 'som e iluminação', 'som e iluminacao'];
 
+  // Busca apenas setores do departamento Diáconos/Obreiros (vinculados via department_id)
   const { data: allSectors } = await db.from('sectors').select('*').eq('is_active', true);
   if (!allSectors?.length) return res.status(400).json({ message: 'Nenhum setor ativo cadastrado' });
 
-  // Apenas setores do culto padrão (Diáconos/Obreiros)
-  const sectors = allSectors.filter(s => {
-    const nome = s.name.toLowerCase().trim();
-    return !SETORES_OUTROS_DEPTS.includes(nome);
-  });
+  // Filtra pelos setores que pertencem ao depto Diáconos/Obreiros
+  const sectors = allSectors.filter(s => s.department_id === DEPT_DIACONOS_ID);
+  if (!sectors.length) return res.status(400).json({ message: 'Nenhum setor do depto Diáconos/Obreiros encontrado' });
 
   // Voluntários já escalados neste culto
   const { data: already } = await db.from('scales').select('member_id, sector_id').eq('cult_id', cult_id);
@@ -585,7 +580,7 @@ app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líd
   const pendingSectors = sectors.filter(s => !alreadySectorIds.has(s.id));
   if (!pendingSectors.length) return res.json({ message: 'Todos os setores já estão preenchidos', created: 0 });
 
-  // Voluntários ativos do departamento Diáconos/Obreiros têm prioridade
+  // Voluntários ativos — prioriza membros do próprio depto Diáconos/Obreiros (volantes)
   const { data: allMembers } = await db.from('members')
     .select('id, name, department_id')
     .eq('is_active', true)
@@ -602,8 +597,8 @@ app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líd
     monthCountMap[m.id] = count || 0;
   }
 
-  // Filtra elegíveis: não escalado neste culto + menos de 3x no mês
-  // Prioriza membros do depto Diáconos/Obreiros, depois demais
+  // Elegíveis: não escalado neste culto + menos de 3x no mês
+  // Diáconos/Obreiros têm prioridade por serem volantes
   const eligibleDiaconos = (allMembers || []).filter(m =>
     m.department_id === DEPT_DIACONOS_ID &&
     !alreadyMemberIds.has(m.id) &&
@@ -615,7 +610,7 @@ app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líd
     monthCountMap[m.id] < 3
   );
 
-  // Embaralha cada grupo separadamente para distribuição justa
+  // Embaralha cada grupo separadamente, Diáconos primeiro
   const shuffled = [
     ...eligibleDiaconos.sort(() => Math.random() - 0.5),
     ...eligibleOthers.sort(() => Math.random() - 0.5),
@@ -632,7 +627,7 @@ app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líd
       cult_id,
       member_id: candidate.id,
       sector_id: sector.id,
-      department_id: DEPT_DIACONOS_ID, // escala padrão sempre vinculada ao depto Diáconos
+      department_id: DEPT_DIACONOS_ID,
     });
 
     if (!error) {
@@ -673,11 +668,9 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
   const { data: members } = await db.from('members').select('*').eq('is_active', true).eq('status', 'Ativo');
   const { data: allSectorsAG } = await db.from('sectors').select('*').eq('is_active', true);
 
-  // Escala padrão: apenas setores do departamento Diáconos/Obreiros (id = 8)
-  // Mídia, Louvor, Infantil etc. montam a própria escala separadamente
+  // Escala padrão = apenas setores do depto Diáconos/Obreiros (id=8), filtrados por department_id
   const DEPT_DIACONOS_ID = 8;
-  const SETORES_OUTROS_DEPTS = ['som', 'iluminação', 'iluminacao', 'foto', 'filmagem', 'som e iluminação', 'som e iluminacao'];
-  const sectors = (allSectorsAG || []).filter(s => !SETORES_OUTROS_DEPTS.includes(s.name.toLowerCase().trim()));
+  const sectors = (allSectorsAG || []).filter(s => s.department_id === DEPT_DIACONOS_ID);
 
   let created = 0;
 
@@ -699,7 +692,7 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
           cult_id: cult.id,
           member_id: member.id,
           sector_id: sector.id,
-          department_id: DEPT_DIACONOS_ID, // escala padrão sempre vinculada ao depto Diáconos/Obreiros
+          department_id: DEPT_DIACONOS_ID,
         });
         created++;
         break; // one member per sector per cult
