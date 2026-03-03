@@ -550,7 +550,7 @@ app.get('/api/scales/by-department/:cult_id', auth, async (req, res) => {
   const { data: scales, error } = await db.from('scales').select(`
     id, status, department_id,
     members(id, name, department_id),
-    sectors(name),
+    sectors(id, name, department_id),
     departments(name)
   `).eq('cult_id', cult_id).order('department_id');
 
@@ -565,8 +565,9 @@ app.get('/api/scales/by-department/:cult_id', auth, async (req, res) => {
   grouped['none'] = { department_id: null, department_name: 'Sem Departamento', scales: [] };
 
   for (const s of scales || []) {
-    // ✅ Prioridade: department_id do membro (sempre correto), fallback para o da escala
-    const deptId = s.members?.department_id || s.department_id || null;
+    // ✅ Prioridade: department_id do SETOR (onde o membro foi escalado),
+    //    fallback para department_id do membro, depois da escala
+    const deptId = s.sectors?.department_id || s.members?.department_id || s.department_id || null;
     const key = deptId && grouped[deptId] ? deptId : 'none';
     grouped[key].scales.push({
       id: s.id,
@@ -575,7 +576,7 @@ app.get('/api/scales/by-department/:cult_id', auth, async (req, res) => {
       member_id: s.members?.id,
       sector_name: s.sectors?.name || '—',
       department_id: deptId,
-      department_name: grouped[deptId]?.department_name || s.departments?.name || '—',
+      department_name: grouped[deptId]?.department_name || '—',
     });
   }
 
