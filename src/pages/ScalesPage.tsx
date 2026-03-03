@@ -244,35 +244,32 @@ export default function ScalesPage({ user }: Props) {
     if (!selectedCult) return;
     setDeletingScale(true);
 
-    suppressRealtimeRef.current = true;
     const cultToDelete = selectedCult;
-    const currentScales = scales || [];
-
-    // Limpa estado local imediatamente — UI responde na hora
-    setDeleteScaleModal(false);
-    setSelectedCult(null);
-    setDeptBlocks([]);
 
     try {
-      // 1) Remove cada membro da escala individualmente
-      //    (garante funcionamento mesmo sem rota /cults/:id/scale no backend)
-      await Promise.all(currentScales.map(s => api.delete(`/scales/${s.id}`)));
+      // 1) Busca scales direto da API — não usa estado React
+      //    (bug anterior: setSelectedCult(null) limpava scales ANTES do Promise.all)
+      const freshScales = await api.get<{ id: number }[]>(`/scales?cult_id=${cultToDelete}`);
 
-      // 2) Agora deleta o culto (sem FK pendente)
+      // 2) Suprime Realtime antes de deletar
+      suppressRealtimeRef.current = true;
+
+      // 3) Remove cada scale (libera FK antes de deletar o culto)
+      if (freshScales && freshScales.length > 0) {
+        await Promise.all(freshScales.map(s => api.delete(`/scales/${s.id}`)));
+      }
+
+      // 4) Deleta o culto (sem FK pendente, banco aceita)
       await api.delete(`/cults/${cultToDelete}`);
 
+      // 5) Limpa estado local SOMENTE após sucesso
+      setDeleteScaleModal(false);
+      setSelectedCult(null);
+      setDeptBlocks([]);
       await refetchCults();
+
     } catch (e) {
-      // Algo falhou: tenta rota dedicada como fallback
-      try {
-        await api.delete(`/cults/${cultToDelete}/scale`);
-        await refetchCults();
-      } catch (e2) {
-        const msg = e2 instanceof Error ? e2.message : 'Erro ao remover escala';
-        alert(msg);
-        // Restaura seleção para o usuário tentar novamente
-        setSelectedCult(cultToDelete);
-      }
+      alert(e instanceof Error ? e.message : 'Erro ao remover escala');
     } finally {
       setDeletingScale(false);
       setTimeout(() => { suppressRealtimeRef.current = false; }, 1500);
