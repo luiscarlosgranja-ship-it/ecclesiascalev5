@@ -477,7 +477,14 @@ app.post('/api/scales', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asyn
     }
   }
 
-  const { data, error } = await db.from('scales').insert({ cult_id, member_id, sector_id }).select().single();
+  // Resolve department_id: from request body or from the leader's own department
+  let department_id = req.body.department_id || null;
+  if (!department_id && req.user.member_id) {
+    const { data: leaderMember } = await db.from('members').select('department_id').eq('id', req.user.member_id).single();
+    department_id = leaderMember?.department_id || null;
+  }
+
+  const { data, error } = await db.from('scales').insert({ cult_id, member_id, sector_id, department_id }).select().single();
   if (error) return res.status(500).json({ message: error.message });
 
   // Notify member
@@ -490,6 +497,59 @@ app.post('/api/scales', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asyn
   res.json({ id: data.id });
 });
 
+// ─── Escalas agrupadas por departamento para um culto ────────────────────────
+app.get('/api/scales/by-department/:cult_id', auth, async (req, res) => {
+  const cult_id = Number(req.params.cult_id);
+
+  const { data: scales, error } = await db.from('scales').select(`
+    id, status, department_id,
+    members(id, name, department_id),
+    sectors(name),
+    departments(name)
+  `).eq('cult_id', cult_id).order('department_id');
+
+  if (error) return res.status(500).json({ message: error.message });
+
+  // Fetch all departments for complete block listing (even empty ones)
+  const { data: allDepartments } = await db.from('departments').select('*').eq('is_active', true).order('name');
+
+  // Group scales by department
+  const grouped = {};
+
+  // Init all active departments as empty blocks
+  for (const dept of allDepartments || []) {
+    grouped[dept.id] = { department_id: dept.id, department_name: dept.name, scales: [] };
+  }
+
+  // Add a special group for scales with no department
+  grouped['none'] = { department_id: null, department_name: 'Sem Departamento', scales: [] };
+
+  for (const s of scales || []) {
+    const deptId = s.department_id || s.members?.department_id || null;
+    const key = deptId && grouped[deptId] ? deptId : 'none';
+    grouped[key].scales.push({
+      id: s.id,
+      status: s.status,
+      member_name: s.members?.name || '—',
+      member_id: s.members?.id,
+      sector_name: s.sectors?.name || '—',
+      department_id: deptId,
+      department_name: s.departments?.name || grouped[key]?.department_name || '—',
+    });
+  }
+
+  // Filter out empty "Sem Departamento" group and empty departments with no scales
+  const result = Object.values(grouped)
+    .filter(g => g.scales.length > 0 || g.department_id !== null)
+    .sort((a, b) => {
+      if (a.department_id === null) return 1;
+      if (b.department_id === null) return -1;
+      return a.department_name.localeCompare(b.department_name);
+    });
+
+  res.json(result);
+});
+
 // ─── Preencher voluntários automaticamente para um culto específico ───────────
 app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { cult_id } = req.body;
@@ -500,11 +560,9 @@ app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líd
   if (!cult) return res.status(404).json({ message: 'Culto não encontrado' });
   const monthStr = cult.date.slice(0, 7);
 
-  // Setores ativos — exclui setores de departamento específico (Som, Iluminação, Foto, Filmagem)
-  const SETORES_DEPARTAMENTO = ['som', 'iluminação', 'iluminacao', 'foto', 'filmagem', 'som e iluminação', 'som e iluminacao'];
+  // Setores ativos
   const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
-  const setoresPadrao = (sectors || []).filter(s => !SETORES_DEPARTAMENTO.includes(s.name.toLowerCase().trim()));
-  if (!setoresPadrao.length) return res.status(400).json({ message: 'Nenhum setor ativo cadastrado' });
+  if (!sectors?.length) return res.status(400).json({ message: 'Nenhum setor ativo cadastrado' });
 
   // Voluntários já escalados neste culto
   const { data: already } = await db.from('scales').select('member_id, sector_id').eq('cult_id', cult_id);
@@ -512,7 +570,7 @@ app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líd
   const alreadySectorIds = new Set((already || []).map(s => s.sector_id));
 
   // Setores que ainda precisam de voluntário
-  const pendingSectors = setoresPadrao.filter(s => !alreadySectorIds.has(s.id));
+  const pendingSectors = sectors.filter(s => !alreadySectorIds.has(s.id));
   if (!pendingSectors.length) return res.json({ message: 'Todos os setores já estão preenchidos', created: 0 });
 
   // Voluntários ativos com disponibilidade para este tipo de culto
@@ -590,10 +648,7 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
 
   const { data: cults } = await cultsQuery;
   const { data: members } = await db.from('members').select('*').eq('is_active', true).eq('status', 'Ativo');
-  const { data: allSectors } = await db.from('sectors').select('*').eq('is_active', true);
-  // Exclui setores de departamento específico da montagem padrão
-  const SETORES_DEPT = ['som', 'iluminação', 'iluminacao', 'foto', 'filmagem', 'som e iluminação', 'som e iluminacao'];
-  const sectors = (allSectors || []).filter(s => !SETORES_DEPT.includes(s.name.toLowerCase().trim()));
+  const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
 
   let created = 0;
 
