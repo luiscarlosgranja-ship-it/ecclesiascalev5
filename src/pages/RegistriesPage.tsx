@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, ToggleLeft, ToggleRight, Download, Clock, AlertTriangle, ShieldOff } from 'lucide-react';
+import { Plus, Edit, Trash2, ToggleLeft, ToggleRight, Download, Clock, AlertTriangle, ShieldOff, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, Button, Modal, Input, Badge } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import { useTrialStatus } from '../hooks/useTrialStatus';
@@ -42,6 +42,204 @@ const DEFAULT_CULT_TYPES = [
   { name: 'Quinta-feira (Culto da Vitória)',            default_day: 4, default_time: '19:30' },
   { name: 'Segunda-feira Noite (Culto de Empreendedores)', default_day: 1, default_time: '19:30' },
 ];
+
+// ─── Setores agrupados por departamento ───────────────────────────────────────
+function SectorsView({ sectors, departments, onRefetch }: {
+  sectors: any[];
+  departments: any[];
+  onRefetch: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editItem, setEditItem] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  function toggleCollapse(key: string) {
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+
+  function openNew(departmentId: number) {
+    setEditItem({ name: '', is_active: 1, department_id: departmentId });
+    setError('');
+    setModalOpen(true);
+  }
+
+  function openEdit(sector: any) {
+    setEditItem({ ...sector });
+    setError('');
+    setModalOpen(true);
+  }
+
+  async function save() {
+    if (!editItem?.name?.trim()) { setError('Nome é obrigatório'); return; }
+    setSaving(true); setError('');
+    try {
+      if (editItem.id) {
+        await api.put(`/sectors/${editItem.id}`, editItem);
+      } else {
+        await api.post('/sectors', editItem);
+      }
+      setModalOpen(false);
+      onRefetch();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao salvar');
+    } finally { setSaving(false); }
+  }
+
+  async function toggleActive(sector: any) {
+    await api.put(`/sectors/${sector.id}`, { ...sector, is_active: sector.is_active ? 0 : 1 });
+    onRefetch();
+  }
+
+  async function remove(id: number) {
+    if (!confirm('Excluir este setor? Esta ação não pode ser desfeita.')) return;
+    try {
+      await api.delete(`/sectors/${id}`);
+      onRefetch();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao excluir');
+    }
+  }
+
+  // Group sectors by department_id
+  const grouped: Record<string, { dept: any; sectors: any[] }> = {};
+
+  // Init all departments
+  for (const dept of departments) {
+    grouped[dept.id] = { dept, sectors: [] };
+  }
+  // Sem departamento
+  grouped['none'] = { dept: { id: null, name: 'Sem Departamento' }, sectors: [] };
+
+  for (const s of sectors) {
+    const key = s.department_id && grouped[s.department_id] ? String(s.department_id) : 'none';
+    grouped[key].sectors.push(s);
+  }
+
+  const groups = Object.entries(grouped)
+    .filter(([, g]) => g.sectors.length > 0 || g.dept.id !== null)
+    .sort(([, a], [, b]) => {
+      if (a.dept.id === null) return 1;
+      if (b.dept.id === null) return -1;
+      return a.dept.name.localeCompare(b.dept.name);
+    });
+
+  return (
+    <>
+      <div className="space-y-3">
+        {groups.map(([key, { dept, sectors: deptSectors }]) => {
+          const isCollapsed = collapsed.has(key);
+          const activeCount = deptSectors.filter(s => s.is_active).length;
+
+          return (
+            <Card key={key} className="overflow-hidden">
+              {/* Block header */}
+              <div className="flex items-center justify-between px-4 py-3 bg-stone-800/50 border-b border-stone-700">
+                <button
+                  onClick={() => toggleCollapse(key)}
+                  className="flex items-center gap-2 text-left flex-1"
+                >
+                  {isCollapsed ? <ChevronDown size={15} className="text-stone-500" /> : <ChevronUp size={15} className="text-stone-500" />}
+                  <span className="text-stone-200 font-semibold text-sm">{dept.name}</span>
+                  <span className="text-stone-500 text-xs">
+                    {activeCount}/{deptSectors.length} ativo(s)
+                  </span>
+                </button>
+                {dept.id !== null && (
+                  <Button size="sm" onClick={() => openNew(dept.id)}>
+                    <Plus size={13} /> Novo Setor
+                  </Button>
+                )}
+              </div>
+
+              {/* Sectors table */}
+              {!isCollapsed && (
+                <div className="overflow-x-auto">
+                  {deptSectors.length === 0 ? (
+                    <div className="py-6 text-center">
+                      <p className="text-stone-600 text-xs">Nenhum setor cadastrado neste departamento</p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-stone-800">
+                          <th className="text-left p-3 text-stone-500 font-medium text-xs">#</th>
+                          <th className="text-left p-3 text-stone-500 font-medium text-xs">Nome</th>
+                          <th className="text-left p-3 text-stone-500 font-medium text-xs">Status</th>
+                          <th className="text-right p-3 text-stone-500 font-medium text-xs">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {deptSectors.map((s: any, i: number) => (
+                          <tr key={s.id} className="border-b border-stone-800/60 hover:bg-stone-800/20 transition-colors">
+                            <td className="p-3 text-stone-600 text-xs">{i + 1}</td>
+                            <td className="p-3 text-stone-200 font-medium">{s.name}</td>
+                            <td className="p-3">
+                              <Badge label={s.is_active ? 'Ativo' : 'Inativo'} color={s.is_active ? 'green' : 'gray'} />
+                            </td>
+                            <td className="p-3">
+                              <div className="flex justify-end gap-1">
+                                <button onClick={() => toggleActive(s)} title="Ativar/Desativar"
+                                  className="text-stone-400 hover:text-stone-200 p-1 transition-colors">
+                                  {s.is_active
+                                    ? <ToggleRight size={16} className="text-emerald-400" />
+                                    : <ToggleLeft size={16} />}
+                                </button>
+                                <button onClick={() => openEdit(s)}
+                                  className="text-amber-400 hover:text-amber-300 p-1 transition-colors">
+                                  <Edit size={15} />
+                                </button>
+                                <button onClick={() => remove(s.id)}
+                                  className="text-red-400 hover:text-red-300 p-1 transition-colors">
+                                  <Trash2 size={15} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* Modal Novo / Editar Setor */}
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)}
+        title={editItem?.id ? 'Editar Setor' : 'Novo Setor'} size="sm">
+        {editItem && (
+          <div className="space-y-4">
+            <Input
+              label="Nome *"
+              value={editItem.name || ''}
+              onChange={e => { setEditItem((i: any) => ({ ...i, name: e.target.value })); setError(''); }}
+              placeholder="Digite o nome do setor..."
+              autoFocus
+            />
+            {error && (
+              <div className="flex items-center gap-2 bg-red-900/20 border border-red-700 rounded-lg px-3 py-2">
+                <AlertTriangle size={14} className="text-red-400 flex-shrink-0" />
+                <p className="text-red-300 text-xs">{error}</p>
+              </div>
+            )}
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={() => setModalOpen(false)}>Cancelar</Button>
+              <Button onClick={save} loading={saving}>Salvar</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+    </>
+  );
+}
 
 export default function RegistriesPage({ user, initialTab }: Props) {
   const [tab, setTab] = useState<Tab>(() => resolveTab(initialTab));
@@ -186,9 +384,11 @@ export default function RegistriesPage({ user, initialTab }: Props) {
           <Button variant="secondary" size="sm" onClick={() => setSeedConfirm(true)}>
             <Download size={16} /> Popular Padrões
           </Button>
-          <Button size="sm" onClick={openNew}>
-            <Plus size={16} /> Novo
-          </Button>
+          {tab !== 'sectors' && (
+            <Button size="sm" onClick={openNew}>
+              <Plus size={16} /> Novo
+            </Button>
+          )}
         </div>
       </div>
 
@@ -245,10 +445,18 @@ export default function RegistriesPage({ user, initialTab }: Props) {
       <div className="text-xs text-stone-500 px-1">
         {tab === 'ministries' && 'Gerencie os ministérios da igreja (Louvor, Homens, Mulheres, Família, etc.)'}
         {tab === 'departments' && 'Gerencie os departamentos (Família, Som, Infantil, Jovens, etc.)'}
-        {tab === 'sectors' && 'Gerencie os setores de escala (Setor 1, Recepção, Externo, etc.)'}
+        {tab === 'sectors' && 'Gerencie os setores de escala agrupados por departamento.'}
         {tab === 'cult_types' && 'Gerencie os tipos de culto com dia e horário padrão'}
       </div>
 
+      {/* ─── Aba Setores: blocos por departamento ─────────────────────────── */}
+      {tab === 'sectors' ? (
+        <SectorsView
+          sectors={sectors || []}
+          departments={departments || []}
+          onRefetch={rSec}
+        />
+      ) : (
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -310,6 +518,7 @@ export default function RegistriesPage({ user, initialTab }: Props) {
           )}
         </div>
       </Card>
+      )}
 
       {/* Modal Novo / Editar */}
       <Modal open={modalOpen} onClose={() => setModalOpen(false)}
