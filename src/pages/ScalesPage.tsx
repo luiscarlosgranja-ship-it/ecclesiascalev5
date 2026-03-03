@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Printer, Zap, Trash2, CheckCircle, Repeat, Calendar, Users, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, Button, Modal, Badge, Select, Spinner, Input } from '../components/ui';
 import { useApi } from '../hooks/useApi';
@@ -82,6 +82,8 @@ export default function ScalesPage({ user }: Props) {
   useEffect(() => { fetchDeptBlocks(); }, [fetchDeptBlocks]);
 
   // ─── Supabase Realtime ───────────────────────────────────────────────────────
+  const realtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     const sb = getSupabase();
     if (!sb) return;
@@ -89,15 +91,22 @@ export default function ScalesPage({ user }: Props) {
     const channel = sb
       .channel('scales-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'scales' }, () => {
-        refetchScales();
-        fetchDeptBlocks();
+        // Debounce to avoid cascading loops from bulk inserts (auto-generate)
+        if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
+        realtimeDebounceRef.current = setTimeout(() => {
+          refetchScales();
+          fetchDeptBlocks();
+        }, 800);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cults' }, () => {
         refetchCults();
       })
       .subscribe();
 
-    return () => { sb.removeChannel(channel); };
+    return () => {
+      if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
+      sb.removeChannel(channel);
+    };
   }, [refetchScales, refetchCults, fetchDeptBlocks]);
 
   // ─── Toggle block collapse ───────────────────────────────────────────────────
@@ -124,15 +133,21 @@ export default function ScalesPage({ user }: Props) {
 
   // ─── Auto generate ───────────────────────────────────────────────────────────
   async function generateAuto() {
-    if (!selectedCult && autoType !== 'month') { setError('Selecione um culto'); return; }
+    if (!selectedCult && autoType !== 'month') { setError('Selecione um culto antes de gerar'); return; }
     setSaving(true); setError('');
     try {
       const payload = autoType === 'month'
         ? { type: 'month', month: new Date().toISOString().slice(0, 7) }
         : { type: autoType, cult_id: selectedCult };
       await api.post('/scales/auto-generate', payload);
+      // Close modal first, then refresh — avoids triggering multiple re-renders
+      // that combined with Supabase realtime could cause a cascade loop
       setAutoModal(false);
-      refetchScales(); fetchDeptBlocks();
+      // Small delay so realtime debounce handles the DB changes instead of duplicating
+      setTimeout(() => {
+        refetchScales();
+        fetchDeptBlocks();
+      }, 1000);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao gerar escala');
     } finally { setSaving(false); }
@@ -563,10 +578,13 @@ export default function ScalesPage({ user }: Props) {
               </label>
             ))}
           </div>
+          {!selectedCult && autoType !== 'month' && (
+            <p className="text-amber-400 text-xs">⚠️ Para gerar Cultos Padrão ou Temáticos, selecione um culto na tela principal primeiro.</p>
+          )}
           {error && <p className="text-red-400 text-xs">{error}</p>}
           <div className="flex gap-3">
             <Button variant="outline" onClick={() => setAutoModal(false)}>Cancelar</Button>
-            <Button onClick={generateAuto} loading={saving}>Gerar</Button>
+            <Button onClick={generateAuto} loading={saving} disabled={!selectedCult && autoType !== 'month'}>Gerar</Button>
           </div>
         </div>
       </Modal>
