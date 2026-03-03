@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, ToggleLeft, ToggleRight, Download, Clock, AlertTriangle, ShieldOff, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Edit, Trash2, ToggleLeft, ToggleRight, Clock, AlertTriangle, ShieldOff, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, Button, Modal, Input, Badge } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import { useTrialStatus } from '../hooks/useTrialStatus';
@@ -17,31 +17,6 @@ function resolveTab(raw?: string): Tab {
 
 const DIAS_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
-const DEFAULT_MINISTRIES = [
-  'Louvor', 'Homens', 'Mulheres', 'Família', 'Ação Social', 'Mídia',
-  'Intercessão', 'Infantil', 'Jovens', 'Adolescentes',
-];
-
-const DEFAULT_DEPARTMENTS = [
-  'Família', 'Som', 'Infantil', 'Adolescentes', 'Jovens',
-  'Terceira Idade', 'Obreiros / Diáconos', 'Recepção', 'Mídia', 'Louvor',
-];
-
-const DEFAULT_SECTORS = [
-  'Setor 1', 'Setor 2', 'Setor 3', 'Setor 4',
-  'Recepção', 'Externo', 'Máquinas de Cartão',
-  'Foto', 'Filmagem', 'Som e Iluminação',
-];
-
-const DEFAULT_CULT_TYPES = [
-  { name: 'Domingo Manhã',                              default_day: 0, default_time: '09:00' },
-  { name: 'Domingo Noite (Celebração)',                 default_day: 0, default_time: '19:00' },
-  { name: 'Terça-feira (EDP)',                          default_day: 2, default_time: '19:30' },
-  { name: 'Quarta-feira Manhã (Manhã de Milagres)',     default_day: 3, default_time: '09:00' },
-  { name: 'Quarta-feira Noite (Quarta D)',              default_day: 3, default_time: '19:30' },
-  { name: 'Quinta-feira (Culto da Vitória)',            default_day: 4, default_time: '19:30' },
-  { name: 'Segunda-feira Noite (Culto de Empreendedores)', default_day: 1, default_time: '19:30' },
-];
 
 // ─── Setores agrupados por departamento ───────────────────────────────────────
 function SectorsView({ sectors, departments, onRefetch, user }: {
@@ -251,9 +226,7 @@ export default function RegistriesPage({ user, initialTab }: Props) {
   const [editItem, setEditItem] = useState<any>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [seeding, setSeeding] = useState(false);
   const [error, setError] = useState('');
-  const [seedConfirm, setSeedConfirm] = useState(false);
 
   const trial = useTrialStatus();
 
@@ -315,40 +288,6 @@ export default function RegistriesPage({ user, initialTab }: Props) {
     refetchMap[tab]();
   }
 
-  async function seedDefaults() {
-    setSeeding(true);
-    try {
-      const existing = {
-        ministries: (ministries || []).map((m: any) => m.name.toLowerCase()),
-        departments: (departments || []).map((d: any) => d.name.toLowerCase()),
-        sectors: (sectors || []).map((s: any) => s.name.toLowerCase()),
-        cult_types: (cultTypes || []).map((c: any) => c.name.toLowerCase()),
-      };
-
-      for (const name of DEFAULT_MINISTRIES) {
-        if (!existing.ministries.includes(name.toLowerCase()))
-          await api.post('/ministries', { name, is_active: 1 });
-      }
-      for (const name of DEFAULT_DEPARTMENTS) {
-        if (!existing.departments.includes(name.toLowerCase()))
-          await api.post('/departments', { name, is_active: 1 });
-      }
-      for (const name of DEFAULT_SECTORS) {
-        if (!existing.sectors.includes(name.toLowerCase()))
-          await api.post('/sectors', { name, is_active: 1 });
-      }
-      for (const ct of DEFAULT_CULT_TYPES) {
-        if (!existing.cult_types.includes(ct.name.toLowerCase()))
-          await api.post('/cult_types', ct);
-      }
-
-      rMin(); rDept(); rSec(); rCT();
-      setSeedConfirm(false);
-      alert('Dados padrão cadastrados com sucesso!');
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Erro ao popular dados');
-    } finally { setSeeding(false); }
-  }
 
   const TABS: { id: Tab; label: string }[] = [
     { id: 'ministries', label: 'Ministérios' },
@@ -385,9 +324,6 @@ export default function RegistriesPage({ user, initialTab }: Props) {
       <div className="flex items-center justify-between flex-wrap gap-4">
         <h1 className="text-xl font-bold text-stone-100">Cadastros</h1>
         <div className="flex gap-2 flex-wrap">
-          <Button variant="secondary" size="sm" onClick={() => setSeedConfirm(true)}>
-            <Download size={16} /> Popular Padrões
-          </Button>
           {tab !== 'sectors' && (
             <Button size="sm" onClick={openNew}>
               <Plus size={16} /> Novo
@@ -518,7 +454,6 @@ export default function RegistriesPage({ user, initialTab }: Props) {
           {dataMap[tab].length === 0 && (
             <div className="py-10 text-center">
               <p className="text-stone-500 text-sm">Nenhum item cadastrado</p>
-              <p className="text-stone-600 text-xs mt-1">Clique em "Popular Padrões" para carregar os dados padrão</p>
             </div>
           )}
         </div>
@@ -578,38 +513,6 @@ export default function RegistriesPage({ user, initialTab }: Props) {
         )}
       </Modal>
 
-      {/* Modal Confirmar Popular Padrões */}
-      <Modal open={seedConfirm} onClose={() => setSeedConfirm(false)}
-        title="Popular Dados Padrão" size="sm">
-        <div className="space-y-4">
-          <p className="text-stone-300 text-sm">
-            Isso irá cadastrar automaticamente os seguintes dados padrão (apenas os que ainda não existirem):
-          </p>
-          <div className="space-y-3 text-xs text-stone-400">
-            <div>
-              <p className="text-stone-300 font-medium mb-1">Ministérios ({DEFAULT_MINISTRIES.length})</p>
-              <p className="leading-relaxed">{DEFAULT_MINISTRIES.join(', ')}</p>
-            </div>
-            <div>
-              <p className="text-stone-300 font-medium mb-1">Departamentos ({DEFAULT_DEPARTMENTS.length})</p>
-              <p className="leading-relaxed">{DEFAULT_DEPARTMENTS.join(', ')}</p>
-            </div>
-            <div>
-              <p className="text-stone-300 font-medium mb-1">Setores ({DEFAULT_SECTORS.length})</p>
-              <p className="leading-relaxed">{DEFAULT_SECTORS.join(', ')}</p>
-            </div>
-            <div>
-              <p className="text-stone-300 font-medium mb-1">Tipos de Culto ({DEFAULT_CULT_TYPES.length})</p>
-              <p className="leading-relaxed">{DEFAULT_CULT_TYPES.map(c => c.name).join(', ')}</p>
-            </div>
-          </div>
-          <p className="text-stone-500 text-xs">✅ Itens já existentes não serão duplicados.</p>
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setSeedConfirm(false)}>Cancelar</Button>
-            <Button onClick={seedDefaults} loading={seeding}>Confirmar e Popular</Button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }
