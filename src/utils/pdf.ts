@@ -114,26 +114,38 @@ interface DepartmentGroup {
 
 // Mapeamento explícito de setores para departamentos (case-insensitive)
 const SETOR_DEPARTMENT_MAP: { [key: string]: string } = {
+  // Diáconos / Obreiros
   'setor 1': 'Diáconos / Obreiros',
   'setor 2': 'Diáconos / Obreiros',
   'setor 3': 'Diáconos / Obreiros',
   'setor 4': 'Diáconos / Obreiros',
   'maquininhas': 'Diáconos / Obreiros',
+  'máquina de cartão': 'Diáconos / Obreiros',
+  'maquina de cartao': 'Diáconos / Obreiros',
   'recepção': 'Diáconos / Obreiros',
+  'recepcao': 'Diáconos / Obreiros',
   'externo': 'Diáconos / Obreiros',
   
+  // Mídia
   'som': 'Mídia',
   'filmagem': 'Mídia',
   'foto': 'Mídia',
   'transmissão': 'Mídia',
+  'transmissao': 'Mídia',
   'câmera': 'Mídia',
+  'camera': 'Mídia',
   'redes sociais': 'Mídia',
   'mídia': 'Mídia',
+  'media': 'Mídia',
   
+  // Infantil
   'infantil': 'Infantil',
   'berçário': 'Infantil',
+  'bercario': 'Infantil',
   'escola bíblica': 'Infantil',
+  'escola biblica': 'Infantil',
   
+  // Louvor
   'bateria': 'Louvor',
   'back 1': 'Louvor',
   'back 2': 'Louvor',
@@ -141,18 +153,25 @@ const SETOR_DEPARTMENT_MAP: { [key: string]: string } = {
   'back 4': 'Louvor',
   'vocal': 'Louvor',
   'violão': 'Louvor',
+  'violao': 'Louvor',
   'baixo': 'Louvor',
   'guitarra': 'Louvor',
   'teclado': 'Louvor',
   'louvor': 'Louvor',
   'música': 'Louvor',
+  'musica': 'Louvor',
   'canto': 'Louvor',
   
+  // Una
   'una': 'Una',
   
+  // Bem-Vindos
   'bem-vindos': 'Bem-Vindos',
   'bem vindos': 'Bem-Vindos',
+  'bem-vindo': 'Bem-Vindos',
+  'bem vindo': 'Bem-Vindos',
   'recepção de bem-vindos': 'Bem-Vindos',
+  'recepcao de bem-vindos': 'Bem-Vindos',
   'boas-vindas': 'Bem-Vindos',
   'boas vindas': 'Bem-Vindos',
 };
@@ -171,17 +190,24 @@ function groupScalesByDepartment(scales: Scale[]): DepartmentGroup[] {
   // Agrupar escalas por departamento usando o mapeamento
   const deptMap = new Map<string, Scale[]>();
   
+  console.log('=== AGRUPAMENTO DE DEPARTAMENTOS ===');
+  console.log('Escalas recebidas:', scales.length);
+  
   for (const scale of scales) {
     const sectorName = scale.sector_name || 'Sem Setor';
-    // Converter para lowercase para buscar no mapeamento
     const sectorLower = sectorName.toLowerCase().trim();
     const deptName = SETOR_DEPARTMENT_MAP[sectorLower] || sectorName;
+    
+    console.log(`"${sectorName}" (${sectorLower}) → "${deptName}"`);
     
     if (!deptMap.has(deptName)) {
       deptMap.set(deptName, []);
     }
     deptMap.get(deptName)!.push(scale);
   }
+  
+  console.log('Departamentos encontrados:', Array.from(deptMap.keys()));
+  console.log('Ordem esperada:', DEPARTMENT_ORDER);
   
   // Retornar na ordem fixa dos departamentos
   const result: DepartmentGroup[] = [];
@@ -197,8 +223,11 @@ function groupScalesByDepartment(scales: Scale[]): DepartmentGroup[] {
   
   // Adicionar departamentos não mapeados
   for (const [deptName, scales] of deptMap) {
+    console.warn(`Departamento não mapeado encontrado: "${deptName}"`);
     result.push({ name: deptName, scales });
   }
+  
+  console.log('Resultado final:', result.map(r => ({ name: r.name, count: r.scales.length })));
   
   return result;
 }
