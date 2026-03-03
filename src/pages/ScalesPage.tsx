@@ -33,6 +33,7 @@ interface AutoResult {
 export default function ScalesPage({ user }: Props) {
   const [selectedCult, setSelectedCult] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<'departments' | 'list'>('departments');
+  const [selectedDepartmentForScale, setSelectedDepartmentForScale] = useState<number | null>(null);
 
   const [deptBlocks, setDeptBlocks] = useState<DeptBlock[]>([]);
   const [deptLoading, setDeptLoading] = useState(false);
@@ -66,8 +67,8 @@ export default function ScalesPage({ user }: Props) {
 
   // Modal de seleção de departamentos para impressão
   const [printConfigModal, setPrintConfigModal] = useState(false);
-  const [availableSectors, setAvailableSectors] = useState<string[]>([]);
-  const [selectedSectorsForPrint, setSelectedSectorsForPrint] = useState<string[]>([]);
+  const [availableDepartments, setAvailableDepartments] = useState<Array<{ id: number; name: string }>>([]);
+  const [selectedDepartmentsForPrint, setSelectedDepartmentsForPrint] = useState<number[]>([]);
   const [printingMode, setPrintingMode] = useState<'cult' | 'month'>('cult');
 
   const { data: cults, refetch: refetchCults } = useApi<Cult[]>('/cults?status=Agendado');
@@ -314,10 +315,20 @@ export default function ScalesPage({ user }: Props) {
   async function handlePrint() {
     if (!scales || !selectedCultData) return;
     
-    // Extrair setores únicos das escalas
-    const uniqueSectors = [...new Set(scales.map(s => s.sector_name).filter(Boolean))];
-    setAvailableSectors(uniqueSectors);
-    setSelectedSectorsForPrint(uniqueSectors);
+    // Extrair departamentos únicos das escalas
+    const { data: depts } = await api.get<Array<{ id: number; name: string }>>('/departments');
+    const uniqueDepts = (depts || []).filter(d => 
+      scales.some(s => s.sector_name && 
+        (d.name === 'Diáconos / Obreiros' || 
+         d.name === 'Mídia' || 
+         d.name === 'Infantil' || 
+         d.name === 'Louvor' || 
+         d.name === 'Una' || 
+         d.name === 'Bem-Vindos'))
+    );
+    
+    setAvailableDepartments(uniqueDepts);
+    setSelectedDepartmentsForPrint(uniqueDepts.map(d => d.id));
     setPrintingMode('cult');
     setPrintConfigModal(true);
   }
@@ -335,11 +346,21 @@ export default function ScalesPage({ user }: Props) {
       )
     );
     
-    // Extrair setores únicos do mês
+    // Extrair departamentos únicos do mês
     const allMonthScales = results.flat();
-    const uniqueSectors = [...new Set(allMonthScales.map(s => s.sector_name).filter(Boolean))];
-    setAvailableSectors(uniqueSectors);
-    setSelectedSectorsForPrint(uniqueSectors);
+    const { data: depts } = await api.get<Array<{ id: number; name: string }>>('/departments');
+    const uniqueDepts = (depts || []).filter(d => 
+      allMonthScales.some(s => s.sector_name && 
+        (d.name === 'Diáconos / Obreiros' || 
+         d.name === 'Mídia' || 
+         d.name === 'Infantil' || 
+         d.name === 'Louvor' || 
+         d.name === 'Una' || 
+         d.name === 'Bem-Vindos'))
+    );
+    
+    setAvailableDepartments(uniqueDepts);
+    setSelectedDepartmentsForPrint(uniqueDepts.map(d => d.id));
     setPrintingMode('month');
     setPrintConfigModal(true);
   }
@@ -347,14 +368,14 @@ export default function ScalesPage({ user }: Props) {
   async function executePrint() {
     if (printingMode === 'cult') {
       if (!scales || !selectedCultData) return;
-      const filteredScales = scales.filter(s => selectedSectorsForPrint.includes(s.sector_name || ''));
       await exportScalePDF(
-        filteredScales, 
+        scales, 
         selectedCultData, 
         `Escala — ${selectedCultData.type_name || selectedCultData.name || 'Culto'}`,
         undefined,
         undefined,
-        selectedSectorsForPrint
+        undefined,
+        selectedDepartmentsForPrint
       );
     } else {
       const month = new Date().toISOString().slice(0, 7);
@@ -370,14 +391,14 @@ export default function ScalesPage({ user }: Props) {
       );
       
       const allMonthScales = results.flat();
-      const filteredScales = allMonthScales.filter(s => selectedSectorsForPrint.includes(s.sector_name || ''));
       await exportScalePDF(
-        filteredScales, 
+        allMonthScales, 
         null, 
         `Escalas — ${month}`, 
-        filteredScales, 
+        allMonthScales, 
         monthCults,
-        selectedSectorsForPrint
+        undefined,
+        selectedDepartmentsForPrint
       );
     }
     setPrintConfigModal(false);
@@ -837,7 +858,7 @@ export default function ScalesPage({ user }: Props) {
       </Modal>
 
       {/* ─── Modal: Adicionar Voluntário ─────────────────────────────────────── */}
-      <Modal open={addModal} onClose={() => setAddModal(false)} title="Adicionar Voluntário à Escala" size="sm">
+      <Modal open={addModal} onClose={() => { setAddModal(false); setSelectedDepartmentForScale(null); }} title="Adicionar Voluntário à Escala" size="sm">
         <div className="space-y-4">
           {selectedCultData && (
             <div className="bg-stone-800/50 rounded-lg p-3 text-xs text-stone-400 space-y-1">
@@ -850,13 +871,32 @@ export default function ScalesPage({ user }: Props) {
             onChange={e => setNewScale(n => ({ ...n, member_id: e.target.value }))}
             placeholder="Selecionar voluntário..."
             options={(members || []).map(m => ({ value: m.id, label: m.name }))} />
+          
+          {/* Novo: Seletor de Departamento */}
+          <Select label="Departamento *" value={selectedDepartmentForScale?.toString() || ''}
+            onChange={e => setSelectedDepartmentForScale(e.target.value ? Number(e.target.value) : null)}
+            placeholder="Selecionar departamento..."
+            options={(sectors || [])
+              .filter((s, i, arr) => arr.findIndex(x => x.department_id === s.department_id) === i)
+              .sort((a, b) => (a.department_id || 0) - (b.department_id || 0))
+              .map(s => ({ 
+                value: s.department_id?.toString() || '', 
+                label: s.department_name || 'Sem Departamento'
+              }))
+            } />
+          
+          {/* Filtrado: Seletor de Setor */}
           <Select label="Setor / Local *" value={newScale.sector_id}
             onChange={e => setNewScale(n => ({ ...n, sector_id: e.target.value }))}
             placeholder="Selecionar setor..."
-            options={(sectors || []).map(s => ({ value: s.id, label: s.name }))} />
+            options={(sectors || [])
+              .filter(s => !selectedDepartmentForScale || s.department_id === selectedDepartmentForScale)
+              .map(s => ({ value: s.id, label: s.name }))
+            } />
+          
           {error && <p className="text-red-400 text-xs">{error}</p>}
           <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setAddModal(false)}>Cancelar</Button>
+            <Button variant="outline" onClick={() => { setAddModal(false); setSelectedDepartmentForScale(null); }}>Cancelar</Button>
             <Button onClick={addToScale} loading={saving}>Adicionar</Button>
           </div>
         </div>
@@ -872,25 +912,25 @@ export default function ScalesPage({ user }: Props) {
           </p>
 
           <div className="bg-stone-800 rounded-lg p-3 space-y-2 max-h-96 overflow-y-auto">
-            {availableSectors.length === 0 ? (
+            {availableDepartments.length === 0 ? (
               <p className="text-stone-500 text-sm italic">Nenhum departamento disponível</p>
             ) : (
-              availableSectors.map(sector => (
-                <label key={sector} 
+              availableDepartments.map(dept => (
+                <label key={dept.id} 
                   className="flex items-center gap-3 cursor-pointer p-2 rounded hover:bg-stone-700 transition-colors">
                   <input 
                     type="checkbox" 
-                    checked={selectedSectorsForPrint.includes(sector)}
+                    checked={selectedDepartmentsForPrint.includes(dept.id)}
                     onChange={e => {
                       if (e.target.checked) {
-                        setSelectedSectorsForPrint(prev => [...prev, sector]);
+                        setSelectedDepartmentsForPrint(prev => [...prev, dept.id]);
                       } else {
-                        setSelectedSectorsForPrint(prev => prev.filter(s => s !== sector));
+                        setSelectedDepartmentsForPrint(prev => prev.filter(id => id !== dept.id));
                       }
                     }}
                     className="w-4 h-4 accent-amber-500" 
                   />
-                  <span className="text-stone-200 text-sm">{sector}</span>
+                  <span className="text-stone-200 text-sm">{dept.name}</span>
                 </label>
               ))
             )}
@@ -898,17 +938,17 @@ export default function ScalesPage({ user }: Props) {
 
           <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg p-3">
             <p className="text-amber-200 text-xs">
-              ✓ {selectedSectorsForPrint.length} de {availableSectors.length} departamento(s) selecionado(s)
+              ✓ {selectedDepartmentsForPrint.length} de {availableDepartments.length} departamento(s) selecionado(s)
             </p>
           </div>
 
           <div className="flex gap-2">
-            <button onClick={() => setSelectedSectorsForPrint(availableSectors)}
+            <button onClick={() => setSelectedDepartmentsForPrint(availableDepartments.map(d => d.id))}
               className="text-amber-400 text-xs hover:text-amber-300 transition-colors">
               Selecionar todos
             </button>
             <span className="text-stone-600 text-xs">•</span>
-            <button onClick={() => setSelectedSectorsForPrint([])}
+            <button onClick={() => setSelectedDepartmentsForPrint([])}
               className="text-stone-500 text-xs hover:text-stone-400 transition-colors">
               Limpar
             </button>
@@ -916,7 +956,7 @@ export default function ScalesPage({ user }: Props) {
 
           <div className="flex gap-3">
             <Button variant="outline" onClick={() => setPrintConfigModal(false)}>Cancelar</Button>
-            <Button onClick={executePrint} disabled={selectedSectorsForPrint.length === 0}>
+            <Button onClick={executePrint} disabled={selectedDepartmentsForPrint.length === 0}>
               <Printer size={16} /> Imprimir Agora
             </Button>
           </div>
