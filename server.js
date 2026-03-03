@@ -1,4 +1,4 @@
 cp ~/Downloads/server.js server.js
 git add server.js
-git commit -m "perf(scales): elimina loop N*M*K de queries no auto-generate, usa 3 queries + processamento em memória"
+git commit -m "fix(scales): agrupa voluntários pelo department_id do membro e corrige insert no auto-generate"
 git push
