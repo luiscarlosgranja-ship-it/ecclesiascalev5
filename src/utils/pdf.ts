@@ -403,59 +403,80 @@ async function exportMonthGridPDF(
     const cScales = allScales.filter(s => s.cult_id === cult.id);
     const deptGroups = groupScalesByDepartmentForMonth(cScales);
     
-    let deptY = by + blockHeaderH + 1;
-    const miniBlockH = Math.floor((rowMaxH - blockHeaderH - 2) / Math.max(1, deptGroups.length));
-    
-    deptGroups.forEach((deptGroup, deptIdx) => {
-      const mbx = bx + 1;
-      const mby = deptY + deptIdx * miniBlockH;
-      const mbw = colW - 2;
-      const mbh = miniBlockH - 0.5;
-
-      // Mini-bloco background
-      doc.setFillColor(245, 243, 240);
-      doc.setDrawColor(220, 215, 210);
-      doc.setLineWidth(0.15);
-      doc.rect(mbx, mby, mbw, mbh, 'FD');
-
-      // Nome do departamento (pequeno, no topo)
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(4.5);
-      doc.setTextColor(100, 90, 80);
-      doc.text(deptGroup.name, mbx + 1, mby + 2, { maxWidth: mbw - 2 });
-
-      // Lista compacta de voluntários
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(4);
-      doc.setTextColor(60, 55, 50);
+    // Se não há departamentos, mostrar mensagem
+    if (deptGroups.length === 0) {
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(5);
+      doc.setTextColor(160, 150, 140);
+      const contentY = by + blockHeaderH + 5;
+      doc.text('Sem escalas', bx + 2, contentY, { maxWidth: colW - 4 });
+    } else {
+      let deptY = by + blockHeaderH + 1;
+      const miniBlockH = Math.floor((rowMaxH - blockHeaderH - 2) / Math.max(1, deptGroups.length));
       
-      let miniY = mby + 3.8;
-      const maxLines = Math.floor((mbh - 3) / 2);
-      
-      deptGroup.scales.slice(0, maxLines).forEach((scale, idx) => {
-        const name = (scale.member_name || '—').substring(0, 12);
-        const statusSymbol = scale.status === 'Confirmado' ? '✓' : 
-                             scale.status === 'Pendente' ? '○' : 
-                             scale.status === 'Troca' ? '⇄' : '✗';
-        
-        doc.setTextColor(...statusColor(scale.status));
+      deptGroups.forEach((deptGroup, deptIdx) => {
+        const mbx = bx + 1;
+        const mby = deptY + deptIdx * miniBlockH;
+        const mbw = colW - 2;
+        const mbh = miniBlockH - 0.5;
+
+        // Mini-bloco background
+        doc.setFillColor(245, 243, 240);
+        doc.setDrawColor(220, 215, 210);
+        doc.setLineWidth(0.15);
+        doc.rect(mbx, mby, mbw, mbh, 'FD');
+
+        // Nome do departamento (pequeno, no topo)
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(4);
-        doc.text(`${statusSymbol}`, mbx + 1, miniY);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(4);
-        doc.setTextColor(60, 55, 50);
-        doc.text(`${name}`, mbx + 2.3, miniY, { maxWidth: mbw - 4 });
-        miniY += 2;
+        doc.setTextColor(80, 70, 60);
+        doc.text(deptGroup.name, mbx + 1, mby + 2, { maxWidth: mbw - 2 });
+
+        // Lista de voluntários
+        if (deptGroup.scales.length === 0) {
+          doc.setFont('helvetica', 'italic');
+          doc.setFontSize(3);
+          doc.setTextColor(160, 150, 140);
+          doc.text('vazio', mbx + 1, mby + 4);
+        } else {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(3.2);
+          
+          let miniY = mby + 4;
+          const lineHeight = 1.8;
+          const maxLines = Math.max(1, Math.floor((mbh - 3) / lineHeight));
+          
+          // Mostrar até maxLines voluntários
+          for (let i = 0; i < Math.min(maxLines, deptGroup.scales.length); i++) {
+            const scale = deptGroup.scales[i];
+            const statusSymbol = scale.status === 'Confirmado' ? '✓' : 
+                                 scale.status === 'Pendente' ? '○' : 
+                                 scale.status === 'Troca' ? '⇄' : '✗';
+            
+            // Símbolo de status
+            doc.setTextColor(...statusColor(scale.status));
+            doc.setFont('helvetica', 'bold');
+            doc.text(statusSymbol, mbx + 0.8, miniY);
+            
+            // Nome do voluntário
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(40, 35, 30);
+            const volName = (scale.member_name || '?').substring(0, 14);
+            doc.text(volName, mbx + 2, miniY, { maxWidth: mbw - 3.5 });
+            
+            miniY += lineHeight;
+          }
+          
+          // Se houver mais voluntários, mostrar "+N"
+          if (deptGroup.scales.length > maxLines) {
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(2.8);
+            doc.setTextColor(150, 140, 130);
+            doc.text(`+${deptGroup.scales.length - maxLines}`, mbx + 0.8, miniY);
+          }
+        }
       });
-
-      if (deptGroup.scales.length > maxLines) {
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(3);
-        doc.setTextColor(150, 140, 130);
-        doc.text(`+${deptGroup.scales.length - maxLines}`, mbx + 1.5, miniY);
-      }
-    });
+    }
 
     col++;
     if (col >= COLS) {
@@ -494,33 +515,41 @@ async function exportMonthGridPDF(
 }
 
 function groupScalesByDepartmentForMonth(scales: Scale[]): DepartmentGroup[] {
+  // Se não há escalas, retorna array vazio
+  if (!scales || scales.length === 0) {
+    return [];
+  }
+  
   const deptMap = new Map<string, Scale[]>();
   
-  const deptNames: { [key: string]: string } = {
-    'Diáconos / Obreiros': 'Diáconos / Obreiros',
-    'Infantil': 'Infantil',
-    'Louvor': 'Louvor',
-    'Midia': 'Mídia',
-    'Recepcao': 'Recepção',
-    'Intercessao': 'Intercessão',
-  };
-
+  // Mapear cada escala para um departamento
   for (const scale of scales) {
-    const sector = scale.sector_name || 'Sem Setor';
-    const deptKey = sector.includes('Infantil') ? 'Infantil' :
-                    sector.includes('Louvor') || sector.includes('Música') ? 'Louvor' :
-                    sector.includes('Mídia') || sector.includes('Transmissão') ? 'Midia' :
-                    sector.includes('Obreiro') || sector.includes('Diácono') ? 'Diáconos / Obreiros' :
-                    sector.includes('Recepcao') || sector.includes('Boas-vindas') ? 'Recepcao' :
-                    sector.includes('Intercessao') || sector.includes('Oração') ? 'Intercessao' :
-                    'Outro';
+    let deptName = 'Outro';
     
-    const deptName = deptNames[deptKey] || sector;
-    if (!deptMap.has(deptName)) deptMap.set(deptName, []);
+    // Detectar departamento pelo nome do setor
+    const sectorLower = (scale.sector_name || '').toLowerCase();
+    
+    if (sectorLower.includes('infantil') || sectorLower.includes('criança')) {
+      deptName = 'Infantil';
+    } else if (sectorLower.includes('louvor') || sectorLower.includes('música') || sectorLower.includes('canto')) {
+      deptName = 'Louvor';
+    } else if (sectorLower.includes('mídia') || sectorLower.includes('transmissão') || sectorLower.includes('som') || sectorLower.includes('câmera')) {
+      deptName = 'Mídia';
+    } else if (sectorLower.includes('obreiro') || sectorLower.includes('diácono') || sectorLower.includes('recepção') || sectorLower.includes('boas-vindas')) {
+      deptName = 'Diáconos / Obreiros';
+    } else if (sectorLower.includes('intercessão') || sectorLower.includes('oração')) {
+      deptName = 'Intercessão';
+    }
+    
+    // Adicionar à mapa
+    if (!deptMap.has(deptName)) {
+      deptMap.set(deptName, []);
+    }
     deptMap.get(deptName)!.push(scale);
   }
-
-  const order = ['Diáconos / Obreiros', 'Infantil', 'Louvor', 'Mídia'];
+  
+  // Ordenar departamentos
+  const order = ['Diáconos / Obreiros', 'Infantil', 'Louvor', 'Mídia', 'Intercessão'];
   const result: DepartmentGroup[] = [];
   
   for (const name of order) {
@@ -530,8 +559,9 @@ function groupScalesByDepartmentForMonth(scales: Scale[]): DepartmentGroup[] {
     }
   }
   
-  for (const [name, scales] of deptMap) {
-    result.push({ name, scales });
+  // Adicionar departamentos restantes
+  for (const [name, scaleList] of deptMap) {
+    result.push({ name, scales: scaleList });
   }
   
   return result;
