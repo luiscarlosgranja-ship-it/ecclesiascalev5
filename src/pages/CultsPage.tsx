@@ -1,40 +1,55 @@
 import { useState, useEffect } from 'react';
-import { Plus, Edit, Ban, History, Calendar, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
+import { Plus, Edit, Ban, History, Calendar, ChevronLeft, ChevronRight, Trash2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Card, Button, Modal, Badge, Select, Input } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
 import { supabase } from '../utils/supabaseClient';
-import type { AuthUser, Cult, CultType } from '../types';
+import type { AuthUser, Cult, CultType, Sector } from '../types';
 import { format, addMonths, subMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 interface Props { user: AuthUser; }
 
+interface GenerateResult {
+  cultsCreated: number;
+  scalesCreated: number;
+  cultNames: string[];
+  errors: string[];
+}
+
+const OPTIONAL_SCALE_SECTORS = [
+  { key: 'recepcao',    label: 'Recepção',            description: 'Voluntários de boas-vindas' },
+  { key: 'louvor',      label: 'Louvor / Música',      description: 'Equipe de louvor e instrumentistas' },
+  { key: 'midia',       label: 'Mídia / Transmissão',  description: 'Som, câmera, redes sociais' },
+  { key: 'infantil',    label: 'Ministério Infantil',  description: 'Berçário e escola bíblica' },
+  { key: 'intercessao', label: 'Intercessão',          description: 'Equipe de oração' },
+];
+
 export default function CultsPage({ user }: Props) {
   const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
   const [generateModal, setGenerateModal] = useState(false);
+  const [generateStep, setGenerateStep] = useState<1 | 2>(1);
   const [editModal, setEditModal] = useState<Partial<Cult> | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [selectedTypes, setSelectedTypes] = useState<number[]>([]);
+  const [selectedScaleSectors, setSelectedScaleSectors] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [result, setResult] = useState<GenerateResult | null>(null);
 
   const { data: cults, refetch } = useApi<Cult[]>('/cults');
   const { data: cultTypes } = useApi<CultType[]>('/cult_types');
+  const { data: sectors } = useApi<Sector[]>('/sectors?is_active=1');
 
-  const active = (cults || []).filter(c => c.status !== 'Cancelado' && c.status !== 'Realizado');
-  const history = (cults || []).filter(c => c.status === 'Cancelado' || c.status === 'Realizado');
+  const active  = (cults || []).filter(c => c.status !== 'Cancelado' && c.status !== 'Realizado');
+  const history = (cults || []).filter(c => c.status === 'Cancelado'  || c.status === 'Realizado');
 
-  // ─── Supabase Realtime ───────────────────────────────────────────────────────
   useEffect(() => {
     const channel = supabase
       .channel('cults-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'cults' }, () => {
-        refetch();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cults' }, () => { refetch(); })
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, [refetch]);
 
@@ -42,29 +57,72 @@ export default function CultsPage({ user }: Props) {
     return c.name || c.type_name || '(Sem nome)';
   }
 
+  function openGenerateModal() {
+    setGenerateModal(true);
+    setGenerateStep(1);
+    setSelectedTypes([]);
+    setSelectedScaleSectors([]);
+    setError('');
+    setResult(null);
+  }
+
+  function closeGenerateModal() {
+    setGenerateModal(false);
+    setGenerateStep(1);
+    setResult(null);
+    setError('');
+  }
+
   async function generateMonth() {
     if (selectedTypes.length === 0) { setError('Selecione ao menos um tipo de culto'); return; }
     setGenerating(true); setError('');
     try {
-      await api.post('/cults/generate-month', {
-        month: format(selectedMonth, 'yyyy-MM'),
-        cult_type_ids: selectedTypes,
+      const cultRes = await api.post<{ created: number; cults: { id: number; name?: string; type_name?: string }[] }>(
+        '/cults/generate-month',
+        { month: format(selectedMonth, 'yyyy-MM'), cult_type_ids: selectedTypes }
+      );
+
+      const createdCults = cultRes.cults || [];
+      let scalesCreated = 0;
+      const scaleErrors: string[] = [];
+
+      if (createdCults.length > 0) {
+        for (const cult of createdCults) {
+          try {
+            const payload = {
+              type: 'standard',
+              cult_id: cult.id,
+              include_sectors: selectedScaleSectors,
+              include_deacons: true,
+            };
+            const res = await api.post<{ created: number }>('/scales/auto-generate', payload);
+            scalesCreated += res?.created || 0;
+          } catch {
+            scaleErrors.push(getCultName(cult as Cult));
+          }
+        }
+      }
+
+      setResult({
+        cultsCreated: cultRes.created || createdCults.length,
+        scalesCreated,
+        cultNames: createdCults.map(c => c.name || c.type_name || 'Culto'),
+        errors: scaleErrors,
       });
-      setGenerateModal(false);
+
       refetch();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao gerar');
-    } finally { setGenerating(false); }
+    } finally {
+      setGenerating(false);
+    }
   }
 
   async function cancelCult(c: Cult) {
     if (!confirm(`Cancelar o culto "${getCultName(c)}"?`)) return;
     await api.put(`/cults/${c.id}`, {
-      type_id: c.type_id || null,
-      name: c.name || null,
-      date: c.date,
-      time: c.time,
-      status: 'Cancelado',
+      type_id: c.type_id || null, name: c.name || null,
+      date: c.date, time: c.time, status: 'Cancelado',
     });
     refetch();
   }
@@ -91,12 +149,14 @@ export default function CultsPage({ user }: Props) {
     } finally { setSaving(false); }
   }
 
+  const stepLabel = generateStep === 1 ? 'Passo 1 de 2 — Cultos' : 'Passo 2 de 2 — Escalas';
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-4">
         <h1 className="text-xl font-bold text-stone-100">Cultos / Eventos</h1>
         <div className="flex gap-2">
-          <Button variant="secondary" size="sm" onClick={() => { setGenerateModal(true); setError(''); }}>
+          <Button variant="secondary" size="sm" onClick={openGenerateModal}>
             <Calendar size={16} /> Gerar Mês
           </Button>
           <Button size="sm" onClick={() => { setEditModal({ status: 'Agendado' }); setError(''); }}>
@@ -109,13 +169,11 @@ export default function CultsPage({ user }: Props) {
       <div className="flex border-b border-stone-700">
         <button onClick={() => setActiveTab('active')}
           className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${activeTab === 'active' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
-          Eventos Ativos
-          <span className="ml-1.5 text-xs opacity-60">({active.length})</span>
+          Eventos Ativos <span className="ml-1.5 text-xs opacity-60">({active.length})</span>
         </button>
         <button onClick={() => setActiveTab('history')}
           className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'history' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
-          <History size={14} /> Histórico
-          <span className="text-xs opacity-60">({history.length})</span>
+          <History size={14} /> Histórico <span className="text-xs opacity-60">({history.length})</span>
         </button>
       </div>
 
@@ -141,10 +199,8 @@ export default function CultsPage({ user }: Props) {
                   <td className="p-3 text-stone-400 text-xs">{c.date}</td>
                   <td className="p-3 text-stone-400 text-xs">{c.time}</td>
                   <td className="p-3">
-                    <Badge
-                      label={c.status}
-                      color={c.status === 'Agendado' ? 'blue' : c.status === 'Confirmado' ? 'green' : c.status === 'Cancelado' ? 'red' : 'gray'}
-                    />
+                    <Badge label={c.status}
+                      color={c.status === 'Agendado' ? 'blue' : c.status === 'Confirmado' ? 'green' : c.status === 'Cancelado' ? 'red' : 'gray'} />
                   </td>
                   <td className="p-3">
                     <div className="flex justify-end gap-1">
@@ -180,85 +236,214 @@ export default function CultsPage({ user }: Props) {
         </div>
       </Card>
 
-      {/* Modal: Gerar Cultos do Mês */}
-      <Modal open={generateModal} onClose={() => setGenerateModal(false)} title="Gerar Cultos do Mês" size="md">
+      {/* ─── Modal: Gerar Cultos do Mês ─────────────────────────────────────── */}
+      <Modal open={generateModal} onClose={closeGenerateModal} title="Gerar Cultos do Mês" size="md">
         <div className="space-y-5">
-          <div>
-            <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Mês de Referência</label>
-            <div className="flex items-center gap-3 bg-stone-800 border border-stone-700 rounded-xl p-4">
-              <button onClick={() => setSelectedMonth(prev => subMonths(prev, 1))}
-                className="text-stone-400 hover:text-stone-200 transition-colors">
-                <ChevronLeft size={18} />
-              </button>
-              <p className="flex-1 text-center text-stone-200 font-medium">
-                {format(selectedMonth, 'MMMM yyyy', { locale: ptBR })}
+
+          {/* Resultado final */}
+          {result ? (
+            <div className="space-y-4">
+              <div className="bg-emerald-900/20 border border-emerald-700/40 rounded-xl p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={18} className="text-emerald-400 flex-shrink-0" />
+                  <p className="text-emerald-300 font-semibold text-sm">Geração concluída com sucesso!</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-emerald-900/30 rounded-lg p-3 text-center">
+                    <p className="text-emerald-200 text-2xl font-bold">{result.cultsCreated}</p>
+                    <p className="text-emerald-400 text-xs mt-0.5">
+                      {result.cultsCreated === 1 ? 'culto criado' : 'cultos criados'}
+                    </p>
+                  </div>
+                  <div className="bg-amber-900/30 rounded-lg p-3 text-center">
+                    <p className="text-amber-200 text-2xl font-bold">{result.scalesCreated}</p>
+                    <p className="text-amber-400 text-xs mt-0.5">
+                      {result.scalesCreated === 1 ? 'escala gerada' : 'escalas geradas'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {result.cultNames.length > 0 && (
+                <div>
+                  <p className="text-xs text-stone-400 uppercase tracking-wide mb-2">
+                    Cultos criados ({result.cultNames.length})
+                  </p>
+                  <div className="bg-stone-800/50 rounded-lg divide-y divide-stone-700/50 max-h-40 overflow-y-auto">
+                    {result.cultNames.map((name, i) => (
+                      <div key={i} className="flex items-center gap-2 px-3 py-2">
+                        <CheckCircle2 size={13} className="text-emerald-400 flex-shrink-0" />
+                        <span className="text-stone-300 text-xs">{name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {result.errors.length > 0 && (
+                <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <AlertCircle size={14} className="text-amber-400" />
+                    <p className="text-amber-300 text-xs font-semibold">
+                      Escalas não geradas automaticamente ({result.errors.length})
+                    </p>
+                  </div>
+                  <p className="text-amber-400/80 text-xs">
+                    {result.errors.join(', ')} — acesse a tela de Escalas para gerar manualmente.
+                  </p>
+                </div>
+              )}
+
+              <Button onClick={closeGenerateModal} className="w-full">Fechar</Button>
+            </div>
+
+          ) : generateStep === 1 ? (
+            /* Passo 1: mês e tipos */
+            <>
+              <p className="text-xs text-stone-500 uppercase tracking-widest">{stepLabel}</p>
+
+              <div>
+                <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Mês de Referência</label>
+                <div className="flex items-center gap-3 bg-stone-800 border border-stone-700 rounded-xl p-4">
+                  <button onClick={() => setSelectedMonth(prev => subMonths(prev, 1))}
+                    className="text-stone-400 hover:text-stone-200 transition-colors">
+                    <ChevronLeft size={18} />
+                  </button>
+                  <p className="flex-1 text-center text-stone-200 font-medium">
+                    {format(selectedMonth, 'MMMM yyyy', { locale: ptBR })}
+                  </p>
+                  <button onClick={() => setSelectedMonth(prev => addMonths(prev, 1))}
+                    className="text-stone-400 hover:text-stone-200 transition-colors">
+                    <ChevronRight size={18} />
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Tipos de Culto</label>
+                <div className="space-y-2">
+                  {(cultTypes || []).map(ct => (
+                    <label key={ct.id} className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-stone-800 transition-colors">
+                      <input type="checkbox"
+                        checked={selectedTypes.includes(ct.id)}
+                        onChange={e => setSelectedTypes(prev => e.target.checked ? [...prev, ct.id] : prev.filter(id => id !== ct.id))}
+                        className="w-4 h-4 accent-amber-500" />
+                      <span className="text-stone-200 text-sm">{ct.name}</span>
+                      {ct.default_time && <span className="text-stone-500 text-xs ml-auto">{ct.default_time}</span>}
+                    </label>
+                  ))}
+                </div>
+                <div className="flex gap-2 mt-2">
+                  <button onClick={() => setSelectedTypes((cultTypes || []).map(ct => ct.id))}
+                    className="text-amber-400 text-xs hover:text-amber-300 transition-colors">Selecionar todos</button>
+                  <span className="text-stone-600 text-xs">•</span>
+                  <button onClick={() => setSelectedTypes([])}
+                    className="text-stone-500 text-xs hover:text-stone-400 transition-colors">Limpar</button>
+                </div>
+              </div>
+
+              {error && <p className="text-red-400 text-xs">{error}</p>}
+
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={closeGenerateModal}>Cancelar</Button>
+                <Button onClick={() => {
+                  if (selectedTypes.length === 0) { setError('Selecione ao menos um tipo de culto'); return; }
+                  setError('');
+                  setGenerateStep(2);
+                }}>
+                  Próximo →
+                </Button>
+              </div>
+            </>
+
+          ) : (
+            /* Passo 2: seleção de escalas */
+            <>
+              <p className="text-xs text-stone-500 uppercase tracking-widest">{stepLabel}</p>
+
+              <p className="text-stone-400 text-sm">
+                Escolha quais escalas deseja gerar automaticamente para cada culto criado.
               </p>
-              <button onClick={() => setSelectedMonth(prev => addMonths(prev, 1))}
-                className="text-stone-400 hover:text-stone-200 transition-colors">
-                <ChevronRight size={18} />
-              </button>
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Tipos de Culto</label>
-            <div className="space-y-2">
-              {(cultTypes || []).map(ct => (
-                <label key={ct.id} className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-stone-800 transition-colors">
-                  <input
-                    type="checkbox"
-                    checked={selectedTypes.includes(ct.id)}
-                    onChange={e => setSelectedTypes(prev => e.target.checked ? [...prev, ct.id] : prev.filter(id => id !== ct.id))}
-                    className="w-4 h-4 accent-amber-500"
-                  />
-                  <span className="text-stone-200 text-sm">{ct.name}</span>
-                  {ct.default_time && <span className="text-stone-500 text-xs ml-auto">{ct.default_time}</span>}
-                </label>
-              ))}
-            </div>
-            <div className="flex gap-2 mt-2">
-              <button onClick={() => setSelectedTypes((cultTypes || []).map(ct => ct.id))}
-                className="text-amber-400 text-xs hover:text-amber-300 transition-colors">
-                Selecionar todos
-              </button>
-              <span className="text-stone-600 text-xs">•</span>
-              <button onClick={() => setSelectedTypes([])}
-                className="text-stone-500 text-xs hover:text-stone-400 transition-colors">
-                Limpar
-              </button>
-            </div>
-          </div>
-          {error && <p className="text-red-400 text-xs">{error}</p>}
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setGenerateModal(false)}>Cancelar</Button>
-            <Button onClick={generateMonth} loading={generating}>Gerar Cultos</Button>
-          </div>
+
+              {/* Obrigatório */}
+              <div>
+                <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Obrigatório</label>
+                <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-900/20 border border-amber-700/40">
+                  <input type="checkbox" checked disabled className="w-4 h-4 accent-amber-500 cursor-not-allowed" />
+                  <div className="flex-1">
+                    <p className="text-amber-200 text-sm font-medium">Diáconos / Obreiros</p>
+                    <p className="text-amber-400/70 text-xs">Sempre incluído — obrigatório em todo culto</p>
+                  </div>
+                  <span className="text-amber-500 text-xs font-bold">FIXO</span>
+                </div>
+              </div>
+
+              {/* Opcionais */}
+              <div>
+                <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Escalas Opcionais</label>
+                <div className="space-y-2">
+                  {OPTIONAL_SCALE_SECTORS.map(s => (
+                    <label key={s.key} className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-stone-700 hover:border-amber-600/50 hover:bg-stone-800/50 transition-all">
+                      <input type="checkbox"
+                        checked={selectedScaleSectors.includes(s.key)}
+                        onChange={e => setSelectedScaleSectors(prev =>
+                          e.target.checked ? [...prev, s.key] : prev.filter(k => k !== s.key)
+                        )}
+                        className="w-4 h-4 accent-amber-500" />
+                      <div className="flex-1">
+                        <p className="text-stone-200 text-sm">{s.label}</p>
+                        <p className="text-stone-500 text-xs">{s.description}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+                <div className="flex gap-2 mt-2">
+                  <button onClick={() => setSelectedScaleSectors(OPTIONAL_SCALE_SECTORS.map(s => s.key))}
+                    className="text-amber-400 text-xs hover:text-amber-300 transition-colors">Selecionar todos</button>
+                  <span className="text-stone-600 text-xs">•</span>
+                  <button onClick={() => setSelectedScaleSectors([])}
+                    className="text-stone-500 text-xs hover:text-stone-400 transition-colors">Limpar</button>
+                </div>
+              </div>
+
+              {/* Resumo */}
+              <div className="bg-stone-800/50 rounded-lg p-3 text-xs text-stone-400 space-y-1">
+                <p><span className="text-stone-300">Mês:</span> {format(selectedMonth, 'MMMM yyyy', { locale: ptBR })}</p>
+                <p><span className="text-stone-300">Tipos selecionados:</span> {selectedTypes.length} tipo(s)</p>
+                <p>
+                  <span className="text-stone-300">Escalas:</span>{' '}
+                  Diáconos/Obreiros (fixo)
+                  {selectedScaleSectors.length > 0 && ` + ${selectedScaleSectors.length} opcional(is)`}
+                </p>
+              </div>
+
+              {error && <p className="text-red-400 text-xs">{error}</p>}
+
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={() => setGenerateStep(1)}>← Voltar</Button>
+                <Button onClick={generateMonth} loading={generating}>Gerar Cultos</Button>
+              </div>
+            </>
+          )}
         </div>
       </Modal>
 
-      {/* Modal: Editar / Novo Culto */}
+      {/* ─── Modal: Editar / Novo Culto ──────────────────────────────────────── */}
       <Modal open={!!editModal} onClose={() => setEditModal(null)} title={editModal?.id ? 'Editar Culto' : 'Novo Culto'} size="md">
         {editModal && (
           <div className="space-y-4">
-            <Select
-              label="Tipo de Culto"
+            <Select label="Tipo de Culto"
               value={editModal.type_id || ''}
               onChange={e => {
                 const ct = (cultTypes || []).find(c => c.id === Number(e.target.value));
-                setEditModal(m => ({
-                  ...m!,
-                  type_id: Number(e.target.value),
-                  time: ct?.default_time || m!.time || '',
-                }));
+                setEditModal(m => ({ ...m!, type_id: Number(e.target.value), time: ct?.default_time || m!.time || '' }));
               }}
               placeholder="Selecionar tipo..."
-              options={(cultTypes || []).map(ct => ({ value: ct.id, label: ct.name }))}
-            />
-            <Input
-              label="Nome personalizado (opcional)"
+              options={(cultTypes || []).map(ct => ({ value: ct.id, label: ct.name }))} />
+            <Input label="Nome personalizado (opcional)"
               value={editModal.name || ''}
               onChange={e => setEditModal(m => ({ ...m!, name: e.target.value }))}
-              placeholder="Ex: Culto de Aniversário da Igreja"
-            />
+              placeholder="Ex: Culto de Aniversário da Igreja" />
             <div className="grid grid-cols-2 gap-3">
               <Input label="Data *" type="date" value={editModal.date || ''}
                 onChange={e => setEditModal(m => ({ ...m!, date: e.target.value }))} />
@@ -266,17 +451,15 @@ export default function CultsPage({ user }: Props) {
                 onChange={e => setEditModal(m => ({ ...m!, time: e.target.value }))} />
             </div>
             {editModal.id && (
-              <Select
-                label="Status"
+              <Select label="Status"
                 value={editModal.status || 'Agendado'}
                 onChange={e => setEditModal(m => ({ ...m!, status: e.target.value as any }))}
                 options={[
-                  { value: 'Agendado', label: 'Agendado' },
-                  { value: 'Confirmado', label: 'Confirmado' },
-                  { value: 'Realizado', label: 'Realizado' },
-                  { value: 'Cancelado', label: 'Cancelado' },
-                ]}
-              />
+                  { value: 'Agendado',  label: 'Agendado'  },
+                  { value: 'Confirmado',label: 'Confirmado' },
+                  { value: 'Realizado', label: 'Realizado'  },
+                  { value: 'Cancelado', label: 'Cancelado'  },
+                ]} />
             )}
             {error && <p className="text-red-400 text-xs">{error}</p>}
             <div className="flex gap-3">
