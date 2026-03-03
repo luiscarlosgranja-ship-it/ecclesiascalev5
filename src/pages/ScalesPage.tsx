@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Printer, Zap, Trash2, CheckCircle, Repeat, Calendar, Users, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Printer, Zap, Trash2, CheckCircle, Repeat, Calendar, Users, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
 import { Card, Button, Modal, Badge, Select, Spinner, Input } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
 import { getSupabase } from '../utils/supabaseClient';
 import type { AuthUser, Scale, Cult, Member, Sector, CultType } from '../types';
-import { isAdmin, isLeader } from '../utils/permissions';
+import { isAdmin, isLeader, isSuperAdmin } from '../utils/permissions';
 import { exportScalePDF } from '../utils/pdf';
 
 interface Props { user: AuthUser; }
@@ -54,6 +54,10 @@ export default function ScalesPage({ user }: Props) {
   const [swapEmail, setSwapEmail] = useState('');
   const [swapMsg, setSwapMsg] = useState('');
   const [swapSaving, setSwapSaving] = useState(false);
+
+  // ─── Delete entire scale modal ───────────────────────────────────────────────
+  const [deleteScaleModal, setDeleteScaleModal] = useState(false);
+  const [deletingScale, setDeletingScale] = useState(false);
 
   const { data: cults, refetch: refetchCults } = useApi<Cult[]>('/cults?status=Agendado');
   const { data: scales, refetch: refetchScales } = useApi<Scale[]>(
@@ -186,11 +190,44 @@ export default function ScalesPage({ user }: Props) {
     refetchScales(); fetchDeptBlocks();
   }
 
-  // ─── Remove scale ────────────────────────────────────────────────────────────
+  // ─── Remove scale member ─────────────────────────────────────────────────────
   async function removeScale(id: number) {
     if (!confirm('Remover desta escala? O membro ficará disponível novamente.')) return;
     await api.delete(`/scales/${id}`);
+    // Verifica se era o último membro — se sim, desfaz a escala (deleta o culto)
+    const remaining = (scales || []).filter(s => s.id !== id);
+    if (remaining.length === 0 && selectedCult) {
+      await api.delete(`/cults/${selectedCult}`);
+      setSelectedCult(null);
+      refetchCults();
+      return;
+    }
     refetchScales(); fetchDeptBlocks();
+  }
+
+  // ─── Delete entire scale ──────────────────────────────────────────────────────
+  async function deleteEntireScale() {
+    if (!selectedCult) return;
+    setDeletingScale(true);
+    try {
+      // Remove todos os membros da escala e depois o culto
+      await api.delete(`/cults/${selectedCult}/scale`);
+      setDeleteScaleModal(false);
+      setSelectedCult(null);
+      refetchCults();
+    } catch (e) {
+      // Fallback: tenta deletar o culto diretamente (backend pode cascade)
+      try {
+        await api.delete(`/cults/${selectedCult}`);
+        setDeleteScaleModal(false);
+        setSelectedCult(null);
+        refetchCults();
+      } catch {
+        alert('Erro ao remover escala');
+      }
+    } finally {
+      setDeletingScale(false);
+    }
   }
 
   // ─── Add to scale ────────────────────────────────────────────────────────────
@@ -323,6 +360,11 @@ export default function ScalesPage({ user }: Props) {
                   <Button size="sm" onClick={() => { setAddModal(true); setError(''); }}>
                     <Plus size={16} /> Adicionar Voluntário
                   </Button>
+                  {isAdmin(user.role) && (
+                    <Button size="sm" variant="danger" onClick={() => setDeleteScaleModal(true)}>
+                      <Trash2 size={16} /> Remover Escala
+                    </Button>
+                  )}
                 </>
               )}
             </>
@@ -638,6 +680,34 @@ export default function ScalesPage({ user }: Props) {
             <Button variant="outline" onClick={() => { setFillModal(false); setFillMsg(''); }}>Cancelar</Button>
             <Button onClick={fillCult} loading={fillLoading} disabled={!!fillMsg && !fillMsg.startsWith('❌')}>
               <Zap size={15} /> Preencher
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ─── Modal: Remover Escala Inteira ──────────────────────────────────── */}
+      <Modal open={deleteScaleModal} onClose={() => setDeleteScaleModal(false)} title="Remover Escala" size="sm">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 bg-red-900/20 border border-red-700/40 rounded-lg p-4">
+            <AlertTriangle size={18} className="text-red-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-red-300 text-sm font-semibold">Ação irreversível</p>
+              <p className="text-red-400/80 text-xs mt-1">
+                Todos os voluntários serão removidos desta escala e o culto será desfeito. Esta ação não pode ser desfeita.
+              </p>
+            </div>
+          </div>
+          {selectedCultData && (
+            <div className="bg-stone-800/50 rounded-lg p-3 text-xs text-stone-400 space-y-1">
+              <p><span className="text-stone-300">Culto:</span> {selectedCultData.name || selectedCultData.type_name}</p>
+              <p><span className="text-stone-300">Data:</span> {selectedCultData.date} às {selectedCultData.time}</p>
+              <p><span className="text-stone-300">Voluntários:</span> {scales?.length ?? 0} escalado(s)</p>
+            </div>
+          )}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setDeleteScaleModal(false)}>Cancelar</Button>
+            <Button variant="danger" onClick={deleteEntireScale} loading={deletingScale}>
+              <Trash2 size={15} /> Confirmar Remoção
             </Button>
           </div>
         </div>
