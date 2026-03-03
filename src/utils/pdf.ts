@@ -113,50 +113,28 @@ interface DepartmentGroup {
 }
 
 function groupScalesByDepartment(scales: Scale[]): DepartmentGroup[] {
-  // Mapeamento de setores para departamentos
-  const deptMap = new Map<string, Scale[]>();
+  // Manter a ordem original dos setores como aparecem nas escalas
+  const seenDepts = new Map<string, DepartmentGroup>();
+  const orderList: string[] = []; // Rastrear ordem de aparição
   
-  const deptNames: { [key: string]: string } = {
-    'Diáconos / Obreiros': 'Diáconos / Obreiros',
-    'Infantil': 'Departamento Infantil',
-    'Louvor': 'Departamento de Louvor',
-    'Midia': 'Departamento de Mídia',
-    'Recepcao': 'Recepção',
-    'Intercessao': 'Intercessão',
-  };
-
   for (const scale of scales) {
-    const sector = scale.sector_name || 'Sem Setor';
-    const deptKey = sector.includes('Infantil') ? 'Infantil' :
-                    sector.includes('Louvor') || sector.includes('Música') ? 'Louvor' :
-                    sector.includes('Mídia') || sector.includes('Transmissão') ? 'Midia' :
-                    sector.includes('Obreiro') || sector.includes('Diácono') ? 'Diáconos / Obreiros' :
-                    sector.includes('Recepcao') || sector.includes('Boas-vindas') ? 'Recepcao' :
-                    sector.includes('Intercessao') || sector.includes('Oração') ? 'Intercessao' :
-                    'Outro';
+    const deptName = (scale.sector_name || 'Sem Setor');
     
-    const deptName = deptNames[deptKey] || sector;
-    if (!deptMap.has(deptName)) deptMap.set(deptName, []);
-    deptMap.get(deptName)!.push(scale);
-  }
-
-  // Ordenar departamentos na sequência desejada
-  const order = ['Diáconos / Obreiros', 'Departamento Infantil', 'Departamento de Louvor', 'Departamento de Mídia'];
-  const result: DepartmentGroup[] = [];
-  
-  for (const name of order) {
-    if (deptMap.has(name)) {
-      result.push({ name, scales: deptMap.get(name)! });
-      deptMap.delete(name);
+    // Se é a primeira vez vendo este departamento, adicionar à lista de ordem
+    if (!seenDepts.has(deptName)) {
+      orderList.push(deptName);
+      seenDepts.set(deptName, { 
+        name: deptName, 
+        scales: [] 
+      });
     }
+    
+    // Adicionar escala ao departamento
+    seenDepts.get(deptName)!.scales.push(scale);
   }
   
-  // Adicionar qualquer departamento restante
-  for (const [name, scales] of deptMap) {
-    result.push({ name, scales });
-  }
-  
-  return result;
+  // Retornar na ordem de aparição
+  return orderList.map(name => seenDepts.get(name)!);
 }
 
 async function exportSingleCultBlocksPDF(
