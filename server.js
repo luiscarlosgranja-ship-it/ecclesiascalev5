@@ -500,9 +500,11 @@ app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líd
   if (!cult) return res.status(404).json({ message: 'Culto não encontrado' });
   const monthStr = cult.date.slice(0, 7);
 
-  // Setores ativos
+  // Setores ativos — exclui setores de departamento específico (Som, Iluminação, Foto, Filmagem)
+  const SETORES_DEPARTAMENTO = ['som', 'iluminação', 'iluminacao', 'foto', 'filmagem', 'som e iluminação', 'som e iluminacao'];
   const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
-  if (!sectors?.length) return res.status(400).json({ message: 'Nenhum setor ativo cadastrado' });
+  const setoresPadrao = (sectors || []).filter(s => !SETORES_DEPARTAMENTO.includes(s.name.toLowerCase().trim()));
+  if (!setoresPadrao.length) return res.status(400).json({ message: 'Nenhum setor ativo cadastrado' });
 
   // Voluntários já escalados neste culto
   const { data: already } = await db.from('scales').select('member_id, sector_id').eq('cult_id', cult_id);
@@ -510,7 +512,7 @@ app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líd
   const alreadySectorIds = new Set((already || []).map(s => s.sector_id));
 
   // Setores que ainda precisam de voluntário
-  const pendingSectors = sectors.filter(s => !alreadySectorIds.has(s.id));
+  const pendingSectors = setoresPadrao.filter(s => !alreadySectorIds.has(s.id));
   if (!pendingSectors.length) return res.json({ message: 'Todos os setores já estão preenchidos', created: 0 });
 
   // Voluntários ativos com disponibilidade para este tipo de culto
@@ -588,7 +590,10 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
 
   const { data: cults } = await cultsQuery;
   const { data: members } = await db.from('members').select('*').eq('is_active', true).eq('status', 'Ativo');
-  const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
+  const { data: allSectors } = await db.from('sectors').select('*').eq('is_active', true);
+  // Exclui setores de departamento específico da montagem padrão
+  const SETORES_DEPT = ['som', 'iluminação', 'iluminacao', 'foto', 'filmagem', 'som e iluminação', 'som e iluminacao'];
+  const sectors = (allSectors || []).filter(s => !SETORES_DEPT.includes(s.name.toLowerCase().trim()));
 
   let created = 0;
 
