@@ -122,34 +122,47 @@ const SETOR_DEPARTMENT_MAP: { [key: string]: string } = {
   'Recepção': 'Diáconos / Obreiros',
   'Externo': 'Diáconos / Obreiros',
   
-  'Infantil': 'Departamento Infantil',
-  'Berçário': 'Departamento Infantil',
-  'Escola Bíblica': 'Departamento Infantil',
+  'Som': 'Mídia',
+  'Filmagem': 'Mídia',
+  'Foto': 'Mídia',
+  'Transmissão': 'Mídia',
+  'Câmera': 'Mídia',
+  'Redes Sociais': 'Mídia',
+  'Mídia': 'Mídia',
   
-  'Louvor': 'Departamento de Louvor',
-  'Música': 'Departamento de Louvor',
-  'Canto': 'Departamento de Louvor',
-  'Violão': 'Departamento de Louvor',
-  'Teclado': 'Departamento de Louvor',
-  'Bateria': 'Departamento de Louvor',
+  'Infantil': 'Infantil',
+  'Berçário': 'Infantil',
+  'Escola Bíblica': 'Infantil',
   
-  'Mídia': 'Departamento de Mídia',
-  'Som': 'Departamento de Mídia',
-  'Câmera': 'Departamento de Mídia',
-  'Transmissão': 'Departamento de Mídia',
-  'Redes Sociais': 'Departamento de Mídia',
+  'Bateria': 'Louvor',
+  'Back 1': 'Louvor',
+  'Back 2': 'Louvor',
+  'Back 3': 'Louvor',
+  'Back 4': 'Louvor',
+  'Vocal': 'Louvor',
+  'Violão': 'Louvor',
+  'Baixo': 'Louvor',
+  'Guitarra': 'Louvor',
+  'Teclado': 'Louvor',
+  'Louvor': 'Louvor',
+  'Música': 'Louvor',
+  'Canto': 'Louvor',
   
-  'Intercessão': 'Departamento de Intercessão',
-  'Oração': 'Departamento de Intercessão',
+  'Una': 'Una',
+  
+  'Bem-Vindos': 'Bem-Vindos',
+  'Recepção de Bem-Vindos': 'Bem-Vindos',
+  'Boas-vindas': 'Bem-Vindos',
 };
 
 // Ordem fixa dos departamentos
 const DEPARTMENT_ORDER = [
   'Diáconos / Obreiros',
-  'Departamento Infantil',
-  'Departamento de Louvor',
-  'Departamento de Mídia',
-  'Departamento de Intercessão',
+  'Mídia',
+  'Infantil',
+  'Louvor',
+  'Una',
+  'Bem-Vindos',
 ];
 
 function groupScalesByDepartment(scales: Scale[]): DepartmentGroup[] {
@@ -561,14 +574,15 @@ function groupScalesByDepartmentForMonth(scales: Scale[]): DepartmentGroup[] {
     deptMap.get(deptName)!.push(scale);
   }
   
-  // Retornar na ordem fixa dos departamentos (versão curta dos nomes)
+  // Retornar na ordem fixa dos departamentos (nomes curtos para mês)
   const result: DepartmentGroup[] = [];
   const shortNames: { [key: string]: string } = {
     'Diáconos / Obreiros': 'Diáconos',
-    'Departamento Infantil': 'Infantil',
-    'Departamento de Louvor': 'Louvor',
-    'Departamento de Mídia': 'Mídia',
-    'Departamento de Intercessão': 'Intercessão',
+    'Mídia': 'Mídia',
+    'Infantil': 'Infantil',
+    'Louvor': 'Louvor',
+    'Una': 'Una',
+    'Bem-Vindos': 'Bem-Vindos',
   };
   
   for (const deptName of DEPARTMENT_ORDER) {
@@ -598,15 +612,26 @@ export async function exportScalePDF(
   title: string,
   allScales?: Scale[],
   allCults?: Cult[],
+  selectedSectors?: string[],
 ) {
+  // Filtrar escalas pelos setores selecionados, se informados
+  let filteredScales = scales;
+  if (selectedSectors && selectedSectors.length > 0) {
+    filteredScales = scales.filter(s => selectedSectors.includes(s.sector_name || ''));
+  }
+
   // Mês inteiro → grade landscape
   if (allScales && allCults && allCults.length > 1) {
-    return exportMonthGridPDF(allScales, allCults, title);
+    let filteredAllScales = allScales;
+    if (selectedSectors && selectedSectors.length > 0) {
+      filteredAllScales = allScales.filter(s => selectedSectors.includes(s.sector_name || ''));
+    }
+    return exportMonthGridPDF(filteredAllScales, allCults, title);
   }
 
   // Culto único → blocos de departamento
   if (cult) {
-    return exportSingleCultBlocksPDF(scales, cult, title);
+    return exportSingleCultBlocksPDF(filteredScales, cult, title);
   }
 
   // Fallback (não deve chegar aqui)
