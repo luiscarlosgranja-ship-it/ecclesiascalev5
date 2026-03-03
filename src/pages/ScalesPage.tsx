@@ -64,6 +64,12 @@ export default function ScalesPage({ user }: Props) {
   // Resultado detalhado da geração automática
   const [autoResult, setAutoResult] = useState<AutoResult | null>(null);
 
+  // Modal de seleção de departamentos para impressão
+  const [printConfigModal, setPrintConfigModal] = useState(false);
+  const [availableSectors, setAvailableSectors] = useState<string[]>([]);
+  const [selectedSectorsForPrint, setSelectedSectorsForPrint] = useState<string[]>([]);
+  const [printingMode, setPrintingMode] = useState<'cult' | 'month'>('cult');
+
   const { data: cults, refetch: refetchCults } = useApi<Cult[]>('/cults?status=Agendado');
   const { data: scales, refetch: refetchScales } = useApi<Scale[]>(
     selectedCult ? `/scales?cult_id=${selectedCult}` : null, [selectedCult]
@@ -307,13 +313,20 @@ export default function ScalesPage({ user }: Props) {
 
   async function handlePrint() {
     if (!scales || !selectedCultData) return;
-    await exportScalePDF(scales, selectedCultData, `Escala — ${selectedCultData.type_name || selectedCultData.name || 'Culto'}`);
+    
+    // Extrair setores únicos das escalas
+    const uniqueSectors = [...new Set(scales.map(s => s.sector_name).filter(Boolean))];
+    setAvailableSectors(uniqueSectors);
+    setSelectedSectorsForPrint(uniqueSectors);
+    setPrintingMode('cult');
+    setPrintConfigModal(true);
   }
 
   async function handlePrintMonth() {
     const month = new Date().toISOString().slice(0, 7);
     const monthCults = availableCults.filter(c => c.date.startsWith(month));
     if (monthCults.length === 0) return;
+    
     const token = localStorage.getItem('token') || '';
     const results = await Promise.all(
       monthCults.map(c =>
@@ -321,7 +334,53 @@ export default function ScalesPage({ user }: Props) {
           .then(r => r.json()).then((s: Scale[]) => s).catch(() => [] as Scale[])
       )
     );
-    await exportScalePDF(results.flat(), null, `Escalas — ${month}`, results.flat(), monthCults);
+    
+    // Extrair setores únicos do mês
+    const allMonthScales = results.flat();
+    const uniqueSectors = [...new Set(allMonthScales.map(s => s.sector_name).filter(Boolean))];
+    setAvailableSectors(uniqueSectors);
+    setSelectedSectorsForPrint(uniqueSectors);
+    setPrintingMode('month');
+    setPrintConfigModal(true);
+  }
+
+  async function executePrint() {
+    if (printingMode === 'cult') {
+      if (!scales || !selectedCultData) return;
+      const filteredScales = scales.filter(s => selectedSectorsForPrint.includes(s.sector_name || ''));
+      await exportScalePDF(
+        filteredScales, 
+        selectedCultData, 
+        `Escala — ${selectedCultData.type_name || selectedCultData.name || 'Culto'}`,
+        undefined,
+        undefined,
+        selectedSectorsForPrint
+      );
+    } else {
+      const month = new Date().toISOString().slice(0, 7);
+      const monthCults = availableCults.filter(c => c.date.startsWith(month));
+      if (monthCults.length === 0) return;
+      
+      const token = localStorage.getItem('token') || '';
+      const results = await Promise.all(
+        monthCults.map(c =>
+          fetch(`/api/scales?cult_id=${c.id}`, { headers: { Authorization: `Bearer ${token}` } })
+            .then(r => r.json()).then((s: Scale[]) => s).catch(() => [] as Scale[])
+        )
+      );
+      
+      const allMonthScales = results.flat();
+      const filteredScales = allMonthScales.filter(s => selectedSectorsForPrint.includes(s.sector_name || ''));
+      await exportScalePDF(
+        filteredScales, 
+        null, 
+        `Escalas — ${month}`, 
+        filteredScales, 
+        monthCults,
+        selectedSectorsForPrint
+      );
+    }
+    setPrintConfigModal(false);
   }
 
   function getCultLabel(c: Cult) {
@@ -799,6 +858,67 @@ export default function ScalesPage({ user }: Props) {
           <div className="flex gap-3">
             <Button variant="outline" onClick={() => setAddModal(false)}>Cancelar</Button>
             <Button onClick={addToScale} loading={saving}>Adicionar</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ─── Modal: Configurar Impressão ──────────────────────────────────────── */}
+      <Modal open={printConfigModal} onClose={() => setPrintConfigModal(false)} 
+        title={printingMode === 'cult' ? 'Configurar Impressão do Culto' : 'Configurar Impressão do Mês'} 
+        size="md">
+        <div className="space-y-4">
+          <p className="text-stone-400 text-sm">
+            Selecione quais departamentos deseja incluir na impressão:
+          </p>
+
+          <div className="bg-stone-800 rounded-lg p-3 space-y-2 max-h-96 overflow-y-auto">
+            {availableSectors.length === 0 ? (
+              <p className="text-stone-500 text-sm italic">Nenhum departamento disponível</p>
+            ) : (
+              availableSectors.map(sector => (
+                <label key={sector} 
+                  className="flex items-center gap-3 cursor-pointer p-2 rounded hover:bg-stone-700 transition-colors">
+                  <input 
+                    type="checkbox" 
+                    checked={selectedSectorsForPrint.includes(sector)}
+                    onChange={e => {
+                      if (e.target.checked) {
+                        setSelectedSectorsForPrint(prev => [...prev, sector]);
+                      } else {
+                        setSelectedSectorsForPrint(prev => prev.filter(s => s !== sector));
+                      }
+                    }}
+                    className="w-4 h-4 accent-amber-500" 
+                  />
+                  <span className="text-stone-200 text-sm">{sector}</span>
+                </label>
+              ))
+            )}
+          </div>
+
+          <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg p-3">
+            <p className="text-amber-200 text-xs">
+              ✓ {selectedSectorsForPrint.length} de {availableSectors.length} departamento(s) selecionado(s)
+            </p>
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={() => setSelectedSectorsForPrint(availableSectors)}
+              className="text-amber-400 text-xs hover:text-amber-300 transition-colors">
+              Selecionar todos
+            </button>
+            <span className="text-stone-600 text-xs">•</span>
+            <button onClick={() => setSelectedSectorsForPrint([])}
+              className="text-stone-500 text-xs hover:text-stone-400 transition-colors">
+              Limpar
+            </button>
+          </div>
+
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setPrintConfigModal(false)}>Cancelar</Button>
+            <Button onClick={executePrint} disabled={selectedSectorsForPrint.length === 0}>
+              <Printer size={16} /> Imprimir Agora
+            </Button>
           </div>
         </div>
       </Modal>
