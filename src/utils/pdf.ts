@@ -192,13 +192,22 @@ function groupScalesByDepartment(scales: Scale[]): DepartmentGroup[] {
   
   console.log('=== AGRUPAMENTO DE DEPARTAMENTOS ===');
   console.log('Escalas recebidas:', scales.length);
+  console.log('Mapeamento disponível:', Object.keys(SETOR_DEPARTMENT_MAP).length, 'setores mapeados');
   
   for (const scale of scales) {
     const sectorName = scale.sector_name || 'Sem Setor';
     const sectorLower = sectorName.toLowerCase().trim();
-    const deptName = SETOR_DEPARTMENT_MAP[sectorLower] || sectorName;
     
-    console.log(`"${sectorName}" (${sectorLower}) → "${deptName}"`);
+    // Procurar no mapeamento
+    let deptName = SETOR_DEPARTMENT_MAP[sectorLower];
+    
+    // Se não encontrou, mostrar aviso e usar o nome do setor como departamento
+    if (!deptName) {
+      console.warn(`⚠️ Setor não mapeado: "${sectorName}" (${sectorLower})`);
+      deptName = sectorName;
+    }
+    
+    console.log(`"${sectorName}" → "${deptName}"`);
     
     if (!deptMap.has(deptName)) {
       deptMap.set(deptName, []);
@@ -211,23 +220,27 @@ function groupScalesByDepartment(scales: Scale[]): DepartmentGroup[] {
   
   // Retornar na ordem fixa dos departamentos
   const result: DepartmentGroup[] = [];
+  
+  // Primeiro: adicionar departamentos na ordem fixa (se houver escalas)
   for (const deptName of DEPARTMENT_ORDER) {
     if (deptMap.has(deptName)) {
       result.push({
         name: deptName,
         scales: deptMap.get(deptName)!
       });
+      console.log(`✅ Adicionado: ${deptName} (${deptMap.get(deptName)!.length} escalas)`);
       deptMap.delete(deptName);
     }
   }
   
-  // Adicionar departamentos não mapeados
-  for (const [deptName, scales] of deptMap) {
-    console.warn(`Departamento não mapeado encontrado: "${deptName}"`);
-    result.push({ name: deptName, scales });
+  // Depois: adicionar departamentos não mapeados no final
+  for (const [deptName, scaleList] of deptMap) {
+    console.warn(`⚠️ Departamento não padrão encontrado: "${deptName}" (${scaleList.length} escalas)`);
+    result.push({ name: deptName, scales: scaleList });
   }
   
   console.log('Resultado final:', result.map(r => ({ name: r.name, count: r.scales.length })));
+  console.log('=== FIM DO AGRUPAMENTO ===');
   
   return result;
 }
