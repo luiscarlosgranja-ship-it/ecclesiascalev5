@@ -13,6 +13,9 @@ interface Props { user: AuthUser; }
 export default function ScalesPage({ user }: Props) {
   const [selectedCult, setSelectedCult] = useState<number | null>(null);
   const [autoModal, setAutoModal] = useState(false);
+  const [fillLoading, setFillLoading] = useState(false);
+  const [fillMsg, setFillMsg] = useState('');
+  const [fillModal, setFillModal] = useState(false);
   const [autoType, setAutoType] = useState<'month' | 'standard' | 'thematic'>('month');
   const [addModal, setAddModal] = useState(false);
   const [newCultModal, setNewCultModal] = useState(false);
@@ -57,6 +60,19 @@ export default function ScalesPage({ user }: Props) {
 
     return () => { sb.removeChannel(channel); };
   }, [refetchScales, refetchCults]);
+
+  // ─── Preencher voluntários automaticamente para o culto selecionado ───────────
+  async function fillCult() {
+    if (!selectedCult) return;
+    setFillLoading(true); setFillMsg('');
+    try {
+      const res = await api.post<{ message: string; created: number }>('/scales/fill-cult', { cult_id: selectedCult });
+      setFillMsg(res.message);
+      refetchScales();
+    } catch (e) {
+      setFillMsg('❌ ' + (e instanceof Error ? e.message : 'Erro ao preencher'));
+    } finally { setFillLoading(false); }
+  }
 
   // ─── Auto gerar escala ───────────────────────────────────────────────────────
   async function generateAuto() {
@@ -200,9 +216,14 @@ export default function ScalesPage({ user }: Props) {
                 <Calendar size={16} /> Nova Escala
               </Button>
               {selectedCult && (
-                <Button size="sm" onClick={() => { setAddModal(true); setError(''); }}>
-                  <Plus size={16} /> Adicionar Voluntário
-                </Button>
+                <>
+                  <Button size="sm" variant="secondary" onClick={() => { setFillModal(true); setFillMsg(''); }}>
+                    <Zap size={16} /> Preencher Automático
+                  </Button>
+                  <Button size="sm" onClick={() => { setAddModal(true); setError(''); }}>
+                    <Plus size={16} /> Adicionar Voluntário
+                  </Button>
+                </>
               )}
             </>
           )}
@@ -404,6 +425,37 @@ export default function ScalesPage({ user }: Props) {
           <div className="flex gap-3">
             <Button variant="outline" onClick={() => setAutoModal(false)}>Cancelar</Button>
             <Button onClick={generateAuto} loading={saving}>Gerar</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal: Preencher Voluntários Automaticamente */}
+      <Modal open={fillModal} onClose={() => { setFillModal(false); setFillMsg(''); }} title="Preencher Voluntários Automaticamente" size="sm">
+        <div className="space-y-4">
+          {selectedCultData && (
+            <div className="bg-stone-800/50 rounded-lg p-3 text-xs text-stone-400 space-y-1">
+              <p><span className="text-stone-300">Culto:</span> {selectedCultData.name || selectedCultData.type_name}</p>
+              <p><span className="text-stone-300">Data:</span> {selectedCultData.date}</p>
+            </div>
+          )}
+          <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg p-3">
+            <p className="text-amber-300 text-xs leading-relaxed">
+              O sistema preencherá os setores vazios com voluntários disponíveis, respeitando as regras:
+            </p>
+            <ul className="text-amber-300/80 text-xs mt-2 space-y-1 list-disc list-inside">
+              <li>Não escalar o mesmo voluntário duas vezes no culto</li>
+              <li>Máximo 3 escalas por voluntário no mês</li>
+              <li>Setores já preenchidos serão mantidos</li>
+            </ul>
+          </div>
+          {fillMsg && (
+            <p className={`text-sm font-medium ${fillMsg.startsWith('❌') ? 'text-red-400' : 'text-emerald-400'}`}>{fillMsg}</p>
+          )}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => { setFillModal(false); setFillMsg(''); }}>Cancelar</Button>
+            <Button onClick={fillCult} loading={fillLoading} disabled={!!fillMsg && !fillMsg.startsWith('❌')}>
+              <Zap size={15} /> Preencher
+            </Button>
           </div>
         </div>
       </Modal>

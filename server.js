@@ -490,6 +490,83 @@ app.post('/api/scales', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asyn
   res.json({ id: data.id });
 });
 
+// ─── Preencher voluntários automaticamente para um culto específico ───────────
+app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
+  const { cult_id } = req.body;
+  if (!cult_id) return res.status(400).json({ message: 'cult_id obrigatório' });
+
+  // Busca dados do culto
+  const { data: cult } = await db.from('cults').select('*').eq('id', cult_id).single();
+  if (!cult) return res.status(404).json({ message: 'Culto não encontrado' });
+  const monthStr = cult.date.slice(0, 7);
+
+  // Setores ativos
+  const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
+  if (!sectors?.length) return res.status(400).json({ message: 'Nenhum setor ativo cadastrado' });
+
+  // Voluntários já escalados neste culto
+  const { data: already } = await db.from('scales').select('member_id, sector_id').eq('cult_id', cult_id);
+  const alreadyMemberIds = new Set((already || []).map(s => s.member_id));
+  const alreadySectorIds = new Set((already || []).map(s => s.sector_id));
+
+  // Setores que ainda precisam de voluntário
+  const pendingSectors = sectors.filter(s => !alreadySectorIds.has(s.id));
+  if (!pendingSectors.length) return res.json({ message: 'Todos os setores já estão preenchidos', created: 0 });
+
+  // Voluntários ativos com disponibilidade para este tipo de culto
+  const { data: members } = await db.from('members')
+    .select('id, name, department_id')
+    .eq('is_active', true)
+    .eq('status', 'Ativo');
+
+  // Para cada voluntário, busca contagem mensal
+  const monthCountMap = {};
+  for (const m of members || []) {
+    const { count } = await db.from('scales')
+      .select('*, cults!inner(date)', { count: 'exact', head: true })
+      .eq('member_id', m.id)
+      .not('status', 'eq', 'Recusado')
+      .like('cults.date', `${monthStr}%`);
+    monthCountMap[m.id] = count || 0;
+  }
+
+  // Filtra elegíveis: não escalado neste culto + menos de 3x no mês
+  const eligible = (members || []).filter(m =>
+    !alreadyMemberIds.has(m.id) && monthCountMap[m.id] < 3
+  );
+
+  // Embaralha para distribuição aleatória justa
+  const shuffled = eligible.sort(() => Math.random() - 0.5);
+
+  let created = 0;
+  const usedInThisCult = new Set(alreadyMemberIds);
+
+  for (const sector of pendingSectors) {
+    // Encontra voluntário disponível que ainda não foi usado neste culto
+    const candidate = shuffled.find(m => !usedInThisCult.has(m.id));
+    if (!candidate) break;
+
+    const { error } = await db.from('scales').insert({
+      cult_id,
+      member_id: candidate.id,
+      sector_id: sector.id,
+    });
+
+    if (!error) {
+      usedInThisCult.add(candidate.id);
+      created++;
+
+      // Notifica o voluntário
+      const { data: userRow } = await db.from('users').select('id').eq('member_id', candidate.id).maybeSingle();
+      if (userRow) {
+        await notify(userRow.id, 'Nova Escala', `Você foi escalado para ${sector.name} em ${cult.date}`);
+      }
+    }
+  }
+
+  res.json({ message: `${created} voluntário(s) adicionado(s) automaticamente`, created });
+});
+
 app.put('/api/scales/:id/confirm', auth, async (req, res) => {
   await db.from('scales').update({ status: 'Confirmado', confirmed_at: new Date().toISOString() }).eq('id', req.params.id);
   res.json({ message: 'Confirmado' });
