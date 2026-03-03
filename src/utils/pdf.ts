@@ -104,8 +104,195 @@ function drawFooter(doc: jsPDF, page: number, total: number, pw: number, ph: num
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  CULTO ÚNICO COM BLOCOS DE DEPARTAMENTO
+//  Layout: retrato, blocos em grade (2 colunas ou 1 linha)
+// ─────────────────────────────────────────────────────────────────────────────
+interface DepartmentGroup {
+  name: string;
+  scales: Scale[];
+}
+
+function groupScalesByDepartment(scales: Scale[]): DepartmentGroup[] {
+  // Mapeamento de setores para departamentos
+  const deptMap = new Map<string, Scale[]>();
+  
+  const deptNames: { [key: string]: string } = {
+    'Diáconos / Obreiros': 'Diáconos / Obreiros',
+    'Infantil': 'Departamento Infantil',
+    'Louvor': 'Departamento de Louvor',
+    'Midia': 'Departamento de Mídia',
+    'Recepcao': 'Recepção',
+    'Intercessao': 'Intercessão',
+  };
+
+  for (const scale of scales) {
+    const sector = scale.sector_name || 'Sem Setor';
+    const deptKey = sector.includes('Infantil') ? 'Infantil' :
+                    sector.includes('Louvor') || sector.includes('Música') ? 'Louvor' :
+                    sector.includes('Mídia') || sector.includes('Transmissão') ? 'Midia' :
+                    sector.includes('Obreiro') || sector.includes('Diácono') ? 'Diáconos / Obreiros' :
+                    sector.includes('Recepcao') || sector.includes('Boas-vindas') ? 'Recepcao' :
+                    sector.includes('Intercessao') || sector.includes('Oração') ? 'Intercessao' :
+                    'Outro';
+    
+    const deptName = deptNames[deptKey] || sector;
+    if (!deptMap.has(deptName)) deptMap.set(deptName, []);
+    deptMap.get(deptName)!.push(scale);
+  }
+
+  // Ordenar departamentos na sequência desejada
+  const order = ['Diáconos / Obreiros', 'Departamento Infantil', 'Departamento de Louvor', 'Departamento de Mídia'];
+  const result: DepartmentGroup[] = [];
+  
+  for (const name of order) {
+    if (deptMap.has(name)) {
+      result.push({ name, scales: deptMap.get(name)! });
+      deptMap.delete(name);
+    }
+  }
+  
+  // Adicionar qualquer departamento restante
+  for (const [name, scales] of deptMap) {
+    result.push({ name, scales });
+  }
+  
+  return result;
+}
+
+async function exportSingleCultBlocksPDF(
+  scales: Scale[],
+  cult: Cult,
+  title: string,
+) {
+  const logo = await fetchLogo();
+  const doc = new jsPDF({ orientation: 'portrait', format: 'a4', unit: 'mm' });
+  const PW = doc.internal.pageSize.getWidth();  // 210mm
+  const PH = doc.internal.pageSize.getHeight(); // 297mm
+  const MX = 12;
+  const MY = 8;
+  
+  const subtitle = `${fmtDate(cult.date)}  ·  ${fmtTime(cult.time)}`;
+  let curY = drawMainHeader(doc, logo, title, subtitle, PW);
+  curY += 4;
+
+  const deptGroups = groupScalesByDepartment(scales);
+  const contentW = PW - MX * 2;
+  const blockW = contentW / 2 - 2; // 2 colunas com espaço entre
+  const blockPadding = 3;
+  const blockBorderW = 0.3;
+
+  let col = 0;
+  let maxRowH = 0;
+
+  for (let i = 0; i < deptGroups.length; i++) {
+    const deptGroup = deptGroups[i];
+    const hasData = deptGroup.scales.length > 0;
+    
+    // Calcula altura do bloco
+    const headerH = 6;
+    const tableHeadH = 4;
+    const rowH = 4;
+    const footerH = 2;
+    const blockH = headerH + tableHeadH + Math.max(1, deptGroup.scales.length) * rowH + footerH;
+    
+    if (col === 0) {
+      maxRowH = blockH;
+    } else {
+      maxRowH = Math.max(maxRowH, blockH);
+    }
+
+    // Verificar quebra de página
+    if (curY + maxRowH > PH - 15 && col === 0) {
+      doc.addPage();
+      curY = drawMainHeader(doc, logo, title, subtitle, PW) + 4;
+      col = 0;
+      maxRowH = blockH;
+    }
+
+    const bx = MX + col * (blockW + 4);
+    const by = curY;
+
+    // ── Desenha o bloco ─────────────────────────────────────────────
+    
+    // Borda do bloco
+    doc.setDrawColor(...C_BORDER);
+    doc.setLineWidth(blockBorderW);
+    doc.rect(bx, by, blockW, blockH, 'S');
+
+    // Cabeçalho do bloco
+    doc.setFillColor(...C_BLOCK_HDR);
+    doc.rect(bx, by, blockW, headerH, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(...C_BLOCK_FG);
+    doc.text(deptGroup.name, bx + blockPadding, by + 4.5, { maxWidth: blockW - blockPadding * 2 });
+
+    // Mini-tabela
+    const tableY = by + headerH;
+    
+    // thead
+    doc.setFillColor(...C_TH_BG);
+    doc.rect(bx, tableY, blockW, tableHeadH, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(5.5);
+    doc.setTextColor(...C_TH_FG);
+    
+    const c1w = blockW * 0.45;
+    const c2w = blockW * 0.35;
+    const c3w = blockW * 0.20;
+    
+    doc.text('VOLUNTÁRIO', bx + blockPadding, tableY + 3, { maxWidth: c1w - blockPadding });
+    doc.text('FUNÇÃO', bx + c1w + blockPadding, tableY + 3, { maxWidth: c2w - blockPadding });
+    doc.text('STATUS', bx + c1w + c2w + blockPadding, tableY + 3, { maxWidth: c3w - blockPadding });
+
+    // tbody
+    let rowY = tableY + tableHeadH;
+    if (deptGroup.scales.length === 0) {
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(5.5);
+      doc.setTextColor(160, 150, 140);
+      doc.text('Nenhum voluntário', bx + blockPadding, rowY + 2, { maxWidth: blockW - blockPadding * 2 });
+    } else {
+      deptGroup.scales.forEach((scale, idx) => {
+        const bgColor = idx % 2 === 0 ? C_ROW_ODD : C_ROW_EVEN;
+        doc.setFillColor(...bgColor);
+        doc.rect(bx, rowY, blockW, rowH, 'F');
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(5);
+        doc.setTextColor(50, 45, 40);
+        doc.text(scale.member_name || '—', bx + blockPadding, rowY + 2.5, { maxWidth: c1w - blockPadding * 2 });
+        doc.text(scale.sector_name || '—', bx + c1w + blockPadding, rowY + 2.5, { maxWidth: c2w - blockPadding * 2 });
+
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...statusColor(scale.status));
+        doc.setFontSize(5);
+        doc.text(scale.status, bx + c1w + c2w + blockPadding, rowY + 2.5, { maxWidth: c3w - blockPadding * 2 });
+
+        rowY += rowH;
+      });
+    }
+
+    col++;
+    if (col >= 2) {
+      col = 0;
+      curY += maxRowH + MY;
+    }
+  }
+
+  // Rodapé
+  const total = (doc as any).internal.getNumberOfPages();
+  for (let p = 1; p <= total; p++) {
+    doc.setPage(p);
+    drawFooter(doc, p, total, PW, PH);
+  }
+
+  doc.save(`escala_${(cult?.date || 'culto').replace(/-/g,'')}.pdf`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  GRADE DE CULTOS — layout igual à imagem de referência
-//  Landscape A4, 4 colunas, cada célula = bloco de um culto
+//  Landscape A4, 4 colunas, cada célula = bloco de um culto com mini-blocos de departamentos
 // ─────────────────────────────────────────────────────────────────────────────
 async function exportMonthGridPDF(
   allScales: Scale[],
@@ -133,14 +320,20 @@ async function exportMonthGridPDF(
 
   const colW = (PW - MX * 2 - GAP * (COLS - 1)) / COLS;
 
-  // Calcula altura de um bloco dado o nº de voluntários
-  const blockHeaderH = 10; // cabeçalho do bloco (data+hora)
-  const tableHeadH = 6;    // thead da mini-tabela
-  const rowH = 5.2;        // altura de cada linha
-  const blockPadB = 3;     // padding inferior do bloco
+  // Mapear culturas por id para acesso rápido
+  const cultMap = new Map(sorted.map(c => [c.id, c]));
 
-  function blockHeight(scaleCount: number): number {
-    return blockHeaderH + tableHeadH + Math.max(1, scaleCount) * rowH + blockPadB;
+  // Calcula altura de um bloco dado o nº de voluntários
+  const blockHeaderH = 8;     // cabeçalho do bloco principal
+  const deptMiniH = 18;       // altura aprox de cada mini-bloco de departamento
+  const blockPadB = 2;        // padding inferior do bloco
+
+  function blockHeight(cultId: number): number {
+    const cScales = allScales.filter(s => s.cult_id === cultId);
+    const deptGroups = groupScalesByDepartmentForMonth(cScales);
+    // Estima altura: cabeçalho + (num depts * altura mini)
+    const deptHeight = Math.max(deptMiniH * deptGroups.length, 30);
+    return blockHeaderH + deptHeight + blockPadB;
   }
 
   // Altura disponível por página
@@ -152,16 +345,14 @@ async function exportMonthGridPDF(
 
   for (let i = 0; i < sorted.length; i++) {
     const cult = sorted[i];
-    const cScales = allScales.filter(s => s.cult_id === cult.id);
-    const bh = blockHeight(cScales.length);
+    const bh = blockHeight(cult.id);
 
     // Nova linha?
     if (col === 0) {
       // Pré-calcula a altura máxima desta linha
       rowMaxH = 0;
       for (let j = i; j < Math.min(i + COLS, sorted.length); j++) {
-        const s2 = allScales.filter(s => s.cult_id === sorted[j].id);
-        rowMaxH = Math.max(rowMaxH, blockHeight(s2.length));
+        rowMaxH = Math.max(rowMaxH, blockHeight(sorted[j].id));
       }
       // Nova página se não couber
       if (curY + rowMaxH > PH - 12) {
@@ -175,7 +366,7 @@ async function exportMonthGridPDF(
     const bx = MX + col * (colW + GAP);
     const by = curY;
 
-    // ── Desenha o bloco ───────────────────────────────────────────────────────
+    // ── Desenha o bloco do culto ───────────────────────────────────────────────────
 
     // Borda do bloco
     doc.setDrawColor(...C_BORDER);
@@ -188,94 +379,76 @@ async function exportMonthGridPDF(
 
     // Data — esquerda
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setTextColor(...C_BLOCK_FG);
-    doc.text(fmtDate(cult.date), bx + 2, by + 4.5);
+    doc.text(fmtDate(cult.date), bx + 2, by + 3);
 
     // Hora — direita
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7);
+    doc.setFontSize(6);
     doc.setTextColor(180, 175, 165);
-    doc.text(fmtTime(cult.time), bx + colW - 2, by + 4.5, { align: 'right' });
+    doc.text(fmtTime(cult.time), bx + colW - 2, by + 3, { align: 'right' });
 
     // Tipo/nome do culto
     const typeName = cult.type_name || cult.name || '';
     if (typeName) {
       doc.setFont('helvetica', 'italic');
-      doc.setFontSize(6.5);
+      doc.setFontSize(5.5);
       doc.setTextColor(200, 185, 155);
-      doc.text(typeName, bx + 2, by + 8.5, { maxWidth: colW - 4 });
+      doc.text(typeName, bx + 2, by + 6.5, { maxWidth: colW - 4 });
     }
 
-    // ── Mini-tabela de voluntários ─────────────────────────────────────────
-    const tableY = by + blockHeaderH;
+    // ── Mini-blocos de departamentos ───────────────────────────────────────────────
+    const cScales = allScales.filter(s => s.cult_id === cult.id);
+    const deptGroups = groupScalesByDepartmentForMonth(cScales);
+    
+    let deptY = by + blockHeaderH + 1;
+    const miniBlockH = Math.floor((rowMaxH - blockHeaderH - 2) / Math.max(1, deptGroups.length));
+    
+    deptGroups.forEach((deptGroup, deptIdx) => {
+      const mbx = bx + 1;
+      const mby = deptY + deptIdx * miniBlockH;
+      const mbw = colW - 2;
+      const mbh = miniBlockH - 0.5;
 
-    // thead
-    doc.setFillColor(...C_TH_BG);
-    doc.rect(bx, tableY, colW, tableHeadH, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6);
-    doc.setTextColor(...C_TH_FG);
-    const c1w = colW * 0.38;
-    const c2w = colW * 0.42;
-    const c3w = colW * 0.20;
-    doc.text('SETOR',      bx + 2,            tableY + 4);
-    doc.text('VOLUNTÁRIO', bx + c1w + 2,      tableY + 4);
-    doc.text('STATUS',     bx + c1w + c2w + 2, tableY + 4);
+      // Mini-bloco background
+      doc.setFillColor(245, 243, 240);
+      doc.setDrawColor(220, 215, 210);
+      doc.setLineWidth(0.15);
+      doc.rect(mbx, mby, mbw, mbh, 'FD');
 
-    if (cScales.length === 0) {
-      doc.setFont('helvetica', 'italic');
-      doc.setFontSize(6.5);
-      doc.setTextColor(160, 150, 140);
-      doc.text('Sem voluntários escalados', bx + 2, tableY + tableHeadH + 4);
-    } else {
-      // Linhas
-      const bySetor = new Map<string, Scale[]>();
-      for (const s of [...cScales].sort((a,b)=>(a.sector_name||'').localeCompare(b.sector_name||''))) {
-        const k = s.sector_name || 'Sem Setor';
-        if (!bySetor.has(k)) bySetor.set(k, []);
-        bySetor.get(k)!.push(s);
+      // Nome do departamento (pequeno, no topo)
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(4.5);
+      doc.setTextColor(100, 90, 80);
+      doc.text(deptGroup.name, mbx + 1, mby + 2, { maxWidth: mbw - 2 });
+
+      // Lista compacta de voluntários
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(3.5);
+      doc.setTextColor(60, 55, 50);
+      
+      let miniY = mby + 3.5;
+      const maxLines = Math.floor((mbh - 2.5) / 1.5);
+      
+      deptGroup.scales.slice(0, maxLines).forEach((scale, idx) => {
+        const name = (scale.member_name || '—').substring(0, 15);
+        const status = scale.status === 'Confirmado' ? '✓' : 
+                       scale.status === 'Pendente' ? '○' : 
+                       scale.status === 'Troca' ? '⇄' : '✗';
+        
+        doc.setTextColor(...statusColor(scale.status));
+        doc.text(`${status} ${name}`, mbx + 1.5, miniY, { maxWidth: mbw - 3 });
+        miniY += 1.5;
+      });
+
+      if (deptGroup.scales.length > maxLines) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(3);
+        doc.setTextColor(150, 140, 130);
+        doc.text(`+${deptGroup.scales.length - maxLines}`, mbx + 1.5, miniY);
       }
-
-      let ry = tableY + tableHeadH;
-      let rowIdx = 0;
-
-      for (const [sectorName, sScales] of bySetor) {
-        for (let si = 0; si < sScales.length; si++) {
-          const s = sScales[si];
-          // Fundo alternado
-          doc.setFillColor(...(rowIdx % 2 === 0 ? C_ROW_ODD : C_ROW_EVEN));
-          doc.rect(bx, ry, colW, rowH, 'F');
-
-          // Linha separadora horizontal suave
-          doc.setDrawColor(225, 220, 215);
-          doc.setLineWidth(0.1);
-          doc.line(bx, ry, bx + colW, ry);
-
-          doc.setFontSize(6.5);
-
-          // Setor (somente na 1ª linha do grupo)
-          if (si === 0) {
-            doc.setFont('helvetica', 'bold');
-            doc.setTextColor(90, 80, 70);
-            doc.text(sectorName, bx + 2, ry + 3.6, { maxWidth: c1w - 3 });
-          }
-
-          // Voluntário
-          doc.setFont('helvetica', 'normal');
-          doc.setTextColor(50, 45, 40);
-          doc.text(s.member_name || '—', bx + c1w + 2, ry + 3.6, { maxWidth: c2w - 3 });
-
-          // Status colorido
-          doc.setFont('helvetica', 'bold');
-          doc.setTextColor(...statusColor(s.status));
-          doc.text(s.status, bx + c1w + c2w + 2, ry + 3.6, { maxWidth: c3w - 2 });
-
-          ry += rowH;
-          rowIdx++;
-        }
-      }
-    }
+    });
 
     col++;
     if (col >= COLS) {
@@ -285,9 +458,9 @@ async function exportMonthGridPDF(
   }
 
   // Legenda
-  const legendY = PH - 18;
+  const legendY = PH - 12;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.5);
+  doc.setFontSize(5.5);
   doc.setTextColor(120, 110, 100);
   doc.text('Status:', MX, legendY);
   let lx = MX + 12;
@@ -313,8 +486,52 @@ async function exportMonthGridPDF(
   doc.save(`escalas_${new Date().toISOString().slice(0,7)}.pdf`);
 }
 
+function groupScalesByDepartmentForMonth(scales: Scale[]): DepartmentGroup[] {
+  const deptMap = new Map<string, Scale[]>();
+  
+  const deptNames: { [key: string]: string } = {
+    'Diáconos / Obreiros': 'Diáconos / Obreiros',
+    'Infantil': 'Infantil',
+    'Louvor': 'Louvor',
+    'Midia': 'Mídia',
+    'Recepcao': 'Recepção',
+    'Intercessao': 'Intercessão',
+  };
+
+  for (const scale of scales) {
+    const sector = scale.sector_name || 'Sem Setor';
+    const deptKey = sector.includes('Infantil') ? 'Infantil' :
+                    sector.includes('Louvor') || sector.includes('Música') ? 'Louvor' :
+                    sector.includes('Mídia') || sector.includes('Transmissão') ? 'Midia' :
+                    sector.includes('Obreiro') || sector.includes('Diácono') ? 'Diáconos / Obreiros' :
+                    sector.includes('Recepcao') || sector.includes('Boas-vindas') ? 'Recepcao' :
+                    sector.includes('Intercessao') || sector.includes('Oração') ? 'Intercessao' :
+                    'Outro';
+    
+    const deptName = deptNames[deptKey] || sector;
+    if (!deptMap.has(deptName)) deptMap.set(deptName, []);
+    deptMap.get(deptName)!.push(scale);
+  }
+
+  const order = ['Diáconos / Obreiros', 'Infantil', 'Louvor', 'Mídia'];
+  const result: DepartmentGroup[] = [];
+  
+  for (const name of order) {
+    if (deptMap.has(name)) {
+      result.push({ name, scales: deptMap.get(name)! });
+      deptMap.delete(name);
+    }
+  }
+  
+  for (const [name, scales] of deptMap) {
+    result.push({ name, scales });
+  }
+  
+  return result;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-//  exportScalePDF  — culto único (portrait, lista simples) OU mês (grade)
+//  exportScalePDF  — culto único (blocos por departamento) OU mês (grade paisagem)
 // ─────────────────────────────────────────────────────────────────────────────
 export async function exportScalePDF(
   scales: Scale[],
@@ -328,19 +545,21 @@ export async function exportScalePDF(
     return exportMonthGridPDF(allScales, allCults, title);
   }
 
-  // Culto único → portrait com tabela simples
+  // Culto único → blocos de departamento
+  if (cult) {
+    return exportSingleCultBlocksPDF(scales, cult, title);
+  }
+
+  // Fallback (não deve chegar aqui)
   const logo = await fetchLogo();
   const doc = new jsPDF({ orientation: 'portrait', format: 'a4', unit: 'mm' });
   const PW = doc.internal.pageSize.getWidth();
   const MX = 14;
 
-  const subtitle = cult
-    ? `${fmtDate(cult.date)}  ·  ${fmtTime(cult.time)}  ·  ${scales.length} voluntário(s)`
-    : `${scales.length} voluntário(s)`;
+  const subtitle = `${scales.length} voluntário(s)`;
 
   let y = drawMainHeader(doc, logo, title, subtitle, PW);
 
-  // Agrupa por setor
   const bySetor = new Map<string, Scale[]>();
   for (const s of [...scales].sort((a,b)=>(a.sector_name||'').localeCompare(b.sector_name||''))) {
     const k = s.sector_name || 'Sem Setor';
@@ -375,7 +594,6 @@ export async function exportScalePDF(
     },
   });
 
-  // Rodapé
   const total = (doc as any).internal.getNumberOfPages();
   for (let p = 1; p <= total; p++) {
     doc.setPage(p);
