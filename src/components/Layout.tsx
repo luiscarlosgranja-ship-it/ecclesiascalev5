@@ -196,7 +196,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
                     'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
                     page === item.id
                       ? 'bg-amber-600/20 text-amber-400 border border-amber-600/30'
-                      : 'text-stone-400 hover:bg-stone-800 hover:text-stone-200',
+                      : 'text-amber-600/70 hover:bg-stone-800 hover:text-amber-400',
                     collapsed && !mobile && 'justify-center px-2'
                   )}
                   title={collapsed && !mobile ? item.label : undefined}
