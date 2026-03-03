@@ -208,24 +208,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
             </span>
           )}
         </div>
-        {(!collapsed || mobile) && (
-          <div className="mb-2 px-1 py-2 bg-stone-900 rounded-lg border border-stone-800">
-            <p className="text-stone-600 text-[10px] text-center leading-tight">EcclesiaScale v5.0</p>
-            <div className="flex items-center justify-center gap-1 mt-0.5">
-              <Phone size={9} className="text-stone-600" />
-              <p className="text-stone-600 text-[10px] text-center leading-tight">21970031043</p>
-            </div>
-            <p className="text-stone-700 text-[9px] text-center leading-tight">Contato EcclesiaScale</p>
-            {isActivated !== null && (
-              <div className={`flex items-center justify-center gap-1 mt-1 pt-1 border-t border-stone-800`}>
-                {isActivated
-                  ? <><span className="text-[9px] text-emerald-500">● Sistema Ativado</span></>
-                  : <><span className="text-[9px] text-amber-500">● Trial Ativo</span></>
-                }
-              </div>
-            )}
-          </div>
-        )}
+
         <button
           onClick={onLogout}
           className={clsx('w-full flex items-center gap-2 px-3 py-2 rounded-lg text-stone-400 hover:bg-red-900/20 hover:text-red-400 text-sm transition-all', collapsed && !mobile && 'justify-center')}
@@ -317,6 +300,28 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
         <main className="flex-1 overflow-y-auto p-4 md:p-6">
           {children}
         </main>
+
+        {/* ─── Barra de status rodapé ─────────────────────────────────────── */}
+        <footer className="bg-stone-900 border-t border-stone-800 px-4 py-1.5 flex items-center gap-4 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <span className="text-stone-600 text-[10px]">EcclesiaScale v5.0</span>
+            <span className="text-stone-700 text-[10px]">•</span>
+            <div className="flex items-center gap-1">
+              <Phone size={9} className="text-stone-600" />
+              <span className="text-stone-600 text-[10px]">21970031043</span>
+            </div>
+            <span className="text-stone-700 text-[10px]">•</span>
+            <span className="text-stone-600 text-[10px]">Contato EcclesiaScale</span>
+          </div>
+          {isActivated !== null && (
+            <div className="flex items-center gap-1 ml-2">
+              {isActivated
+                ? <span className="text-[10px] text-emerald-500">● Sistema Ativado</span>
+                : <span className="text-[10px] text-amber-500">● Trial Ativo</span>
+              }
+            </div>
+          )}
+        </footer>
       </div>
     </div>
   );
