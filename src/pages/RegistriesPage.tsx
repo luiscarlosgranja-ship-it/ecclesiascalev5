@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Edit, Trash2, ToggleLeft, ToggleRight, Download, Clock, AlertTriangle, ShieldOff } from 'lucide-react';
 import { Card, Button, Modal, Input, Badge } from '../components/ui';
 import { useApi } from '../hooks/useApi';
@@ -6,8 +6,14 @@ import { useTrialStatus } from '../hooks/useTrialStatus';
 import api from '../utils/api';
 import type { AuthUser, Ministry, Department, Sector, CultType } from '../types';
 
-interface Props { user: AuthUser; }
+interface Props { user: AuthUser; initialTab?: string; }
 type Tab = 'ministries' | 'departments' | 'sectors' | 'cult_types';
+
+function resolveTab(raw?: string): Tab {
+  if (raw === 'cult-types') return 'cult_types';
+  if (raw === 'ministries' || raw === 'departments' || raw === 'sectors' || raw === 'cult_types') return raw as Tab;
+  return 'ministries';
+}
 
 const DIAS_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
@@ -37,8 +43,9 @@ const DEFAULT_CULT_TYPES = [
   { name: 'Segunda-feira Noite (Culto de Empreendedores)', default_day: 1, default_time: '19:30' },
 ];
 
-export default function RegistriesPage({ user }: Props) {
-  const [tab, setTab] = useState<Tab>('ministries');
+export default function RegistriesPage({ user, initialTab }: Props) {
+  const [tab, setTab] = useState<Tab>(() => resolveTab(initialTab));
+  useEffect(() => { if (initialTab) setTab(resolveTab(initialTab)); }, [initialTab]);
   const [editItem, setEditItem] = useState<any>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
