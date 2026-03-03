@@ -82,7 +82,16 @@ export default function ScalesPage({ user }: Props) {
   useEffect(() => { fetchDeptBlocks(); }, [fetchDeptBlocks]);
 
   // ─── Supabase Realtime ───────────────────────────────────────────────────────
+  // Usar refs para callbacks evita que o useEffect re-execute e recrie o canal
+  // toda vez que refetchScales/fetchDeptBlocks mudam (causa do loop)
   const realtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refetchScalesRef = useRef(refetchScales);
+  const fetchDeptBlocksRef = useRef(fetchDeptBlocks);
+  const refetchCultsRef = useRef(refetchCults);
+
+  useEffect(() => { refetchScalesRef.current = refetchScales; }, [refetchScales]);
+  useEffect(() => { fetchDeptBlocksRef.current = fetchDeptBlocks; }, [fetchDeptBlocks]);
+  useEffect(() => { refetchCultsRef.current = refetchCults; }, [refetchCults]);
 
   useEffect(() => {
     const sb = getSupabase();
@@ -91,15 +100,15 @@ export default function ScalesPage({ user }: Props) {
     const channel = sb
       .channel('scales-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'scales' }, () => {
-        // Debounce to avoid cascading loops from bulk inserts (auto-generate)
+        // Debounce para evitar múltiplas chamadas em inserções bulk (auto-generate)
         if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
         realtimeDebounceRef.current = setTimeout(() => {
-          refetchScales();
-          fetchDeptBlocks();
+          refetchScalesRef.current();
+          fetchDeptBlocksRef.current();
         }, 800);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cults' }, () => {
-        refetchCults();
+        refetchCultsRef.current();
       })
       .subscribe();
 
@@ -107,7 +116,7 @@ export default function ScalesPage({ user }: Props) {
       if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
       sb.removeChannel(channel);
     };
-  }, [refetchScales, refetchCults, fetchDeptBlocks]);
+  }, []); // Array vazio: canal criado uma única vez, sem risco de loop
 
   // ─── Toggle block collapse ───────────────────────────────────────────────────
   function toggleBlock(key: string) {
@@ -132,22 +141,40 @@ export default function ScalesPage({ user }: Props) {
   }
 
   // ─── Auto generate ───────────────────────────────────────────────────────────
+  const [autoSuccess, setAutoSuccess] = useState('');
+
   async function generateAuto() {
     if (!selectedCult && autoType !== 'month') { setError('Selecione um culto antes de gerar'); return; }
-    setSaving(true); setError('');
+    setSaving(true); setError(''); setAutoSuccess('');
     try {
       const payload = autoType === 'month'
         ? { type: 'month', month: new Date().toISOString().slice(0, 7) }
         : { type: autoType, cult_id: selectedCult };
-      await api.post('/scales/auto-generate', payload);
-      // Close modal first, then refresh — avoids triggering multiple re-renders
-      // that combined with Supabase realtime could cause a cascade loop
-      setAutoModal(false);
-      // Small delay so realtime debounce handles the DB changes instead of duplicating
-      setTimeout(() => {
+
+      const res = await api.post<{ message?: string; created?: number }>('/scales/auto-generate', payload);
+
+      // Monta mensagem de sucesso
+      const msg = res?.message || (res?.created !== undefined ? `${res.created} escala(s) gerada(s) com sucesso!` : 'Escalas geradas com sucesso!');
+      setAutoSuccess(msg);
+
+      // Atualiza dados sem fechar o modal imediatamente (usuário vê o resultado)
+      // O Supabase Realtime já vai disparar a atualização via debounce,
+      // mas forçamos uma atualização manual como fallback
+      if (autoType !== 'month') {
+        // Para culto específico, atualiza direto
         refetchScales();
         fetchDeptBlocks();
-      }, 1000);
+      } else {
+        // Para mês inteiro, apenas atualiza a lista de cultos disponíveis
+        refetchCults();
+      }
+
+      // Fecha modal após 1.5s para o usuário ler o sucesso
+      setTimeout(() => {
+        setAutoModal(false);
+        setAutoSuccess('');
+      }, 1500);
+
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao gerar escala');
     } finally { setSaving(false); }
@@ -582,9 +609,10 @@ export default function ScalesPage({ user }: Props) {
             <p className="text-amber-400 text-xs">⚠️ Para gerar Cultos Padrão ou Temáticos, selecione um culto na tela principal primeiro.</p>
           )}
           {error && <p className="text-red-400 text-xs">{error}</p>}
+          {autoSuccess && <p className="text-emerald-400 text-sm font-medium">✅ {autoSuccess}</p>}
           <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setAutoModal(false)}>Cancelar</Button>
-            <Button onClick={generateAuto} loading={saving} disabled={!selectedCult && autoType !== 'month'}>Gerar</Button>
+            <Button variant="outline" onClick={() => { setAutoModal(false); setAutoSuccess(''); setError(''); }}>Cancelar</Button>
+            <Button onClick={generateAuto} loading={saving} disabled={(!selectedCult && autoType !== 'month') || !!autoSuccess}>Gerar</Button>
           </div>
         </div>
       </Modal>
