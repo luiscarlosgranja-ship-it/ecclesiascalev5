@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Calendar, Repeat, Settings, LogOut, Bell,
   BookOpen, Layers, Shield, ChevronLeft, ChevronRight, Wifi, WifiOff,
   Database, Menu, X, Building2, Grid3X3, Church, RefreshCcw, KeyRound,
-  Sun, Moon, HeartHandshake, Phone, Mail, Image as ImageIcon
+  Sun, Moon, HeartHandshake, Phone, Mail, Image
 } from 'lucide-react';
 import type { AuthUser } from '../types';
 import { useNotifications } from '../hooks/useApi';
@@ -57,7 +57,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'backup',       label: 'Fazer Backup',     icon: <Database size={18} />,   roles: ['SuperAdmin', 'Admin'] },
       { id: 'restore',      label: 'Restaurar Backup', icon: <RefreshCcw size={18} />, roles: ['SuperAdmin', 'Admin'] },
       { id: 'email-config', label: 'Config. E-mail',   icon: <Mail size={18} />,       roles: ['SuperAdmin', 'Admin'] },
-      { id: 'logo',         label: 'Logotipo',         icon: <ImageIcon size={18} />,  roles: ['SuperAdmin', 'Admin'] },
+      { id: 'logo',         label: 'Logotipo',         icon: <Image size={18} />,      roles: ['SuperAdmin', 'Admin'] },
     ],
   },
   {
@@ -111,11 +111,19 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
 
   const [churchName, setChurchName] = useState('');
   const [isActivated, setIsActivated] = useState<boolean | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
   useEffect(() => {
     fetch('/api/settings/trial')
       .then(r => r.ok ? r.json() : {})
       .then(d => setIsActivated(d.isActive === true && d.isTrial !== true))
       .catch(() => {});
+    fetch('/api/settings/logo')
+      .then(r => r.ok ? r.json() : {})
+      .then(d => { if (d.logo) setLogoUrl(d.logo); })
+      .catch(() => {});
+    // Atualiza logo quando salvar
+    const logoHandler = (e: any) => { if (e.detail?.logo !== undefined) setLogoUrl(e.detail.logo); };
+    window.addEventListener('ecclesia-logo-updated', logoHandler);
     fetch('/api/public/church-name')
       .then(r => r.ok ? r.json() : {})
       .then(d => { if (d.name) setChurchName(d.name); })
@@ -123,7 +131,10 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
     // Atualiza quando salvar os dados da igreja
     const handler = (e: any) => { if (e.detail?.name) setChurchName(e.detail.name); };
     window.addEventListener('church-updated', handler);
-    return () => window.removeEventListener('church-updated', handler);
+    return () => {
+      window.removeEventListener('church-updated', handler);
+      window.removeEventListener('ecclesia-logo-updated', logoHandler);
+    };
   }, []);
 
   const { unread, notifications, markRead } = useNotifications(user.member_id);
@@ -144,8 +155,11 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
       {/* Logo */}
       <div className={clsx('flex items-center gap-3 px-4 py-5 border-b border-stone-800', collapsed && !mobile && 'justify-center px-2')}>
         <button onClick={() => setPage('dashboard')} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-          <div className="w-8 h-8 rounded-lg bg-amber-600 flex items-center justify-center flex-shrink-0">
-            <span className="text-white font-bold text-sm">E</span>
+          <div className="w-8 h-8 rounded-lg bg-amber-600 flex items-center justify-center flex-shrink-0 overflow-hidden">
+            {logoUrl
+              ? <img src={logoUrl} alt="Logo" className="w-full h-full object-contain" />
+              : <span className="text-white font-bold text-sm">{(churchName || 'E')[0].toUpperCase()}</span>
+            }
           </div>
           {(!collapsed || mobile) && (
             <div>
@@ -182,7 +196,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
                     'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
                     page === item.id
                       ? 'bg-amber-600/20 text-amber-400 border border-amber-600/30'
-                      : 'text-stone-400 hover:bg-stone-800 hover:text-stone-200',
+                      : 'text-amber-600/70 hover:bg-stone-800 hover:text-amber-400',
                     collapsed && !mobile && 'justify-center px-2'
                   )}
                   title={collapsed && !mobile ? item.label : undefined}
