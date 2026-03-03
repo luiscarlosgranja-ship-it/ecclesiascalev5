@@ -136,13 +136,13 @@ function GroupDropdown({ group, page, setPage, accent, light, border }: {
           borderBottom: hasActive ? `2px solid ${accent}` : open ? `2px solid ${border}` : '2px solid transparent',
           borderTop: '2px solid transparent', cursor: 'pointer',
           display: 'flex', alignItems: 'center', gap: 6,
-          color: hasActive ? accent : open ? '#44403c' : '#a8a29e',
+          color: hasActive ? accent : open ? 'var(--text-primary)' : 'var(--text-muted)',
           fontSize: 13, fontWeight: hasActive || open ? 600 : 500,
           fontFamily: "'Plus Jakarta Sans', sans-serif",
           transition: 'all .15s', whiteSpace: 'nowrap',
         }}
-        onMouseEnter={e => { if (!hasActive && !open) e.currentTarget.style.color = '#44403c'; }}
-        onMouseLeave={e => { if (!hasActive && !open) e.currentTarget.style.color = '#a8a29e'; }}
+        onMouseEnter={e => { if (!hasActive && !open) e.currentTarget.style.color = 'var(--text-primary)'; }}
+        onMouseLeave={e => { if (!hasActive && !open) e.currentTarget.style.color = 'var(--text-muted)'; }}
       >
         {group.label}
         <ChevronDown
@@ -155,18 +155,18 @@ function GroupDropdown({ group, page, setPage, accent, light, border }: {
       {open && (
         <div style={{
           position: 'absolute', top: 'calc(100% + 1px)', left: 0, minWidth: 220,
-          background: '#ffffff',
-          border: '1px solid #e8e5de',
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border-soft)',
           borderTop: `2px solid ${accent}`,
           borderRadius: '0 0 14px 14px',
-          boxShadow: '0 12px 40px rgba(0,0,0,.10), 0 2px 8px rgba(0,0,0,.06)',
+          boxShadow: 'var(--shadow-lg)',
           padding: '8px 8px 10px', zIndex: 999,
           animation: 'spDrop .15s ease', transformOrigin: 'top',
         }}>
           {/* Header da seção */}
           <div style={{
             padding: '6px 10px 10px', display: 'flex', alignItems: 'center', gap: 7,
-            borderBottom: '1px solid #f0ede6', marginBottom: 6,
+            borderBottom: '1px solid var(--border-subtle)', marginBottom: 6,
           }}>
             <div style={{
               width: 24, height: 24, borderRadius: 6, background: light,
@@ -188,22 +188,22 @@ function GroupDropdown({ group, page, setPage, accent, light, border }: {
                   width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px',
                   borderRadius: 9, border: 'none', cursor: 'pointer',
                   background: isAct ? light : 'transparent',
-                  color: isAct ? accent : '#57534e',
+                  color: isAct ? accent : 'var(--text-secondary)',
                   borderLeft: isAct ? `2px solid ${accent}` : '2px solid transparent',
                   textAlign: 'left', transition: 'all .1s',
                   fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontSize: 13, fontWeight: isAct ? 700 : 500,
                 }}
-                onMouseEnter={e => { if (!isAct) { e.currentTarget.style.background = '#f5f4f1'; e.currentTarget.style.color = '#1c1917'; } }}
-                onMouseLeave={e => { e.currentTarget.style.background = isAct ? light : 'transparent'; e.currentTarget.style.color = isAct ? accent : '#57534e'; }}
+                onMouseEnter={e => { if (!isAct) { e.currentTarget.style.background = 'var(--bg-elevated)'; e.currentTarget.style.color = 'var(--text-primary)'; } }}
+                onMouseLeave={e => { e.currentTarget.style.background = isAct ? light : 'transparent'; e.currentTarget.style.color = isAct ? accent : 'var(--text-secondary)'; }}
               >
                 <div style={{
                   width: 28, height: 28, borderRadius: 7, flexShrink: 0,
-                  background: isAct ? light : '#f5f4f1',
+                  background: isAct ? light : 'var(--bg-elevated)',
                   border: isAct ? `1px solid ${border}` : '1px solid transparent',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
-                  <span style={{ color: isAct ? accent : '#a8a29e', display: 'flex' }}>{item.icon}</span>
+                  <span style={{ color: isAct ? accent : 'var(--text-muted)', display: 'flex' }}>{item.icon}</span>
                 </div>
                 {item.label}
                 {isAct && <span style={{ marginLeft: 'auto', width: 6, height: 6, borderRadius: '50%', background: accent, flexShrink: 0 }} />}
@@ -283,25 +283,91 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
   const currentBorder = currentGroup ? (GROUP_BORDER[currentGroup.label] || '#fcd34d') : '#fcd34d';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#f8f7f4', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-base)', overflow: 'hidden' }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Lora:wght@600;700&display=swap');
         *, *::before, *::after { box-sizing: border-box; }
+
+        /* ── Variáveis de tema ── */
+        :root {
+          --bg-base:       #f8f7f4;
+          --bg-surface:    #ffffff;
+          --bg-elevated:   #f5f4f1;
+          --bg-input:      #f0efe9;
+          --border-soft:   #e8e5de;
+          --border-subtle: #f0ede6;
+          --text-primary:  #1c1917;
+          --text-secondary:#57534e;
+          --text-muted:    #a8a29e;
+          --text-faint:    #d6d0c8;
+          --shadow-sm:     0 1px 3px rgba(0,0,0,.06);
+          --shadow-md:     0 4px 16px rgba(0,0,0,.08);
+          --shadow-lg:     0 12px 40px rgba(0,0,0,.10);
+          --accent:        #b45309;
+          --accent-soft:   #fffbeb;
+          --scrollbar-track: #f0efe9;
+          --scrollbar-thumb: #d1cfc6;
+        }
+        .dark {
+          --bg-base:       #0d0d14;
+          --bg-surface:    #14141f;
+          --bg-elevated:   #1c1c2a;
+          --bg-input:      #1e1e2e;
+          --border-soft:   #2a2a3e;
+          --border-subtle: #222232;
+          --text-primary:  #f0f0f8;
+          --text-secondary:#b0b0c8;
+          --text-muted:    #6a6a88;
+          --text-faint:    #3a3a52;
+          --shadow-sm:     0 1px 3px rgba(0,0,0,.3);
+          --shadow-md:     0 4px 16px rgba(0,0,0,.4);
+          --shadow-lg:     0 12px 40px rgba(0,0,0,.6);
+          --accent:        #f59e0b;
+          --accent-soft:   #1e1800;
+          --scrollbar-track: #14141f;
+          --scrollbar-thumb: #2a2a3e;
+        }
+
         @keyframes spDrop   { from { opacity:0; transform:translateY(-6px) scaleY(.96); } to { opacity:1; transform:translateY(0) scaleY(1); } }
         @keyframes spMobile { from { opacity:0; transform:translateX(-12px); } to { opacity:1; transform:translateX(0); } }
         ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: #f0efe9; }
-        ::-webkit-scrollbar-thumb { background: #d1cfc6; border-radius: 4px; }
+        ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+        ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+
+        /* ── Componentes Tailwind adaptados ao tema via CSS vars ── */
+        .theme-card       { background: var(--bg-surface) !important; border-color: var(--border-soft) !important; }
+        .theme-modal      { background: var(--bg-surface) !important; border-color: var(--border-soft) !important; }
+        .theme-modal-header { border-color: var(--border-soft) !important; }
+        .theme-input      { background: var(--bg-input) !important; border-color: var(--border-soft) !important; color: var(--text-primary) !important; }
+        .theme-input::placeholder { color: var(--text-muted) !important; }
+        .theme-select     { background: var(--bg-input) !important; border-color: var(--border-soft) !important; color: var(--text-primary) !important; }
+        .theme-btn-secondary { background: var(--bg-elevated) !important; color: var(--text-secondary) !important; border: 1px solid var(--border-soft); }
+        .theme-btn-secondary:hover { background: var(--border-soft) !important; }
+        .theme-btn-outline { border-color: var(--border-soft) !important; color: var(--text-secondary) !important; }
+        .theme-btn-outline:hover { background: var(--bg-elevated) !important; }
+        .theme-text-primary   { color: var(--text-primary) !important; }
+        .theme-text-secondary { color: var(--text-secondary) !important; }
+        .theme-text-muted     { color: var(--text-muted) !important; }
+        .theme-surface    { background: var(--bg-surface) !important; }
+        .theme-elevated   { background: var(--bg-elevated) !important; }
+        .theme-border     { border-color: var(--border-soft) !important; }
+        .theme-divider    { border-color: var(--border-subtle) !important; }
+
+        /* Tabelas */
+        .theme-table-head { background: var(--bg-elevated) !important; border-color: var(--border-soft) !important; }
+        .theme-table-head th { color: var(--text-muted) !important; }
+        .theme-table-row  { border-color: var(--border-subtle) !important; }
+        .theme-table-row:hover { background: var(--bg-elevated) !important; }
       `}</style>
 
       {/* ─── Topbar ──────────────────────────────────────────────────────────── */}
       <header style={{
-        background: '#ffffff',
-        borderBottom: '1px solid #e8e5de',
+        background: 'var(--bg-surface)',
+        borderBottom: '1px solid var(--border-soft)',
         display: 'flex', alignItems: 'center',
         height: 56, padding: '0 20px',
         flexShrink: 0, gap: 0, zIndex: 100,
-        boxShadow: '0 1px 0 #e8e5de, 0 2px 8px rgba(0,0,0,.04)',
+        boxShadow: 'var(--shadow-sm)',
       }}>
 
         {/* Mobile button */}
@@ -319,12 +385,12 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
                 <span style={{ color: '#fef3c7', fontWeight: 800, fontSize: 13 }}>{(churchName || 'E')[0].toUpperCase()}</span>
               </div>
           }
-          <span style={{ fontFamily: "'Lora', serif", fontWeight: 700, fontSize: 15, color: '#1c1917', whiteSpace: 'nowrap', letterSpacing: -.2 }}>
+          <span style={{ fontFamily: "'Lora', serif", fontWeight: 700, fontSize: 15, color: 'var(--text-primary)', whiteSpace: 'nowrap', letterSpacing: -.2 }}>
             {churchName || 'Ecclesia'}<span style={{ color: '#b45309' }}>Scale</span>
           </span>
         </button>
 
-        <div className="hidden md:block" style={{ width: 1, height: 20, background: '#e8e5de', marginRight: 16, flexShrink: 0 }} />
+        <div className="hidden md:block" style={{ width: 1, height: 20, background: 'var(--border-soft)', marginRight: 16, flexShrink: 0 }} />
 
         {/* Nav — desktop */}
         <nav className="hidden md:flex" style={{ height: '100%', flex: 1 }}>
@@ -365,20 +431,20 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
               {unread > 0 && <span style={{ position: 'absolute', top: 2, right: 2, background: '#b45309', color: '#fff', fontSize: 9, fontWeight: 800, borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{unread > 9 ? '9+' : unread}</span>}
             </button>
             {notifOpen && (
-              <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 8px)', width: 300, background: '#ffffff', border: '1px solid #e8e5de', borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,.10)', zIndex: 999, overflow: 'hidden', animation: 'spDrop .15s ease' }}>
-                <div style={{ padding: '12px 14px', borderBottom: '1px solid #f0ede6' }}>
-                  <p style={{ color: '#1c1917', fontWeight: 700, fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif", margin: 0 }}>Notificações</p>
+              <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 8px)', width: 300, background: 'var(--bg-surface)', border: '1px solid var(--border-soft)', borderRadius: 12, boxShadow: 'var(--shadow-lg)', zIndex: 999, overflow: 'hidden', animation: 'spDrop .15s ease' }}>
+                <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <p style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif", margin: 0 }}>Notificações</p>
                 </div>
                 <div style={{ maxHeight: 280, overflowY: 'auto' }}>
                   {notifications.length === 0
-                    ? <p style={{ color: '#a8a29e', fontSize: 12, padding: 16, textAlign: 'center', fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Nenhuma notificação</p>
+                    ? <p style={{ color: 'var(--text-muted)', fontSize: 12, padding: 16, textAlign: 'center', fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Nenhuma notificação</p>
                     : notifications.slice(0, 10).map(n => (
                       <div key={n.id} onClick={() => markRead(n.id)}
-                        style={{ padding: '10px 14px', borderBottom: '1px solid #f5f4f1', cursor: 'pointer', background: n.is_read ? 'transparent' : '#fffbeb', transition: 'background .1s' }}
-                        onMouseEnter={e => e.currentTarget.style.background = '#f5f4f1'}
-                        onMouseLeave={e => e.currentTarget.style.background = n.is_read ? 'transparent' : '#fffbeb'}>
-                        <p style={{ color: n.is_read ? '#78716c' : '#b45309', fontSize: 12, fontWeight: 600, margin: '0 0 2px', fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{n.title}</p>
-                        <p style={{ color: '#a8a29e', fontSize: 11, margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{n.message}</p>
+                        style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer', background: n.is_read ? 'transparent' : 'var(--accent-soft)', transition: 'background .1s' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
+                        onMouseLeave={e => e.currentTarget.style.background = n.is_read ? 'transparent' : 'var(--accent-soft)'}>
+                        <p style={{ color: n.is_read ? 'var(--text-secondary)' : 'var(--accent)', fontSize: 12, fontWeight: 600, margin: '0 0 2px', fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{n.title}</p>
+                        <p style={{ color: 'var(--text-muted)', fontSize: 11, margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{n.message}</p>
                       </div>
                     ))
                   }
@@ -387,13 +453,13 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
             )}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f5f4f1', border: '1px solid #e8e5de', borderRadius: 10, padding: '5px 10px', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border-soft)', borderRadius: 10, padding: '5px 10px', flexShrink: 0 }}>
             <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'linear-gradient(135deg,#92400e,#b45309)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <span style={{ color: '#fef3c7', fontSize: 10, fontWeight: 800 }}>{(user.name || user.email)[0].toUpperCase()}</span>
             </div>
             <div className="hidden sm:block">
-              <p style={{ color: '#1c1917', fontSize: 12, fontWeight: 600, margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.2 }}>{user.name || user.email}</p>
-              <p style={{ color: '#a8a29e', fontSize: 10, margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.2 }}>{user.role}</p>
+              <p style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 600, margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.2 }}>{user.name || user.email}</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: 10, margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif", lineHeight: 1.2 }}>{user.role}</p>
             </div>
           </div>
 
@@ -407,11 +473,11 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
       </header>
 
       {/* ─── Breadcrumb ──────────────────────────────────────────────────────── */}
-      <div style={{ background: '#ffffff', borderBottom: '1px solid #f0ede6', padding: '6px 22px', display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
-        <span style={{ color: '#d6d0c8', fontSize: 11, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{churchName || 'EcclesiaScale'}</span>
+      <div style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border-subtle)', padding: '6px 22px', display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
+        <span style={{ color: 'var(--text-faint)', fontSize: 11, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{churchName || 'EcclesiaScale'}</span>
         {currentGroup && (
           <>
-            <span style={{ color: '#e0dbd4' }}>›</span>
+            <span style={{ color: 'var(--border-soft)' }}>›</span>
             <span style={{
               background: currentLight, color: currentAccent,
               border: `1px solid ${currentBorder}`,
@@ -421,8 +487,8 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
             }}>{currentGroup.label}</span>
           </>
         )}
-        <span style={{ color: '#e0dbd4' }}>›</span>
-        <span style={{ color: '#44403c', fontSize: 11, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 700 }}>{currentItem?.label || page}</span>
+        <span style={{ color: 'var(--border-soft)' }}>›</span>
+        <span style={{ color: 'var(--text-primary)', fontSize: 11, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 700 }}>{currentItem?.label || page}</span>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5 }}>
           {online
             ? <><Wifi size={10} style={{ color: '#10b981' }} /><span style={{ color: '#a7f3d0', fontSize: 10 }}>online</span></>
@@ -435,9 +501,9 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
       {mobileOpen && (
         <div className="md:hidden" style={{ position: 'fixed', inset: 0, zIndex: 200 }}>
           <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.35)' }} onClick={() => setMobileOpen(false)} />
-          <div style={{ position: 'absolute', top: 0, left: 0, width: 272, height: '100%', background: '#ffffff', borderRight: '1px solid #e8e5de', display: 'flex', flexDirection: 'column', animation: 'spMobile .2s ease', boxShadow: '4px 0 24px rgba(0,0,0,.08)' }}>
-            <div style={{ padding: '14px 16px', borderBottom: '1px solid #f0ede6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontFamily: "'Lora', serif", color: '#1c1917', fontWeight: 700, fontSize: 14 }}>{churchName || 'EcclesiaScale'}</span>
+          <div style={{ position: 'absolute', top: 0, left: 0, width: 272, height: '100%', background: 'var(--bg-surface)', borderRight: '1px solid var(--border-soft)', display: 'flex', flexDirection: 'column', animation: 'spMobile .2s ease', boxShadow: 'var(--shadow-lg)' }}>
+            <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontFamily: "'Lora', serif", color: 'var(--text-primary)', fontWeight: 700, fontSize: 14 }}>{churchName || 'EcclesiaScale'}</span>
               <button onClick={() => setMobileOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a8a29e' }}><X size={18} /></button>
             </div>
             <nav style={{ flex: 1, padding: 8, overflowY: 'auto' }}>
@@ -454,8 +520,8 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
                       const isAct = page === item.id;
                       return (
                         <button key={item.id} onClick={() => { setPage(item.id); setMobileOpen(false); }}
-                          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 9, border: 'none', cursor: 'pointer', textAlign: 'left', background: isAct ? light : 'transparent', color: isAct ? accent : '#78716c', borderLeft: isAct ? `2px solid ${accent}` : '2px solid transparent', fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 13, fontWeight: isAct ? 700 : 500, marginBottom: 2 }}>
-                          <span style={{ color: isAct ? accent : '#a8a29e', display: 'flex' }}>{item.icon}</span>
+                          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 9, border: 'none', cursor: 'pointer', textAlign: 'left', background: isAct ? light : 'transparent', color: isAct ? accent : 'var(--text-secondary)', borderLeft: isAct ? `2px solid ${accent}` : '2px solid transparent', fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 13, fontWeight: isAct ? 700 : 500, marginBottom: 2 }}>
+                          <span style={{ color: isAct ? accent : 'var(--text-muted)', display: 'flex' }}>{item.icon}</span>
                           {item.label}
                         </button>
                       );
@@ -464,7 +530,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
                 );
               })}
             </nav>
-            <div style={{ padding: '10px 8px', borderTop: '1px solid #f0ede6' }}>
+            <div style={{ padding: '10px 8px', borderTop: '1px solid var(--border-subtle)' }}>
               <button onClick={onLogout} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 9, border: 'none', cursor: 'pointer', background: 'transparent', color: '#a8a29e', fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 13 }}>
                 <LogOut size={15} /> Sair
               </button>
@@ -474,20 +540,20 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
       )}
 
       {/* ─── Main ────────────────────────────────────────────────────────────── */}
-      <main style={{ flex: 1, overflowY: 'auto', padding: '16px 24px' }}>
+      <main style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', background: 'var(--bg-base)' }}>
         {children}
       </main>
 
       {/* ─── Footer ──────────────────────────────────────────────────────────── */}
-      <footer style={{ background: '#ffffff', borderTop: '1px solid #f0ede6', padding: '5px 20px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-        <span style={{ color: '#d6d0c8', fontSize: 10, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>EcclesiaScale v5.0</span>
-        <span style={{ color: '#e8e5de' }}>•</span>
+      <footer style={{ background: 'var(--bg-surface)', borderTop: '1px solid var(--border-subtle)', padding: '5px 20px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+        <span style={{ color: 'var(--text-faint)', fontSize: 10, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>EcclesiaScale v5.0</span>
+        <span style={{ color: 'var(--border-soft)' }}>•</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <Phone size={9} style={{ color: '#d6d0c8' }} />
-          <span style={{ color: '#d6d0c8', fontSize: 10, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>21970031043</span>
+          <Phone size={9} style={{ color: 'var(--text-faint)' }} />
+          <span style={{ color: 'var(--text-faint)', fontSize: 10, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>21970031043</span>
         </div>
-        <span style={{ color: '#e8e5de' }}>•</span>
-        <span style={{ color: '#d6d0c8', fontSize: 10, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Contato EcclesiaScale</span>
+        <span style={{ color: 'var(--border-soft)' }}>•</span>
+        <span style={{ color: 'var(--text-faint)', fontSize: 10, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Contato EcclesiaScale</span>
         {isActivated !== null && (
           <div style={{ marginLeft: 8 }}>
             {isActivated

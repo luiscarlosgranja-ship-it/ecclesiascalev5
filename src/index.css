@@ -1,62 +1,134 @@
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Lora:wght@600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════════════════════════════
+   ECCLESIASCALE — Sistema de temas via CSS custom properties
+   Layout injeta .dark ou .light no <html>.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Tema escuro (padrão) ───────────────────────────────────── */
 :root {
-  --gold: #C9A84C;
+  --bg-base:        #0d0d14;
+  --bg-surface:     #14141f;
+  --bg-elevated:    #1c1c2a;
+  --bg-input:       #1e1e2e;
+  --border-soft:    #2a2a3e;
+  --border-subtle:  #222232;
+  --text-primary:   #f0f0f8;
+  --text-secondary: #b0b0c8;
+  --text-muted:     #6a6a88;
+  --text-faint:     #3a3a52;
+  --accent:         #f59e0b;
+  --accent-soft:    #1e1800;
+  --shadow-sm:      0 1px 3px rgba(0,0,0,.3);
+  --shadow-md:      0 4px 16px rgba(0,0,0,.4);
+  --shadow-lg:      0 12px 40px rgba(0,0,0,.6);
+  --scrollbar-track: #14141f;
+  --scrollbar-thumb: #2a2a3e;
+}
+
+/* ── Tema claro ─────────────────────────────────────────────── */
+html.light {
+  --bg-base:        #f8f7f4;
+  --bg-surface:     #ffffff;
+  --bg-elevated:    #f5f4f1;
+  --bg-input:       #f0efe9;
+  --border-soft:    #e8e5de;
+  --border-subtle:  #f0ede6;
+  --text-primary:   #1c1917;
+  --text-secondary: #57534e;
+  --text-muted:     #a8a29e;
+  --text-faint:     #d6d0c8;
+  --accent:         #b45309;
+  --accent-soft:    #fffbeb;
+  --shadow-sm:      0 1px 3px rgba(0,0,0,.06);
+  --shadow-md:      0 4px 16px rgba(0,0,0,.08);
+  --shadow-lg:      0 12px 40px rgba(0,0,0,.10);
+  --scrollbar-track: #f0efe9;
+  --scrollbar-thumb: #d1cfc6;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  font-family: 'Inter', sans-serif;
-  background-color: #0c0a09;
-  color: #f5f5f4;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
-  transition: background-color 0.3s ease, color 0.3s ease;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* ── Tema claro ────────────────────────────────────────────────────── */
-html.light body {
-  background-color: #f5f5f4;
-  color: #1c1917;
-}
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
 
-/* Fundo geral das páginas */
-html.light .bg-stone-950 { background-color: #e7e5e4 !important; }
-html.light .bg-stone-900 { background-color: #f5f5f4 !important; }
-html.light .bg-stone-800 { background-color: #e7e5e4 !important; }
-html.light .bg-stone-700 { background-color: #d6d3d1 !important; }
+/* ═══════════════════════════════════════════════════════════════
+   Mapeamento Tailwind stone/* → CSS vars
+   Garante que todas as páginas se adaptem ao tema automaticamente.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Backgrounds */
+.bg-stone-950 { background-color: var(--bg-base)      !important; }
+.bg-stone-900 { background-color: var(--bg-surface)   !important; }
+.bg-stone-800 { background-color: var(--bg-elevated)  !important; }
+.bg-stone-700 { background-color: var(--border-soft)  !important; }
+
+.bg-stone-900\/50 { background-color: color-mix(in srgb, var(--bg-surface)  50%, transparent) !important; }
+.bg-stone-800\/50 { background-color: color-mix(in srgb, var(--bg-elevated) 50%, transparent) !important; }
+.bg-stone-800\/30 { background-color: color-mix(in srgb, var(--bg-elevated) 30%, transparent) !important; }
+.bg-stone-800\/20 { background-color: color-mix(in srgb, var(--bg-elevated) 20%, transparent) !important; }
+
+.hover\:bg-stone-800:hover { background-color: var(--bg-elevated) !important; }
+.hover\:bg-stone-700:hover { background-color: var(--border-soft) !important; }
+.hover\:bg-stone-600:hover { background-color: var(--border-soft) !important; }
 
 /* Bordas */
-html.light .border-stone-800 { border-color: #d6d3d1 !important; }
-html.light .border-stone-700 { border-color: #a8a29e !important; }
+.border-stone-900 { border-color: var(--bg-elevated)   !important; }
+.border-stone-800 { border-color: var(--border-subtle) !important; }
+.border-stone-700 { border-color: var(--border-soft)   !important; }
+.border-stone-600 { border-color: var(--border-soft)   !important; }
+
+.divide-stone-800\/60 > * + * { border-color: color-mix(in srgb, var(--border-subtle) 60%, transparent) !important; }
+.divide-stone-700     > * + * { border-color: var(--border-soft) !important; }
 
 /* Textos */
-html.light .text-stone-200 { color: #1c1917 !important; }
-html.light .text-stone-300 { color: #292524 !important; }
-html.light .text-stone-400 { color: #44403c !important; }
-html.light .text-stone-500 { color: #78716c !important; }
+.text-stone-100 { color: var(--text-primary)   !important; }
+.text-stone-200 { color: var(--text-primary)   !important; }
+.text-stone-300 { color: var(--text-secondary) !important; }
+.text-stone-400 { color: var(--text-secondary) !important; }
+.text-stone-500 { color: var(--text-muted)     !important; }
+.text-stone-600 { color: var(--text-faint)     !important; }
 
-/* Cards e inputs */
-html.light .bg-stone-900\/50,
-html.light .bg-stone-800\/50 { background-color: rgba(231,229,228,0.8) !important; }
+.hover\:text-stone-200:hover { color: var(--text-primary)   !important; }
+.hover\:text-stone-300:hover { color: var(--text-secondary) !important; }
 
-/* Scrollbar claro */
-html.light ::-webkit-scrollbar-track { background: #e7e5e4; }
-html.light ::-webkit-scrollbar-thumb { background: #a8a29e; }
-
-h1, h2, h3 {
-  font-family: 'Cinzel', serif;
+/* Inputs nativos */
+input, select, textarea {
+  color: var(--text-primary);
+  color-scheme: dark;
 }
+html.light input,
+html.light select,
+html.light textarea { color-scheme: light; }
 
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: #1c1917; }
-::-webkit-scrollbar-thumb { background: #78716c; border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: #a78bfa; }
+.focus\:border-amber-500:focus { border-color: var(--accent) !important; }
 
-input[type=number]::-webkit-inner-spin-button,
-input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+/* ═══════════════════════════════════════════════════════════════
+   Utilitários de tema
+   ═══════════════════════════════════════════════════════════════ */
+.theme-surface    { background: var(--bg-surface)   !important; }
+.theme-elevated   { background: var(--bg-elevated)  !important; }
+.theme-border     { border-color: var(--border-soft)    !important; }
+.theme-divider    { border-color: var(--border-subtle)  !important; }
+.theme-text       { color: var(--text-primary)   !important; }
+.theme-text-2     { color: var(--text-secondary) !important; }
+.theme-text-muted { color: var(--text-muted)     !important; }
+
+.theme-table-head    { background: var(--bg-elevated) !important; }
+.theme-table-head th { color: var(--text-muted) !important; border-color: var(--border-soft) !important; }
+.theme-table-row     { border-color: var(--border-subtle) !important; }
+.theme-table-row:hover { background: var(--bg-elevated) !important; }
