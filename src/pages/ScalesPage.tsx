@@ -709,15 +709,18 @@ export default function ScalesPage({ user }: Props) {
       <Modal open={fillModal} onClose={() => { setFillModal(false); setFillMsg(''); }} title="Preencher Voluntários Automaticamente" size="sm">
         <div className="space-y-4">
           {selectedCultData && (
-            <div className="bg-stone-800/50 rounded-lg p-3 text-xs text-stone-400 space-y-1">
-              <p><span className="text-stone-300">Culto:</span> {selectedCultData.name || selectedCultData.type_name}</p>
-              <p><span className="text-stone-300">Data:</span> {selectedCultData.date}</p>
+            <div className="bg-stone-800 border border-stone-600 rounded-lg p-3 text-xs space-y-1">
+              <p><span className="text-stone-200 font-semibold">Culto:</span> <span className="text-stone-300">{selectedCultData.name || selectedCultData.type_name}</span></p>
+              <p><span className="text-stone-200 font-semibold">Data:</span> <span className="text-stone-300">{selectedCultData.date}</span></p>
             </div>
           )}
-          <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg p-3">
-            <p className="text-amber-300 text-xs leading-relaxed">
-              O sistema preencherá os setores padrão (exceto Som, Iluminação, Foto e Filmagem) com voluntários disponíveis.
-            </p>
+          <div className="bg-stone-800 border border-stone-600 rounded-lg p-3 space-y-2">
+            <p className="text-stone-200 text-xs font-semibold">O sistema respeitará as seguintes regras:</p>
+            <ul className="text-stone-300 text-xs space-y-1 list-disc list-inside leading-relaxed">
+              <li>Não escalar o mesmo voluntário duas vezes no culto</li>
+              <li>Máximo 3 escalas por voluntário no mês</li>
+              <li>Setores já preenchidos serão mantidos</li>
+            </ul>
           </div>
           {fillMsg && (
             <p className={`text-sm font-medium ${fillMsg.startsWith('❌') ? 'text-red-400' : 'text-emerald-400'}`}>{fillMsg}</p>
