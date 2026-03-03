@@ -117,16 +117,20 @@ function GroupDropdown({ group, page, setPage, accent, light, border }: {
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasActive = group.items.some(i => i.id === page);
 
-  function openMenu()  { if (closeTimer.current) clearTimeout(closeTimer.current); setOpen(true); }
-  function closeMenu() { closeTimer.current = setTimeout(() => setOpen(false), 150); }
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
 
   return (
-    <div ref={ref} style={{ position: 'relative', height: '100%' }}
-      onMouseEnter={openMenu} onMouseLeave={closeMenu}>
+    <div ref={ref} style={{ position: 'relative', height: '100%' }}>
       <button
+        onClick={() => setOpen(o => !o)}
         style={{
           height: '100%', padding: '0 14px', background: 'transparent', border: 'none',
           borderBottom: hasActive ? `2px solid ${accent}` : open ? `2px solid ${border}` : '2px solid transparent',
@@ -137,7 +141,8 @@ function GroupDropdown({ group, page, setPage, accent, light, border }: {
           fontFamily: "'Plus Jakarta Sans', sans-serif",
           transition: 'all .15s', whiteSpace: 'nowrap',
         }}
-
+        onMouseEnter={e => { if (!hasActive && !open) e.currentTarget.style.color = 'var(--text-primary)'; }}
+        onMouseLeave={e => { if (!hasActive && !open) e.currentTarget.style.color = 'var(--text-muted)'; }}
       >
         {group.label}
         <ChevronDown
@@ -148,7 +153,7 @@ function GroupDropdown({ group, page, setPage, accent, light, border }: {
       </button>
 
       {open && (
-        <div onMouseEnter={openMenu} onMouseLeave={closeMenu} style={{
+        <div style={{
           position: 'absolute', top: 'calc(100% + 1px)', left: 0, minWidth: 220,
           background: 'var(--bg-surface)',
           border: '1px solid var(--border-soft)',
@@ -254,6 +259,20 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
     };
   }, []);
 
+  // ─── Título da aba e favicon dinâmicos ───────────────────────────────────────
+  useEffect(() => {
+    if (churchName) document.title = churchName;
+    if (logoUrl) {
+      let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      link.href = logoUrl;
+    }
+  }, [churchName, logoUrl]);
+
   const { unread, notifications, markRead } = useNotifications(user.member_id);
   const [notifOpen, setNotifOpen] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
@@ -285,21 +304,21 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
 
         /* ── Variáveis de tema ── */
         :root {
-          --bg-base:       #eceae5;
-          --bg-surface:    #f8f6f2;
-          --bg-elevated:   #e4e0d8;
-          --bg-input:      #dedad2;
-          --border-soft:   #c4bfb5;
-          --border-subtle: #d4cfc6;
-          --text-primary:  #0c0b09;
-          --text-secondary:#2c2925;
-          --text-muted:    #6b6560;
-          --text-faint:    #9c9690;
+          --bg-base:       #f8f7f4;
+          --bg-surface:    #ffffff;
+          --bg-elevated:   #f5f4f1;
+          --bg-input:      #f0efe9;
+          --border-soft:   #e8e5de;
+          --border-subtle: #f0ede6;
+          --text-primary:  #1c1917;
+          --text-secondary:#57534e;
+          --text-muted:    #a8a29e;
+          --text-faint:    #d6d0c8;
           --shadow-sm:     0 1px 3px rgba(0,0,0,.06);
           --shadow-md:     0 4px 16px rgba(0,0,0,.08);
           --shadow-lg:     0 12px 40px rgba(0,0,0,.10);
           --accent:        #b45309;
-          --accent-soft:   #fef3c7;
+          --accent-soft:   #fffbeb;
           --scrollbar-track: #f0efe9;
           --scrollbar-thumb: #d1cfc6;
         }
@@ -381,7 +400,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
               </div>
           }
           <span style={{ fontFamily: "'Lora', serif", fontWeight: 700, fontSize: 15, color: 'var(--text-primary)', whiteSpace: 'nowrap', letterSpacing: -.2 }}>
-            {churchName || 'EcclesiaScale'}
+            {churchName || 'Ecclesia'}<span style={{ color: '#b45309' }}>Scale</span>
           </span>
         </button>
 
