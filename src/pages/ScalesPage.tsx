@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Printer, Zap, Trash2, CheckCircle, Repeat, Calendar, Users, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
+import { Plus, Printer, Zap, Trash2, CheckCircle, Repeat, Calendar, Users, ChevronDown, ChevronUp, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { Card, Button, Modal, Badge, Select, Spinner, Input } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
@@ -24,16 +24,20 @@ interface DeptBlock {
   }[];
 }
 
+interface AutoResult {
+  created: number;
+  cultsCount?: number;
+  label: string; // descrição amigável do tipo gerado
+}
+
 export default function ScalesPage({ user }: Props) {
   const [selectedCult, setSelectedCult] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<'departments' | 'list'>('departments');
 
-  // Department blocks state
   const [deptBlocks, setDeptBlocks] = useState<DeptBlock[]>([]);
   const [deptLoading, setDeptLoading] = useState(false);
   const [collapsedBlocks, setCollapsedBlocks] = useState<Set<string>>(new Set());
 
-  // Modals
   const [autoModal, setAutoModal] = useState(false);
   const [fillModal, setFillModal] = useState(false);
   const [fillLoading, setFillLoading] = useState(false);
@@ -48,16 +52,17 @@ export default function ScalesPage({ user }: Props) {
   const [error, setError] = useState('');
   const [cultError, setCultError] = useState('');
 
-  // Swap modal
   const [swapModal, setSwapModal] = useState(false);
   const [swapScaleId, setSwapScaleId] = useState<number | null>(null);
   const [swapEmail, setSwapEmail] = useState('');
   const [swapMsg, setSwapMsg] = useState('');
   const [swapSaving, setSwapSaving] = useState(false);
 
-  // ─── Delete entire scale modal ───────────────────────────────────────────────
   const [deleteScaleModal, setDeleteScaleModal] = useState(false);
   const [deletingScale, setDeletingScale] = useState(false);
+
+  // Resultado detalhado da geração automática
+  const [autoResult, setAutoResult] = useState<AutoResult | null>(null);
 
   const { data: cults, refetch: refetchCults } = useApi<Cult[]>('/cults?status=Agendado');
   const { data: scales, refetch: refetchScales } = useApi<Scale[]>(
@@ -69,7 +74,6 @@ export default function ScalesPage({ user }: Props) {
 
   const availableCults = cults || [];
 
-  // ─── Load department blocks ──────────────────────────────────────────────────
   const fetchDeptBlocks = useCallback(async () => {
     if (!selectedCult) { setDeptBlocks([]); return; }
     setDeptLoading(true);
@@ -85,16 +89,10 @@ export default function ScalesPage({ user }: Props) {
 
   useEffect(() => { fetchDeptBlocks(); }, [fetchDeptBlocks]);
 
-  // ─── Supabase Realtime ───────────────────────────────────────────────────────
-  // Usar refs para callbacks evita que o useEffect re-execute e recrie o canal
-  // toda vez que refetchScales/fetchDeptBlocks mudam (causa do loop)
   const realtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refetchScalesRef = useRef(refetchScales);
   const fetchDeptBlocksRef = useRef(fetchDeptBlocks);
   const refetchCultsRef = useRef(refetchCults);
-  // Flag para suprimir o Realtime durante operações de deleção de culto
-  // Sem isso, o Realtime detecta o DELETE nas scales e rebusca os dados,
-  // fazendo a escala "ressurgir" logo após ser deletada.
   const suppressRealtimeRef = useRef(false);
 
   useEffect(() => { refetchScalesRef.current = refetchScales; }, [refetchScales]);
@@ -104,13 +102,10 @@ export default function ScalesPage({ user }: Props) {
   useEffect(() => {
     const sb = getSupabase();
     if (!sb) return;
-
     const channel = sb
       .channel('scales-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'scales' }, () => {
-        // Se estamos no meio de uma deleção de culto, ignorar o evento
         if (suppressRealtimeRef.current) return;
-        // Debounce para evitar múltiplas chamadas em inserções bulk (auto-generate)
         if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
         realtimeDebounceRef.current = setTimeout(() => {
           refetchScalesRef.current();
@@ -122,14 +117,12 @@ export default function ScalesPage({ user }: Props) {
         refetchCultsRef.current();
       })
       .subscribe();
-
     return () => {
       if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
       sb.removeChannel(channel);
     };
-  }, []); // Array vazio: canal criado uma única vez, sem risco de loop
+  }, []);
 
-  // ─── Toggle block collapse ───────────────────────────────────────────────────
   function toggleBlock(key: string) {
     setCollapsedBlocks(prev => {
       const next = new Set(prev);
@@ -138,7 +131,6 @@ export default function ScalesPage({ user }: Props) {
     });
   }
 
-  // ─── Fill cult ───────────────────────────────────────────────────────────────
   async function fillCult() {
     if (!selectedCult) return;
     setFillLoading(true); setFillMsg('');
@@ -151,123 +143,103 @@ export default function ScalesPage({ user }: Props) {
     } finally { setFillLoading(false); }
   }
 
-  // ─── Auto generate ───────────────────────────────────────────────────────────
-  const [autoSuccess, setAutoSuccess] = useState('');
+  // ─── Auto generate com resultado detalhado ───────────────────────────────────
+  function openAutoModal() {
+    setAutoModal(true);
+    setAutoResult(null);
+    setError('');
+  }
+
+  function closeAutoModal() {
+    setAutoModal(false);
+    setAutoResult(null);
+    setError('');
+  }
+
+  const AUTO_LABELS: Record<string, string> = {
+    month: 'Mês Inteiro',
+    standard: 'Cultos Padrão',
+    thematic: 'Cultos Temáticos',
+  };
 
   async function generateAuto() {
     if (!selectedCult && autoType !== 'month') { setError('Selecione um culto antes de gerar'); return; }
-    setSaving(true); setError(''); setAutoSuccess('');
+    setSaving(true); setError(''); setAutoResult(null);
     try {
       const payload = autoType === 'month'
         ? { type: 'month', month: new Date().toISOString().slice(0, 7) }
         : { type: autoType, cult_id: selectedCult };
 
-      const res = await api.post<{ message?: string; created?: number }>('/scales/auto-generate', payload);
+      const res = await api.post<{ message?: string; created?: number; cults_count?: number; scales_count?: number }>(
+        '/scales/auto-generate', payload
+      );
 
-      // Monta mensagem de sucesso
-      const msg = res?.message || (res?.created !== undefined ? `${res.created} escala(s) gerada(s) com sucesso!` : 'Escalas geradas com sucesso!');
-      setAutoSuccess(msg);
+      const created = res?.scales_count ?? res?.created ?? 0;
+      const cultsCount = res?.cults_count ?? (autoType !== 'month' ? 1 : undefined);
 
-      // Atualiza dados sem fechar o modal imediatamente (usuário vê o resultado)
-      // O Supabase Realtime já vai disparar a atualização via debounce,
-      // mas forçamos uma atualização manual como fallback
+      setAutoResult({
+        created,
+        cultsCount,
+        label: AUTO_LABELS[autoType],
+      });
+
       if (autoType !== 'month') {
-        // Para culto específico, atualiza direto
         refetchScales();
         fetchDeptBlocks();
       } else {
-        // Para mês inteiro, apenas atualiza a lista de cultos disponíveis
         refetchCults();
       }
-
-      // Fecha modal após 1.5s para o usuário ler o sucesso
-      setTimeout(() => {
-        setAutoModal(false);
-        setAutoSuccess('');
-      }, 1500);
-
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao gerar escala');
     } finally { setSaving(false); }
   }
 
-  // ─── Confirm scale ───────────────────────────────────────────────────────────
   async function confirmScale(id: number) {
     await api.put(`/scales/${id}/confirm`, {});
     refetchScales(); fetchDeptBlocks();
   }
 
-  // ─── Remove scale member ─────────────────────────────────────────────────────
   async function removeScale(id: number) {
     if (!confirm('Remover desta escala? O membro ficará disponível novamente.')) return;
-
-    // Calcula membros restantes ANTES de deletar (estado local ainda tem todos)
     const remaining = (scales || []).filter(s => s.id !== id);
     const cultToDelete = remaining.length === 0 ? selectedCult : null;
-
     if (cultToDelete) {
-      // Último membro: suprime o Realtime para evitar que o DELETE das scales
-      // dispare um refetch e "ressuscite" a escala na tela
       suppressRealtimeRef.current = true;
-      // Limpa estado local imediatamente — antes de qualquer chamada de rede
       setSelectedCult(null);
       setDeptBlocks([]);
     }
-
     try {
       await api.delete(`/scales/${id}`);
-
       if (cultToDelete) {
         await api.delete(`/cults/${cultToDelete}`);
-        // Agora pode atualizar a lista de cultos
         await refetchCults();
       } else {
         refetchScales();
         fetchDeptBlocks();
       }
     } catch (e) {
-      // Em caso de erro, restaura o estado
-      if (cultToDelete) {
-        setSelectedCult(cultToDelete);
-      }
+      if (cultToDelete) setSelectedCult(cultToDelete);
       alert(e instanceof Error ? e.message : 'Erro ao remover membro');
     } finally {
-      // Libera o Realtime após 1.5s (tempo suficiente para o DB propagar os DELETEs)
-      if (cultToDelete) {
-        setTimeout(() => { suppressRealtimeRef.current = false; }, 1500);
-      }
+      if (cultToDelete) setTimeout(() => { suppressRealtimeRef.current = false; }, 1500);
     }
   }
 
-  // ─── Delete entire scale ──────────────────────────────────────────────────────
   async function deleteEntireScale() {
     if (!selectedCult) return;
     setDeletingScale(true);
-
     const cultToDelete = selectedCult;
-
     try {
-      // 1) Busca scales direto da API — não usa estado React
-      //    (bug: setSelectedCult(null) limpava scales ANTES do Promise.all rodar)
       const freshScales = await api.get<{ id: number }[]>(`/scales?cult_id=${cultToDelete}`);
-
-      // 2) Suprime Realtime antes de deletar
       suppressRealtimeRef.current = true;
-
-      // 3) Remove cada scale (libera FK antes de deletar o culto)
       if (freshScales && freshScales.length > 0) {
         await Promise.all(freshScales.map(s => api.delete(`/scales/${s.id}`)));
       }
-
-      // 4) Deleta o culto (sem FK pendente, banco aceita)
       await api.delete(`/cults/${cultToDelete}`);
-
-      // 5) Limpa estado local SOMENTE após sucesso
       setDeleteScaleModal(false);
       setSelectedCult(null);
       setDeptBlocks([]);
       await refetchCults();
-
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Erro ao remover escala');
     } finally {
@@ -276,7 +248,6 @@ export default function ScalesPage({ user }: Props) {
     }
   }
 
-  // ─── Add to scale ────────────────────────────────────────────────────────────
   async function addToScale() {
     if (!selectedCult || !newScale.member_id || !newScale.sector_id) {
       setError('Voluntário e Setor são obrigatórios'); return;
@@ -296,7 +267,6 @@ export default function ScalesPage({ user }: Props) {
     } finally { setSaving(false); }
   }
 
-  // ─── Create new cult ─────────────────────────────────────────────────────────
   async function createNewCultScale() {
     if (!newCult.date || !newCult.time) { setCultError('Data e Horário são obrigatórios'); return; }
     setSavingCult(true); setCultError('');
@@ -317,7 +287,6 @@ export default function ScalesPage({ user }: Props) {
     } finally { setSavingCult(false); }
   }
 
-  // ─── Swap ────────────────────────────────────────────────────────────────────
   function openSwapModal(scaleId: number) {
     setSwapScaleId(scaleId); setSwapEmail(''); setSwapMsg(''); setSwapModal(true);
   }
@@ -334,7 +303,6 @@ export default function ScalesPage({ user }: Props) {
     } finally { setSwapSaving(false); }
   }
 
-  // ─── Print ───────────────────────────────────────────────────────────────────
   const selectedCultData = availableCults.find(c => c.id === selectedCult);
 
   async function handlePrint() {
@@ -360,7 +328,6 @@ export default function ScalesPage({ user }: Props) {
     return `${c.name || c.type_name || 'Culto'} — ${c.date} ${c.time}`;
   }
 
-  // ─── Dept block colors ───────────────────────────────────────────────────────
   const BLOCK_COLORS = [
     'border-amber-600/40 bg-amber-900/10',
     'border-blue-600/40 bg-blue-900/10',
@@ -392,7 +359,7 @@ export default function ScalesPage({ user }: Props) {
         <div className="flex gap-2 flex-wrap">
           {canManage && (
             <>
-              <Button variant="secondary" size="sm" onClick={() => { setAutoModal(true); setError(''); }}>
+              <Button variant="secondary" size="sm" onClick={openAutoModal}>
                 <Zap size={16} /> Gerar Automático
               </Button>
               <Button variant="secondary" size="sm" onClick={() => { setNewCultModal(true); setCultError(''); }}>
@@ -440,8 +407,6 @@ export default function ScalesPage({ user }: Props) {
               <option key={c.id} value={c.id}>{getCultLabel(c)}</option>
             ))}
           </select>
-
-          {/* View mode toggle */}
           {selectedCult && isAdmin(user.role) && (
             <div className="flex rounded-lg overflow-hidden border border-stone-700">
               <button
@@ -459,7 +424,6 @@ export default function ScalesPage({ user }: Props) {
             </div>
           )}
         </div>
-
         {selectedCultData && (
           <div className="mt-3 flex flex-wrap gap-4 text-xs text-stone-400">
             <span>📅 {selectedCultData.date}</span>
@@ -492,10 +456,8 @@ export default function ScalesPage({ user }: Props) {
                   const colorClass = BLOCK_COLORS[idx % BLOCK_COLORS.length];
                   const headerClass = HEADER_COLORS[idx % HEADER_COLORS.length];
                   const confirmedCount = block.scales.filter(s => s.status === 'Confirmado').length;
-
                   return (
                     <div key={blockKey} className={`rounded-xl border ${colorClass} overflow-hidden`}>
-                      {/* Block header */}
                       <button
                         onClick={() => toggleBlock(blockKey)}
                         className={`w-full flex items-center justify-between px-4 py-3 ${headerClass} transition-opacity hover:opacity-80`}
@@ -509,8 +471,6 @@ export default function ScalesPage({ user }: Props) {
                         </div>
                         {isCollapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
                       </button>
-
-                      {/* Block content */}
                       {!isCollapsed && (
                         <div className="divide-y divide-stone-800/60">
                           {block.scales.map((s, i) => (
@@ -554,7 +514,7 @@ export default function ScalesPage({ user }: Props) {
         </>
       )}
 
-      {/* ─── List View (leader view or toggled) ─────────────────────────────── */}
+      {/* ─── List View ──────────────────────────────────────────────────────── */}
       {selectedCult && (viewMode === 'list' || !isAdmin(user.role)) && (
         <Card className="overflow-hidden">
           {!scales ? (
@@ -674,34 +634,89 @@ export default function ScalesPage({ user }: Props) {
       </Modal>
 
       {/* ─── Modal: Gerar Escala Automática ─────────────────────────────────── */}
-      <Modal open={autoModal} onClose={() => setAutoModal(false)} title="Gerar Escala Automática" size="sm">
+      <Modal open={autoModal} onClose={closeAutoModal} title="Gerar Escala Automática" size="sm">
         <div className="space-y-4">
-          <p className="text-stone-400 text-sm">
-            O sistema respeitará as regras de não-repetição (máx. 3x/mês) e evitará duplicidade de setor.
-          </p>
-          <div className="space-y-2">
-            {[
-              { value: 'month', label: 'Mês Inteiro' },
-              { value: 'standard', label: 'Cultos Padrão' },
-              { value: 'thematic', label: 'Cultos Temáticos' },
-            ].map(opt => (
-              <label key={opt.value}
-                className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-stone-700 hover:border-amber-600 transition-all">
-                <input type="radio" value={opt.value} checked={autoType === opt.value}
-                  onChange={() => setAutoType(opt.value as any)} className="accent-amber-500" />
-                <span className="text-stone-200 text-sm">{opt.label}</span>
-              </label>
-            ))}
-          </div>
-          {!selectedCult && autoType !== 'month' && (
-            <p className="text-amber-400 text-xs">⚠️ Para gerar Cultos Padrão ou Temáticos, selecione um culto na tela principal primeiro.</p>
+
+          {/* ── Resultado de sucesso ─────────────────────────────────────────── */}
+          {autoResult ? (
+            <div className="space-y-4">
+              <div className="bg-emerald-900/20 border border-emerald-700/40 rounded-xl p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={18} className="text-emerald-400 flex-shrink-0" />
+                  <p className="text-emerald-300 font-semibold text-sm">Escala gerada com sucesso!</p>
+                </div>
+
+                {/* Tipo gerado */}
+                <div className="bg-stone-800/60 rounded-lg px-3 py-2 text-xs">
+                  <span className="text-stone-400">Tipo: </span>
+                  <span className="text-stone-200 font-medium">{autoResult.label}</span>
+                </div>
+
+                {/* Contadores */}
+                <div className={`grid gap-3 ${autoResult.cultsCount !== undefined ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  {autoResult.cultsCount !== undefined && (
+                    <div className="bg-amber-900/30 rounded-lg p-3 text-center">
+                      <p className="text-amber-200 text-2xl font-bold">{autoResult.cultsCount}</p>
+                      <p className="text-amber-400 text-xs mt-0.5">
+                        {autoResult.cultsCount === 1 ? 'culto processado' : 'cultos processados'}
+                      </p>
+                    </div>
+                  )}
+                  <div className="bg-emerald-900/30 rounded-lg p-3 text-center">
+                    <p className="text-emerald-200 text-2xl font-bold">{autoResult.created}</p>
+                    <p className="text-emerald-400 text-xs mt-0.5">
+                      {autoResult.created === 1 ? 'escala gerada' : 'escalas geradas'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Mensagem complementar por tipo */}
+                <p className="text-stone-400 text-xs leading-relaxed">
+                  {autoResult.label === 'Mês Inteiro' &&
+                    'Todos os cultos do mês foram processados e as escalas distribuídas respeitando o limite de 3x/mês por voluntário.'}
+                  {autoResult.label === 'Cultos Padrão' &&
+                    'As escalas dos cultos padrão foram geradas com a distribuição automática de voluntários.'}
+                  {autoResult.label === 'Cultos Temáticos' &&
+                    'As escalas dos cultos temáticos foram geradas com a distribuição automática de voluntários.'}
+                </p>
+              </div>
+
+              <Button onClick={closeAutoModal} className="w-full">Fechar</Button>
+            </div>
+
+          ) : (
+            /* ── Formulário de geração ──────────────────────────────────────── */
+            <>
+              <p className="text-stone-400 text-sm">
+                O sistema respeitará as regras de não-repetição (máx. 3x/mês) e evitará duplicidade de setor.
+              </p>
+              <div className="space-y-2">
+                {[
+                  { value: 'month',    label: 'Mês Inteiro' },
+                  { value: 'standard', label: 'Cultos Padrão' },
+                  { value: 'thematic', label: 'Cultos Temáticos' },
+                ].map(opt => (
+                  <label key={opt.value}
+                    className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-stone-700 hover:border-amber-600 transition-all">
+                    <input type="radio" value={opt.value} checked={autoType === opt.value}
+                      onChange={() => setAutoType(opt.value as any)} className="accent-amber-500" />
+                    <span className="text-stone-200 text-sm">{opt.label}</span>
+                  </label>
+                ))}
+              </div>
+              {!selectedCult && autoType !== 'month' && (
+                <p className="text-amber-400 text-xs">⚠️ Para gerar Cultos Padrão ou Temáticos, selecione um culto na tela principal primeiro.</p>
+              )}
+              {error && <p className="text-red-400 text-xs">{error}</p>}
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={closeAutoModal}>Cancelar</Button>
+                <Button onClick={generateAuto} loading={saving}
+                  disabled={!selectedCult && autoType !== 'month'}>
+                  Gerar
+                </Button>
+              </div>
+            </>
           )}
-          {error && <p className="text-red-400 text-xs">{error}</p>}
-          {autoSuccess && <p className="text-emerald-400 text-sm font-medium">✅ {autoSuccess}</p>}
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={() => { setAutoModal(false); setAutoSuccess(''); setError(''); }}>Cancelar</Button>
-            <Button onClick={generateAuto} loading={saving} disabled={(!selectedCult && autoType !== 'month') || !!autoSuccess}>Gerar</Button>
-          </div>
         </div>
       </Modal>
 
