@@ -14,7 +14,7 @@ app.use(express.json());
 
 // ─── Supabase Setup ───────────────────────────────────────────────────────────
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY; // use service_role key (bypasses RLS)
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   console.error('❌ SUPABASE_URL e SUPABASE_SERVICE_KEY são obrigatórios');
   process.exit(1);
@@ -71,8 +71,7 @@ async function checkTrial(res) {
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
-// ─── Rotas públicas (sem autenticação) ────────────────────────────────────────
-// Usadas na tela de cadastro antes do login
+// ─── Rotas públicas ───────────────────────────────────────────────────────────
 app.get('/api/public/departments', async (req, res) => {
   const { data, error } = await db.from('departments').select('id, name').order('name');
   if (error) return res.status(500).json({ message: error.message });
@@ -199,7 +198,6 @@ app.get('/api/members', auth, async (req, res) => {
   const { data: members, error } = await query;
   if (error) return res.status(500).json({ message: error.message });
 
-  // Attach ministries
   const memberIds = members.map(m => m.id);
   const { data: mmRows } = await db.from('member_ministries').select('member_id, ministries(*)').in('member_id', memberIds);
 
@@ -240,7 +238,6 @@ app.post('/api/members', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asy
   if (error) return res.status(500).json({ message: error.message });
 
   if (email) {
-    // ✅ CORREÇÃO: Verifica se usuário já existe antes de criar, evitando sobrescrever senha
     const { data: existingUser } = await db.from('users').select('id').eq('email', email).maybeSingle();
     if (!existingUser) {
       const hash = bcrypt.hashSync('EcclesiaScale@' + member.id, 10);
@@ -264,7 +261,6 @@ app.put('/api/members/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), 
     role, department_id: department_id || null, status, is_active: is_active ?? true
   }).eq('id', req.params.id);
 
-  // ✅ CORREÇÃO: Atualiza apenas role e is_active do usuário, NUNCA a senha
   if (email && role) {
     const { data: existingUser } = await db.from('users').select('id').eq('email', email).maybeSingle();
     if (existingUser) {
@@ -287,8 +283,6 @@ app.put('/api/users/:id/password', auth, requireRole('SuperAdmin', 'Admin', 'Lí
   const { password } = req.body;
   if (!password || password.length < 8) return res.status(400).json({ message: 'Senha deve ter mínimo 8 caracteres' });
 
-  // :id pode ser o id do membro (vindo de MembersPage) ou id do usuário
-  // Tenta primeiro por member_id, depois por id direto
   const memberId = Number(req.params.id);
   let { data: userByMember } = await db.from('users').select('id').eq('member_id', memberId).single();
 
@@ -326,7 +320,6 @@ SIMPLE_TABLES.forEach(table => {
     const { name, icon, is_active, default_time, default_day } = req.body;
     if (!name) return res.status(400).json({ message: 'Nome obrigatório' });
 
-    // Verifica duplicidade por nome (case-insensitive)
     const { data: existing } = await db.from(table).select('id').ilike('name', name.trim()).maybeSingle();
     if (existing) return res.status(409).json({ message: `Já existe um item com o nome "${name.trim()}" nesta lista.` });
 
@@ -346,7 +339,6 @@ SIMPLE_TABLES.forEach(table => {
     const { name, icon, is_active, default_time, default_day } = req.body;
     if (!name) return res.status(400).json({ message: 'Nome obrigatório' });
 
-    // Verifica duplicidade por nome (case-insensitive), excluindo o próprio item
     const { data: existing } = await db.from(table).select('id').ilike('name', name.trim()).neq('id', req.params.id).maybeSingle();
     if (existing) return res.status(409).json({ message: `Já existe um item com o nome "${name.trim()}" nesta lista.` });
 
@@ -364,7 +356,7 @@ SIMPLE_TABLES.forEach(table => {
   });
 });
 
-// ─── Sectors CRUD — acessível por Líderes (gerenciam setores do próprio depto) ─
+// ─── Sectors CRUD ─────────────────────────────────────────────────────────────
 app.get('/api/sectors', auth, async (req, res) => {
   const { data, error } = await db.from('sectors').select('*, departments(name)').order('name');
   if (error) return res.status(500).json({ message: error.message });
@@ -375,7 +367,6 @@ app.post('/api/sectors', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asy
   const { name, is_active, department_id } = req.body;
   if (!name) return res.status(400).json({ message: 'Nome obrigatório' });
 
-  // Líderes só podem criar setores no próprio departamento
   if (req.user.role === 'Líder') {
     const { data: leaderMember } = await db.from('members').select('department_id').eq('id', req.user.member_id).single();
     if (!leaderMember?.department_id || leaderMember.department_id !== Number(department_id)) {
@@ -397,7 +388,6 @@ app.put('/api/sectors/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), 
   const { name, is_active, department_id } = req.body;
   if (!name) return res.status(400).json({ message: 'Nome obrigatório' });
 
-  // Líderes só podem editar setores do próprio departamento
   if (req.user.role === 'Líder') {
     const { data: sector } = await db.from('sectors').select('department_id').eq('id', req.params.id).single();
     const { data: leaderMember } = await db.from('members').select('department_id').eq('id', req.user.member_id).single();
@@ -416,7 +406,6 @@ app.put('/api/sectors/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), 
 });
 
 app.delete('/api/sectors/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
-  // Líderes só podem excluir setores do próprio departamento
   if (req.user.role === 'Líder') {
     const { data: sector } = await db.from('sectors').select('department_id').eq('id', req.params.id).single();
     const { data: leaderMember } = await db.from('members').select('department_id').eq('id', req.user.member_id).single();
@@ -491,7 +480,7 @@ app.get('/api/scales', auth, async (req, res) => {
   const { cult_id, member_id, limit } = req.query;
 
   let query = db.from('scales').select(`
-    *, 
+    *,
     members(name),
     sectors(name),
     cults(date, time, name, cult_types(name))
@@ -522,7 +511,6 @@ app.post('/api/scales', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asyn
   const { data: existing } = await db.from('scales').select('id').eq('cult_id', cult_id).eq('member_id', member_id).maybeSingle();
   if (existing) return res.status(409).json({ message: 'Voluntário já está escalado neste culto' });
 
-  // Check monthly limit
   const { data: cult } = await db.from('cults').select('date').eq('id', cult_id).single();
   if (cult) {
     const month = cult.date.slice(0, 7);
@@ -537,7 +525,6 @@ app.post('/api/scales', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asyn
     }
   }
 
-  // Resolve department_id: from request body or from the leader's own department
   let department_id = req.body.department_id || null;
   if (!department_id && req.user.member_id) {
     const { data: leaderMember } = await db.from('members').select('department_id').eq('id', req.user.member_id).single();
@@ -547,7 +534,6 @@ app.post('/api/scales', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asyn
   const { data, error } = await db.from('scales').insert({ cult_id, member_id, sector_id, department_id }).select().single();
   if (error) return res.status(500).json({ message: error.message });
 
-  // Notify member
   const { data: user } = await db.from('users').select('id').eq('member_id', member_id).maybeSingle();
   if (user && cult) {
     const { data: sector } = await db.from('sectors').select('name').eq('id', sector_id).single();
@@ -557,7 +543,7 @@ app.post('/api/scales', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asyn
   res.json({ id: data.id });
 });
 
-// ─── Escalas agrupadas por departamento para um culto ────────────────────────
+// ─── Escalas agrupadas por departamento ──────────────────────────────────────
 app.get('/api/scales/by-department/:cult_id', auth, async (req, res) => {
   const cult_id = Number(req.params.cult_id);
 
@@ -570,22 +556,17 @@ app.get('/api/scales/by-department/:cult_id', auth, async (req, res) => {
 
   if (error) return res.status(500).json({ message: error.message });
 
-  // Fetch all departments for complete block listing (even empty ones)
   const { data: allDepartments } = await db.from('departments').select('*').eq('is_active', true).order('name');
 
-  // Group scales by department
   const grouped = {};
-
-  // Init all active departments as empty blocks
   for (const dept of allDepartments || []) {
     grouped[dept.id] = { department_id: dept.id, department_name: dept.name, scales: [] };
   }
-
-  // Add a special group for scales with no department
   grouped['none'] = { department_id: null, department_name: 'Sem Departamento', scales: [] };
 
   for (const s of scales || []) {
-    const deptId = s.department_id || s.members?.department_id || null;
+    // ✅ Prioridade: department_id do membro (sempre correto), fallback para o da escala
+    const deptId = s.members?.department_id || s.department_id || null;
     const key = deptId && grouped[deptId] ? deptId : 'none';
     grouped[key].scales.push({
       id: s.id,
@@ -594,11 +575,10 @@ app.get('/api/scales/by-department/:cult_id', auth, async (req, res) => {
       member_id: s.members?.id,
       sector_name: s.sectors?.name || '—',
       department_id: deptId,
-      department_name: s.departments?.name || grouped[key]?.department_name || '—',
+      department_name: grouped[deptId]?.department_name || s.departments?.name || '—',
     });
   }
 
-  // Filter out empty "Sem Departamento" group and empty departments with no scales
   const result = Object.values(grouped)
     .filter(g => g.scales.length > 0 || g.department_id !== null)
     .sort((a, b) => {
@@ -610,36 +590,30 @@ app.get('/api/scales/by-department/:cult_id', auth, async (req, res) => {
   res.json(result);
 });
 
-// ─── Preencher voluntários automaticamente para um culto específico ───────────
+// ─── Preencher voluntários automaticamente ────────────────────────────────────
 app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { cult_id } = req.body;
   if (!cult_id) return res.status(400).json({ message: 'cult_id obrigatório' });
 
-  // Busca dados do culto
   const { data: cult } = await db.from('cults').select('*').eq('id', cult_id).single();
   if (!cult) return res.status(404).json({ message: 'Culto não encontrado' });
   const monthStr = cult.date.slice(0, 7);
 
-  // Setores ativos
   const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
   if (!sectors?.length) return res.status(400).json({ message: 'Nenhum setor ativo cadastrado' });
 
-  // Voluntários já escalados neste culto
   const { data: already } = await db.from('scales').select('member_id, sector_id').eq('cult_id', cult_id);
   const alreadyMemberIds = new Set((already || []).map(s => s.member_id));
   const alreadySectorIds = new Set((already || []).map(s => s.sector_id));
 
-  // Setores que ainda precisam de voluntário
   const pendingSectors = sectors.filter(s => !alreadySectorIds.has(s.id));
   if (!pendingSectors.length) return res.json({ message: 'Todos os setores já estão preenchidos', created: 0 });
 
-  // Voluntários ativos com disponibilidade para este tipo de culto
   const { data: members } = await db.from('members')
     .select('id, name, department_id')
     .eq('is_active', true)
     .eq('status', 'Ativo');
 
-  // Para cada voluntário, busca contagem mensal
   const monthCountMap = {};
   for (const m of members || []) {
     const { count } = await db.from('scales')
@@ -650,37 +624,33 @@ app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líd
     monthCountMap[m.id] = count || 0;
   }
 
-  // Filtra elegíveis: não escalado neste culto + menos de 3x no mês
   const eligible = (members || []).filter(m =>
     !alreadyMemberIds.has(m.id) && monthCountMap[m.id] < 3
   );
 
-  // Embaralha para distribuição aleatória justa
   const shuffled = eligible.sort(() => Math.random() - 0.5);
-
   let created = 0;
   const usedInThisCult = new Set(alreadyMemberIds);
 
   for (const sector of pendingSectors) {
-    // Encontra voluntário disponível que ainda não foi usado neste culto
-    const candidate = shuffled.find(m => !usedInThisCult.has(m.id));
+    // ✅ Prioriza membro do mesmo departamento do setor
+    const candidate =
+      shuffled.find(m => !usedInThisCult.has(m.id) && m.department_id === sector.department_id) ||
+      shuffled.find(m => !usedInThisCult.has(m.id));
     if (!candidate) break;
 
     const { error } = await db.from('scales').insert({
       cult_id,
       member_id: candidate.id,
       sector_id: sector.id,
+      department_id: candidate.department_id || null, // ✅ salva department do membro
     });
 
     if (!error) {
       usedInThisCult.add(candidate.id);
       created++;
-
-      // Notifica o voluntário
       const { data: userRow } = await db.from('users').select('id').eq('member_id', candidate.id).maybeSingle();
-      if (userRow) {
-        await notify(userRow.id, 'Nova Escala', `Você foi escalado para ${sector.name} em ${cult.date}`);
-      }
+      if (userRow) await notify(userRow.id, 'Nova Escala', `Você foi escalado para ${sector.name} em ${cult.date}`);
     }
   }
 
@@ -697,43 +667,115 @@ app.delete('/api/scales/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder')
   res.json({ message: 'Removido' });
 });
 
+// ─── Auto Generate — OTIMIZADO ────────────────────────────────────────────────
 app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { type, cult_id, month } = req.body;
   const today = new Date().toISOString().slice(0, 10);
 
   let cultsQuery = db.from('cults').select('*').eq('status', 'Agendado');
-  if (type === 'month' && month) cultsQuery = cultsQuery.like('date', `${month}%`);
-  else if (cult_id) cultsQuery = cultsQuery.eq('id', cult_id);
-  else cultsQuery = cultsQuery.gte('date', today);
+  if (type === 'month' && month)  cultsQuery = cultsQuery.like('date', `${month}%`);
+  else if (cult_id)               cultsQuery = cultsQuery.eq('id', cult_id);
+  else                            cultsQuery = cultsQuery.gte('date', today);
 
-  const { data: cults } = await cultsQuery;
-  const { data: members } = await db.from('members').select('*').eq('is_active', true).eq('status', 'Ativo');
-  const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
+  const [{ data: cults }, { data: members }, { data: sectors }] = await Promise.all([
+    cultsQuery,
+    db.from('members').select('id, name, department_id').eq('is_active', true).eq('status', 'Ativo'),
+    db.from('sectors').select('id, name, department_id').eq('is_active', true),
+  ]);
 
-  let created = 0;
+  if (!cults?.length)   return res.json({ message: 'Nenhum culto encontrado', created: 0, cults_count: 0 });
+  if (!members?.length) return res.json({ message: 'Nenhum voluntário ativo', created: 0, cults_count: 0 });
+  if (!sectors?.length) return res.json({ message: 'Nenhum setor ativo', created: 0, cults_count: 0 });
 
-  for (const cult of cults || []) {
-    const monthStr = cult.date.slice(0, 7);
-    for (const sector of sectors || []) {
-      for (const member of members || []) {
-        const { data: alreadyInCult } = await db.from('scales').select('id').eq('cult_id', cult.id).eq('member_id', member.id).maybeSingle();
-        if (alreadyInCult) continue;
+  const months = [...new Set(cults.map(c => c.date.slice(0, 7)))];
+  const cultIds = cults.map(c => c.id);
 
-        const { count: monthCount } = await db.from('scales')
-          .select('*, cults!inner(date)', { count: 'exact', head: true })
-          .eq('member_id', member.id)
-          .like('cults.date', `${monthStr}%`);
+  const { data: existingScales } = await db.from('scales')
+    .select('cult_id, member_id, sector_id')
+    .in('cult_id', cultIds.slice(0, 500));
 
-        if (monthCount >= 3) continue;
+  // Contagens mensais em paralelo
+  const monthCountResults = await Promise.all(
+    months.map(m =>
+      db.from('scales')
+        .select('member_id, cults!inner(date)')
+        .like('cults.date', `${m}%`)
+        .neq('status', 'Recusado')
+    )
+  );
 
-        await db.from('scales').insert({ cult_id: cult.id, member_id: member.id, sector_id: sector.id });
-        created++;
-        break; // one member per sector per cult
-      }
+  const memberMonthCount = {};
+  for (let i = 0; i < months.length; i++) {
+    const m = months[i];
+    for (const row of monthCountResults[i]?.data || []) {
+      const key = `${row.member_id}:${m}`;
+      memberMonthCount[key] = (memberMonthCount[key] || 0) + 1;
     }
   }
 
-  res.json({ message: `${created} escala(s) gerada(s)` });
+  const cultMemberSet = new Set();
+  const cultSectorSet = new Set();
+  for (const s of existingScales || []) {
+    cultMemberSet.add(`${s.cult_id}:${s.member_id}`);
+    cultSectorSet.add(`${s.cult_id}:${s.sector_id}`);
+  }
+
+  const toInsert = [];
+
+  for (const cult of cults) {
+    const monthStr = cult.date.slice(0, 7);
+    const freeSectors = sectors.filter(s => !cultSectorSet.has(`${cult.id}:${s.id}`));
+    if (!freeSectors.length) continue;
+
+    const shuffled = [...members].sort(() => Math.random() - 0.5);
+
+    const usedInCult = new Set(
+      [...cultMemberSet]
+        .filter(k => k.startsWith(`${cult.id}:`))
+        .map(k => Number(k.split(':')[1]))
+    );
+
+    for (const sector of freeSectors) {
+      // ✅ Prioriza membro do mesmo departamento do setor
+      const candidate =
+        shuffled.find(m => {
+          if (usedInCult.has(m.id)) return false;
+          if ((memberMonthCount[`${m.id}:${monthStr}`] || 0) >= 3) return false;
+          return m.department_id === sector.department_id;
+        }) ||
+        shuffled.find(m => {
+          if (usedInCult.has(m.id)) return false;
+          return (memberMonthCount[`${m.id}:${monthStr}`] || 0) < 3;
+        });
+
+      if (!candidate) continue;
+
+      toInsert.push({
+        cult_id: cult.id,
+        member_id: candidate.id,
+        sector_id: sector.id,
+        department_id: candidate.department_id || null, // ✅ department do membro
+      });
+
+      usedInCult.add(candidate.id);
+      cultMemberSet.add(`${cult.id}:${candidate.id}`);
+      cultSectorSet.add(`${cult.id}:${sector.id}`);
+      const key = `${candidate.id}:${monthStr}`;
+      memberMonthCount[key] = (memberMonthCount[key] || 0) + 1;
+    }
+  }
+
+  const BATCH = 500;
+  for (let i = 0; i < toInsert.length; i += BATCH) {
+    await db.from('scales').insert(toInsert.slice(i, i + BATCH));
+  }
+
+  res.json({
+    message: `${toInsert.length} escala(s) gerada(s)`,
+    created: toInsert.length,
+    cults_count: cults.length,
+    scales_count: toInsert.length,
+  });
 });
 
 // ─── Swaps ────────────────────────────────────────────────────────────────────
@@ -792,7 +834,6 @@ app.post('/api/swaps', auth, async (req, res) => {
   }).select().single();
   if (error) return res.status(500).json({ message: error.message });
 
-  // Notify leader
   if (requester.department_id) {
     const { data: leader } = await db.from('users')
       .select('id, members!inner(department_id, role)')
@@ -894,7 +935,7 @@ app.post('/api/activation-codes/activate', auth, async (req, res) => {
   res.json({ message: 'Sistema ativado com sucesso!' });
 });
 
-// ─── Church Settings ─────────────────────────────────────────────────────────
+// ─── Church Settings ──────────────────────────────────────────────────────────
 const CHURCH_FIELDS = ['church_name','church_cnpj','church_address','church_neighborhood','church_city','church_zip','church_phone','church_pastor_dirigente','church_pastor_presidente'];
 
 app.get('/api/church', auth, async (req, res) => {
@@ -904,7 +945,6 @@ app.get('/api/church', auth, async (req, res) => {
     const k = r.key.replace('church_', '');
     result[k === 'church_name' ? 'name' : k] = r.value || '';
   });
-  // map church_name -> name
   if (!result.name) {
     const nameRow = (data || []).find(r => r.key === 'church_name');
     result.name = nameRow?.value || '';
@@ -924,7 +964,6 @@ app.put('/api/church', auth, requireRole('SuperAdmin'), async (req, res) => {
   res.json({ message: 'Dados salvos com sucesso' });
 });
 
-// Rota pública para exibir nome da igreja no sistema
 app.get('/api/public/church-name', async (req, res) => {
   const { data } = await db.from('settings').select('value').eq('key', 'church_name').single();
   res.json({ name: data?.value || '' });
@@ -1028,8 +1067,9 @@ app.delete('/api/pastoral/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secret
   res.json({ message: 'Excluído' });
 });
 
-// Helper: generate backup data (single source of truth)
+// ─── Backup ───────────────────────────────────────────────────────────────────
 const BACKUP_TABLES = ['departments', 'ministries', 'sectors', 'cult_types', 'members', 'member_ministries', 'cults', 'scales', 'swaps', 'notifications'];
+
 async function generateBackupData() {
   const backup = {};
   for (const t of BACKUP_TABLES) {
@@ -1040,13 +1080,11 @@ async function generateBackupData() {
   return backup;
 }
 
-// ─── Backup ───────────────────────────────────────────────────────────────────
 app.post('/api/backup', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const backup = await generateBackupData();
   res.json({ message: `Backup realizado em ${new Date().toLocaleString('pt-BR')}`, data: backup });
 });
 
-// Helper: get SMTP transporter from DB settings or env
 async function getTransporter() {
   const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
   const { data } = await db.from('settings').select('key,value').in('key', keys);
@@ -1062,7 +1100,6 @@ async function getTransporter() {
   });
 }
 
-// GET SMTP config (pass masked)
 app.get('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
   const { data } = await db.from('settings').select('key,value').in('key', keys);
@@ -1075,7 +1112,6 @@ app.get('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (r
   });
 });
 
-// POST SMTP config (save to settings table)
 app.post('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const { host, port, user, pass } = req.body;
   if (!host || !user) return res.status(400).json({ message: 'Host e e-mail são obrigatórios' });
@@ -1085,7 +1121,6 @@ app.post('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (
     { key: 'smtp_port', value: String(port || '587') },
     { key: 'smtp_user', value: user },
   ];
-  // Only update pass if a real value was sent (not the masked placeholder)
   if (pass && pass !== '••••••••') entries.push({ key: 'smtp_pass', value: pass });
 
   for (const entry of entries) {
@@ -1094,7 +1129,6 @@ app.post('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (
   res.json({ message: 'Configurações salvas com sucesso!' });
 });
 
-// POST restore from backup
 app.post('/api/backup/restore', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const { data: backupJson, confirm } = req.body;
   if (!backupJson) return res.status(400).json({ message: 'Dados de backup obrigatórios' });
@@ -1134,7 +1168,6 @@ app.post('/api/backup/restore', auth, requireRole('SuperAdmin', 'Admin'), async 
   });
 });
 
-// POST send backup by email
 app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ message: 'E-mail destinatário obrigatório' });
@@ -1143,7 +1176,6 @@ app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin'), asy
   const json = JSON.stringify(backup, null, 2);
   const filename = `backup_ecclesiascale_${new Date().toISOString().slice(0, 10)}.json`;
 
-  // Get SMTP user for "from" field before creating transporter
   const { data: smtpCfg } = await db.from('settings').select('key,value').in('key', ['smtp_user']);
   const fromEmail = smtpCfg?.[0]?.value || process.env.SMTP_USER || '';
 
