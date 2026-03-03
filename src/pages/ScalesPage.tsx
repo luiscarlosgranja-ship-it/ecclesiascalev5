@@ -244,36 +244,39 @@ export default function ScalesPage({ user }: Props) {
     if (!selectedCult) return;
     setDeletingScale(true);
 
-    // Suprime Realtime antes de qualquer deleção para evitar ressurreição de dados
     suppressRealtimeRef.current = true;
     const cultToDelete = selectedCult;
+    const currentScales = scales || [];
 
-    // Limpa estado local imediatamente
+    // Limpa estado local imediatamente — UI responde na hora
     setDeleteScaleModal(false);
     setSelectedCult(null);
     setDeptBlocks([]);
 
     try {
-      // Tenta rota dedicada (cascade no backend)
-      await api.delete(`/cults/${cultToDelete}/scale`);
-    } catch {
-      // Fallback: deleta o culto diretamente
-      try {
-        await api.delete(`/cults/${cultToDelete}`);
-      } catch {
-        alert('Erro ao remover escala');
-        // Restaura em caso de falha total
-        setSelectedCult(cultToDelete);
-        suppressRealtimeRef.current = false;
-        setDeletingScale(false);
-        return;
-      }
-    }
+      // 1) Remove cada membro da escala individualmente
+      //    (garante funcionamento mesmo sem rota /cults/:id/scale no backend)
+      await Promise.all(currentScales.map(s => api.delete(`/scales/${s.id}`)));
 
-    await refetchCults();
-    setDeletingScale(false);
-    // Libera o Realtime após propagar os DELETEs
-    setTimeout(() => { suppressRealtimeRef.current = false; }, 1500);
+      // 2) Agora deleta o culto (sem FK pendente)
+      await api.delete(`/cults/${cultToDelete}`);
+
+      await refetchCults();
+    } catch (e) {
+      // Algo falhou: tenta rota dedicada como fallback
+      try {
+        await api.delete(`/cults/${cultToDelete}/scale`);
+        await refetchCults();
+      } catch (e2) {
+        const msg = e2 instanceof Error ? e2.message : 'Erro ao remover escala';
+        alert(msg);
+        // Restaura seleção para o usuário tentar novamente
+        setSelectedCult(cultToDelete);
+      }
+    } finally {
+      setDeletingScale(false);
+      setTimeout(() => { suppressRealtimeRef.current = false; }, 1500);
+    }
   }
 
   // ─── Add to scale ────────────────────────────────────────────────────────────
