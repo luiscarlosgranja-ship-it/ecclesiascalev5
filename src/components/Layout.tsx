@@ -155,12 +155,12 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
       {/* Logo */}
       <div className={clsx('flex items-center gap-3 px-4 py-5 border-b border-stone-800', collapsed && !mobile && 'justify-center px-2')}>
         <button onClick={() => setPage('dashboard')} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-          <div className="w-8 h-8 rounded-lg bg-amber-600 flex items-center justify-center flex-shrink-0 overflow-hidden">
-            {logoUrl
-              ? <img src={logoUrl} alt="Logo" className="w-full h-full object-contain" />
-              : <span className="text-white font-bold text-sm">{(churchName || 'E')[0].toUpperCase()}</span>
-            }
-          </div>
+          {logoUrl
+            ? <img src={logoUrl} alt="Logo" className="w-8 h-8 rounded-lg object-contain flex-shrink-0" />
+            : <div className="w-8 h-8 rounded-lg bg-amber-600 flex items-center justify-center flex-shrink-0">
+                <span className="text-white font-bold text-sm">{(churchName || 'E')[0].toUpperCase()}</span>
+              </div>
+          }
           {(!collapsed || mobile) && (
             <div>
               <p className="text-amber-400 font-bold text-sm leading-none">{churchName || 'EcclesiaScale'}</p>
@@ -196,7 +196,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
                     'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
                     page === item.id
                       ? 'bg-amber-600/20 text-amber-400 border border-amber-600/30'
-                      : 'text-amber-600/70 hover:bg-stone-800 hover:text-amber-400',
+                      : 'text-stone-400 hover:bg-stone-800 hover:text-stone-200',
                     collapsed && !mobile && 'justify-center px-2'
                   )}
                   title={collapsed && !mobile ? item.label : undefined}
