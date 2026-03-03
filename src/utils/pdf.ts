@@ -326,14 +326,14 @@ async function exportMonthGridPDF(
 
   // Calcula altura de um bloco dado o nº de voluntários
   const blockHeaderH = 8;     // cabeçalho do bloco principal
-  const deptMiniH = 18;       // altura aprox de cada mini-bloco de departamento
+  const deptMiniH = 22;       // altura aprox de cada mini-bloco de departamento (aumentado)
   const blockPadB = 2;        // padding inferior do bloco
 
   function blockHeight(cultId: number): number {
     const cScales = allScales.filter(s => s.cult_id === cultId);
     const deptGroups = groupScalesByDepartmentForMonth(cScales);
     // Estima altura: cabeçalho + (num depts * altura mini)
-    const deptHeight = Math.max(deptMiniH * deptGroups.length, 30);
+    const deptHeight = Math.max(deptMiniH * deptGroups.length, 40);
     return blockHeaderH + deptHeight + blockPadB;
   }
 
@@ -426,11 +426,11 @@ async function exportMonthGridPDF(
 
       // Lista compacta de voluntários
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(3.5);
+      doc.setFontSize(4);
       doc.setTextColor(60, 55, 50);
       
-      let miniY = mby + 3.5;
-      const maxLines = Math.floor((mbh - 2.5) / 1.5);
+      let miniY = mby + 3.8;
+      const maxLines = Math.floor((mbh - 3) / 2);
       
       deptGroup.scales.slice(0, maxLines).forEach((scale, idx) => {
         const name = (scale.member_name || '—').substring(0, 12);
@@ -439,10 +439,14 @@ async function exportMonthGridPDF(
                              scale.status === 'Troca' ? '⇄' : '✗';
         
         doc.setTextColor(...statusColor(scale.status));
-        doc.setFont('helvetica', 'normal');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(4);
         doc.text(`${statusSymbol}`, mbx + 1, miniY);
-        doc.text(`${name}`, mbx + 2.5, miniY, { maxWidth: mbw - 4 });
-        miniY += 1.5;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(4);
+        doc.setTextColor(60, 55, 50);
+        doc.text(`${name}`, mbx + 2.3, miniY, { maxWidth: mbw - 4 });
+        miniY += 2;
       });
 
       if (deptGroup.scales.length > maxLines) {
