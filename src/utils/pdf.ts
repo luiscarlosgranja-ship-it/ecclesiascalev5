@@ -112,47 +112,49 @@ interface DepartmentGroup {
   scales: Scale[];
 }
 
-// Mapeamento explícito de setores para departamentos
+// Mapeamento explícito de setores para departamentos (case-insensitive)
 const SETOR_DEPARTMENT_MAP: { [key: string]: string } = {
-  'Setor 1': 'Diáconos / Obreiros',
-  'Setor 2': 'Diáconos / Obreiros',
-  'Setor 3': 'Diáconos / Obreiros',
-  'Setor 4': 'Diáconos / Obreiros',
-  'Maquininhas': 'Diáconos / Obreiros',
-  'Recepção': 'Diáconos / Obreiros',
-  'Externo': 'Diáconos / Obreiros',
+  'setor 1': 'Diáconos / Obreiros',
+  'setor 2': 'Diáconos / Obreiros',
+  'setor 3': 'Diáconos / Obreiros',
+  'setor 4': 'Diáconos / Obreiros',
+  'maquininhas': 'Diáconos / Obreiros',
+  'recepção': 'Diáconos / Obreiros',
+  'externo': 'Diáconos / Obreiros',
   
-  'Som': 'Mídia',
-  'Filmagem': 'Mídia',
-  'Foto': 'Mídia',
-  'Transmissão': 'Mídia',
-  'Câmera': 'Mídia',
-  'Redes Sociais': 'Mídia',
-  'Mídia': 'Mídia',
+  'som': 'Mídia',
+  'filmagem': 'Mídia',
+  'foto': 'Mídia',
+  'transmissão': 'Mídia',
+  'câmera': 'Mídia',
+  'redes sociais': 'Mídia',
+  'mídia': 'Mídia',
   
-  'Infantil': 'Infantil',
-  'Berçário': 'Infantil',
-  'Escola Bíblica': 'Infantil',
+  'infantil': 'Infantil',
+  'berçário': 'Infantil',
+  'escola bíblica': 'Infantil',
   
-  'Bateria': 'Louvor',
-  'Back 1': 'Louvor',
-  'Back 2': 'Louvor',
-  'Back 3': 'Louvor',
-  'Back 4': 'Louvor',
-  'Vocal': 'Louvor',
-  'Violão': 'Louvor',
-  'Baixo': 'Louvor',
-  'Guitarra': 'Louvor',
-  'Teclado': 'Louvor',
-  'Louvor': 'Louvor',
-  'Música': 'Louvor',
-  'Canto': 'Louvor',
+  'bateria': 'Louvor',
+  'back 1': 'Louvor',
+  'back 2': 'Louvor',
+  'back 3': 'Louvor',
+  'back 4': 'Louvor',
+  'vocal': 'Louvor',
+  'violão': 'Louvor',
+  'baixo': 'Louvor',
+  'guitarra': 'Louvor',
+  'teclado': 'Louvor',
+  'louvor': 'Louvor',
+  'música': 'Louvor',
+  'canto': 'Louvor',
   
-  'Una': 'Una',
+  'una': 'Una',
   
-  'Bem-Vindos': 'Bem-Vindos',
-  'Recepção de Bem-Vindos': 'Bem-Vindos',
-  'Boas-vindas': 'Bem-Vindos',
+  'bem-vindos': 'Bem-Vindos',
+  'bem vindos': 'Bem-Vindos',
+  'recepção de bem-vindos': 'Bem-Vindos',
+  'boas-vindas': 'Bem-Vindos',
+  'boas vindas': 'Bem-Vindos',
 };
 
 // Ordem fixa dos departamentos
@@ -171,8 +173,9 @@ function groupScalesByDepartment(scales: Scale[]): DepartmentGroup[] {
   
   for (const scale of scales) {
     const sectorName = scale.sector_name || 'Sem Setor';
-    // Procurar o departamento deste setor no mapeamento
-    const deptName = SETOR_DEPARTMENT_MAP[sectorName] || sectorName;
+    // Converter para lowercase para buscar no mapeamento
+    const sectorLower = sectorName.toLowerCase().trim();
+    const deptName = SETOR_DEPARTMENT_MAP[sectorLower] || sectorName;
     
     if (!deptMap.has(deptName)) {
       deptMap.set(deptName, []);
@@ -566,7 +569,9 @@ function groupScalesByDepartmentForMonth(scales: Scale[]): DepartmentGroup[] {
   
   for (const scale of scales) {
     const sectorName = scale.sector_name || 'Sem Setor';
-    const deptName = SETOR_DEPARTMENT_MAP[sectorName] || sectorName;
+    // Converter para lowercase para buscar no mapeamento
+    const sectorLower = sectorName.toLowerCase().trim();
+    const deptName = SETOR_DEPARTMENT_MAP[sectorLower] || sectorName;
     
     if (!deptMap.has(deptName)) {
       deptMap.set(deptName, []);
