@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Calendar, Repeat, Settings, LogOut, Bell,
   BookOpen, Layers, Shield, ChevronLeft, ChevronRight, Wifi, WifiOff,
   Database, Menu, X, Building2, Grid3X3, Church, RefreshCcw, KeyRound,
-  Sun, Moon, HeartHandshake, Phone, Mail, Image
+  Sun, Moon, HeartHandshake, Phone, Mail, Image as ImageIcon
 } from 'lucide-react';
 import type { AuthUser } from '../types';
 import { useNotifications } from '../hooks/useApi';
@@ -57,7 +57,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'backup',       label: 'Fazer Backup',     icon: <Database size={18} />,   roles: ['SuperAdmin', 'Admin'] },
       { id: 'restore',      label: 'Restaurar Backup', icon: <RefreshCcw size={18} />, roles: ['SuperAdmin', 'Admin'] },
       { id: 'email-config', label: 'Config. E-mail',   icon: <Mail size={18} />,       roles: ['SuperAdmin', 'Admin'] },
-      { id: 'logo',         label: 'Logotipo',         icon: <Image size={18} />,      roles: ['SuperAdmin', 'Admin'] },
+      { id: 'logo',         label: 'Logotipo',         icon: <ImageIcon size={18} />,  roles: ['SuperAdmin', 'Admin'] },
     ],
   },
   {
