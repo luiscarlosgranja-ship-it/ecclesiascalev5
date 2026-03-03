@@ -44,11 +44,13 @@ const DEFAULT_CULT_TYPES = [
 ];
 
 // ─── Setores agrupados por departamento ───────────────────────────────────────
-function SectorsView({ sectors, departments, onRefetch }: {
+function SectorsView({ sectors, departments, onRefetch, user }: {
   sectors: any[];
   departments: any[];
   onRefetch: () => void;
+  user: AuthUser;
 }) {
+  const canManage = ['SuperAdmin', 'Admin', 'Líder'].includes(user.role);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [modalOpen, setModalOpen] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
@@ -150,7 +152,7 @@ function SectorsView({ sectors, departments, onRefetch }: {
                     {activeCount}/{deptSectors.length} ativo(s)
                   </span>
                 </button>
-                {dept.id !== null && (
+                {dept.id !== null && canManage && (
                   <Button size="sm" onClick={() => openNew(dept.id)}>
                     <Plus size={13} /> Novo Setor
                   </Button>
@@ -171,7 +173,7 @@ function SectorsView({ sectors, departments, onRefetch }: {
                           <th className="text-left p-3 text-stone-500 font-medium text-xs">#</th>
                           <th className="text-left p-3 text-stone-500 font-medium text-xs">Nome</th>
                           <th className="text-left p-3 text-stone-500 font-medium text-xs">Status</th>
-                          <th className="text-right p-3 text-stone-500 font-medium text-xs">Ações</th>
+                          {canManage && <th className="text-right p-3 text-stone-500 font-medium text-xs">Ações</th>}
                         </tr>
                       </thead>
                       <tbody>
@@ -183,6 +185,7 @@ function SectorsView({ sectors, departments, onRefetch }: {
                               <Badge label={s.is_active ? 'Ativo' : 'Inativo'} color={s.is_active ? 'green' : 'gray'} />
                             </td>
                             <td className="p-3">
+                              {canManage && (
                               <div className="flex justify-end gap-1">
                                 <button onClick={() => toggleActive(s)} title="Ativar/Desativar"
                                   className="text-stone-400 hover:text-stone-200 p-1 transition-colors">
@@ -199,6 +202,7 @@ function SectorsView({ sectors, departments, onRefetch }: {
                                   <Trash2 size={15} />
                                 </button>
                               </div>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -455,6 +459,7 @@ export default function RegistriesPage({ user, initialTab }: Props) {
           sectors={sectors || []}
           departments={departments || []}
           onRefetch={rSec}
+          user={user}
         />
       ) : (
       <Card className="overflow-hidden">

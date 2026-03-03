@@ -40,7 +40,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'members',     label: 'Voluntários',    icon: <Users size={18} />,      roles: ['SuperAdmin', 'Admin', 'Líder'] },
       { id: 'ministries',  label: 'Ministérios',    icon: <Grid3X3 size={18} />,    roles: ['SuperAdmin', 'Admin'] },
       { id: 'departments', label: 'Departamentos',  icon: <Building2 size={18} />,  roles: ['SuperAdmin', 'Admin'] },
-      { id: 'sectors',     label: 'Setores',        icon: <Layers size={18} />,     roles: ['SuperAdmin', 'Admin'] },
+      { id: 'sectors',     label: 'Setores',        icon: <Layers size={18} />,     roles: ['SuperAdmin', 'Admin', 'Líder'] },
       { id: 'cult-types',  label: 'Tipos de Culto', icon: <Settings size={18} />,   roles: ['SuperAdmin', 'Admin'] },
       { id: 'church',      label: 'Dados da Igreja', icon: <Church size={18} />,      roles: ['SuperAdmin'] },
     ],

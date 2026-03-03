@@ -312,8 +312,8 @@ app.post('/api/users/reset-password', auth, requireRole('SuperAdmin', 'Admin'), 
   res.json({ message: 'Senha redefinida com sucesso' });
 });
 
-// ─── Generic CRUD: ministries / departments / sectors / cult_types ────────────
-const SIMPLE_TABLES = ['ministries', 'departments', 'sectors', 'cult_types'];
+// ─── Generic CRUD: ministries / departments / cult_types ─────────────────────
+const SIMPLE_TABLES = ['ministries', 'departments', 'cult_types'];
 
 SIMPLE_TABLES.forEach(table => {
   app.get(`/api/${table}`, auth, async (req, res) => {
@@ -332,8 +332,6 @@ SIMPLE_TABLES.forEach(table => {
 
     let payload = table === 'cult_types'
       ? { name: name.trim(), default_time: default_time || null, default_day: default_day ?? null }
-      : table === 'sectors'
-      ? { name: name.trim(), is_active: is_active ?? true }
       : { name: name.trim(), icon: icon || null, is_active: is_active ?? true };
 
     const { data, error } = await db.from(table).insert(payload).select().single();
@@ -354,8 +352,6 @@ SIMPLE_TABLES.forEach(table => {
 
     let payload = table === 'cult_types'
       ? { name: name.trim(), default_time: default_time || null, default_day: default_day ?? null }
-      : table === 'sectors'
-      ? { name: name.trim(), is_active: is_active ?? true }
       : { name: name.trim(), icon: icon || null, is_active: is_active ?? true };
 
     await db.from(table).update(payload).eq('id', req.params.id);
@@ -366,6 +362,70 @@ SIMPLE_TABLES.forEach(table => {
     await db.from(table).delete().eq('id', req.params.id);
     res.json({ message: 'Excluído' });
   });
+});
+
+// ─── Sectors CRUD — acessível por Líderes (gerenciam setores do próprio depto) ─
+app.get('/api/sectors', auth, async (req, res) => {
+  const { data, error } = await db.from('sectors').select('*, departments(name)').order('name');
+  if (error) return res.status(500).json({ message: error.message });
+  res.json(data.map(s => ({ ...s, department_name: s.departments?.name || null, departments: undefined })));
+});
+
+app.post('/api/sectors', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
+  const { name, is_active, department_id } = req.body;
+  if (!name) return res.status(400).json({ message: 'Nome obrigatório' });
+
+  // Líderes só podem criar setores no próprio departamento
+  if (req.user.role === 'Líder') {
+    const { data: leaderMember } = await db.from('members').select('department_id').eq('id', req.user.member_id).single();
+    if (!leaderMember?.department_id || leaderMember.department_id !== Number(department_id)) {
+      return res.status(403).json({ message: 'Líderes só podem gerenciar setores do próprio departamento' });
+    }
+  }
+
+  const { data: existing } = await db.from('sectors').select('id').ilike('name', name.trim()).maybeSingle();
+  if (existing) return res.status(409).json({ message: `Já existe um setor com o nome "${name.trim()}"` });
+
+  const { data, error } = await db.from('sectors').insert({
+    name: name.trim(), is_active: is_active ?? true, department_id: department_id || null,
+  }).select().single();
+  if (error) return res.status(500).json({ message: error.message });
+  res.json({ id: data.id });
+});
+
+app.put('/api/sectors/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
+  const { name, is_active, department_id } = req.body;
+  if (!name) return res.status(400).json({ message: 'Nome obrigatório' });
+
+  // Líderes só podem editar setores do próprio departamento
+  if (req.user.role === 'Líder') {
+    const { data: sector } = await db.from('sectors').select('department_id').eq('id', req.params.id).single();
+    const { data: leaderMember } = await db.from('members').select('department_id').eq('id', req.user.member_id).single();
+    if (!sector || sector.department_id !== leaderMember?.department_id) {
+      return res.status(403).json({ message: 'Líderes só podem gerenciar setores do próprio departamento' });
+    }
+  }
+
+  const { data: existing } = await db.from('sectors').select('id').ilike('name', name.trim()).neq('id', req.params.id).maybeSingle();
+  if (existing) return res.status(409).json({ message: `Já existe um setor com o nome "${name.trim()}"` });
+
+  await db.from('sectors').update({
+    name: name.trim(), is_active: is_active ?? true, department_id: department_id || null,
+  }).eq('id', req.params.id);
+  res.json({ message: 'Atualizado' });
+});
+
+app.delete('/api/sectors/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
+  // Líderes só podem excluir setores do próprio departamento
+  if (req.user.role === 'Líder') {
+    const { data: sector } = await db.from('sectors').select('department_id').eq('id', req.params.id).single();
+    const { data: leaderMember } = await db.from('members').select('department_id').eq('id', req.user.member_id).single();
+    if (!sector || sector.department_id !== leaderMember?.department_id) {
+      return res.status(403).json({ message: 'Líderes só podem gerenciar setores do próprio departamento' });
+    }
+  }
+  await db.from('sectors').delete().eq('id', req.params.id);
+  res.json({ message: 'Excluído' });
 });
 
 // ─── Cults ────────────────────────────────────────────────────────────────────
@@ -560,16 +620,9 @@ app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líd
   if (!cult) return res.status(404).json({ message: 'Culto não encontrado' });
   const monthStr = cult.date.slice(0, 7);
 
-  // Departamento Diáconos/Obreiros (id=8) — dono dos setores padrão do culto
-  const DEPT_DIACONOS_ID = 8;
-
-  // Busca apenas setores do departamento Diáconos/Obreiros (vinculados via department_id)
-  const { data: allSectors } = await db.from('sectors').select('*').eq('is_active', true);
-  if (!allSectors?.length) return res.status(400).json({ message: 'Nenhum setor ativo cadastrado' });
-
-  // Filtra pelos setores que pertencem ao depto Diáconos/Obreiros
-  const sectors = allSectors.filter(s => s.department_id === DEPT_DIACONOS_ID);
-  if (!sectors.length) return res.status(400).json({ message: 'Nenhum setor do depto Diáconos/Obreiros encontrado' });
+  // Setores ativos
+  const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
+  if (!sectors?.length) return res.status(400).json({ message: 'Nenhum setor ativo cadastrado' });
 
   // Voluntários já escalados neste culto
   const { data: already } = await db.from('scales').select('member_id, sector_id').eq('cult_id', cult_id);
@@ -580,15 +633,15 @@ app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líd
   const pendingSectors = sectors.filter(s => !alreadySectorIds.has(s.id));
   if (!pendingSectors.length) return res.json({ message: 'Todos os setores já estão preenchidos', created: 0 });
 
-  // Voluntários ativos — prioriza membros do próprio depto Diáconos/Obreiros (volantes)
-  const { data: allMembers } = await db.from('members')
+  // Voluntários ativos com disponibilidade para este tipo de culto
+  const { data: members } = await db.from('members')
     .select('id, name, department_id')
     .eq('is_active', true)
     .eq('status', 'Ativo');
 
   // Para cada voluntário, busca contagem mensal
   const monthCountMap = {};
-  for (const m of allMembers || []) {
+  for (const m of members || []) {
     const { count } = await db.from('scales')
       .select('*, cults!inner(date)', { count: 'exact', head: true })
       .eq('member_id', m.id)
@@ -597,29 +650,19 @@ app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líd
     monthCountMap[m.id] = count || 0;
   }
 
-  // Elegíveis: não escalado neste culto + menos de 3x no mês
-  // Diáconos/Obreiros têm prioridade por serem volantes
-  const eligibleDiaconos = (allMembers || []).filter(m =>
-    m.department_id === DEPT_DIACONOS_ID &&
-    !alreadyMemberIds.has(m.id) &&
-    monthCountMap[m.id] < 3
-  );
-  const eligibleOthers = (allMembers || []).filter(m =>
-    m.department_id !== DEPT_DIACONOS_ID &&
-    !alreadyMemberIds.has(m.id) &&
-    monthCountMap[m.id] < 3
+  // Filtra elegíveis: não escalado neste culto + menos de 3x no mês
+  const eligible = (members || []).filter(m =>
+    !alreadyMemberIds.has(m.id) && monthCountMap[m.id] < 3
   );
 
-  // Embaralha cada grupo separadamente, Diáconos primeiro
-  const shuffled = [
-    ...eligibleDiaconos.sort(() => Math.random() - 0.5),
-    ...eligibleOthers.sort(() => Math.random() - 0.5),
-  ];
+  // Embaralha para distribuição aleatória justa
+  const shuffled = eligible.sort(() => Math.random() - 0.5);
 
   let created = 0;
   const usedInThisCult = new Set(alreadyMemberIds);
 
   for (const sector of pendingSectors) {
+    // Encontra voluntário disponível que ainda não foi usado neste culto
     const candidate = shuffled.find(m => !usedInThisCult.has(m.id));
     if (!candidate) break;
 
@@ -627,7 +670,6 @@ app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líd
       cult_id,
       member_id: candidate.id,
       sector_id: sector.id,
-      department_id: DEPT_DIACONOS_ID,
     });
 
     if (!error) {
@@ -666,11 +708,7 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
 
   const { data: cults } = await cultsQuery;
   const { data: members } = await db.from('members').select('*').eq('is_active', true).eq('status', 'Ativo');
-  const { data: allSectorsAG } = await db.from('sectors').select('*').eq('is_active', true);
-
-  // Escala padrão = apenas setores do depto Diáconos/Obreiros (id=8), filtrados por department_id
-  const DEPT_DIACONOS_ID = 8;
-  const sectors = (allSectorsAG || []).filter(s => s.department_id === DEPT_DIACONOS_ID);
+  const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
 
   let created = 0;
 
@@ -688,12 +726,7 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
 
         if (monthCount >= 3) continue;
 
-        await db.from('scales').insert({
-          cult_id: cult.id,
-          member_id: member.id,
-          sector_id: sector.id,
-          department_id: DEPT_DIACONOS_ID,
-        });
+        await db.from('scales').insert({ cult_id: cult.id, member_id: member.id, sector_id: sector.id });
         created++;
         break; // one member per sector per cult
       }

@@ -6,6 +6,7 @@ export const PERMISSIONS = {
   cultsEvents: ['SuperAdmin', 'Admin'] as Role[],
   volunteersCadaster: ['SuperAdmin', 'Admin', 'Líder'] as Role[],
   ministriesDeptSectors: ['SuperAdmin', 'Admin'] as Role[],
+  manageSectors: ['SuperAdmin', 'Admin', 'Líder'] as Role[],
   cultTypes: ['SuperAdmin', 'Admin'] as Role[],
   swapsHistory: ['SuperAdmin', 'Admin', 'Líder'] as Role[],
   myPanel: ['SuperAdmin', 'Admin', 'Líder', 'Membro'] as Role[],
