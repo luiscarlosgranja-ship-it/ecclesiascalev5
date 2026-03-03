@@ -112,29 +112,79 @@ interface DepartmentGroup {
   scales: Scale[];
 }
 
+// Mapeamento explícito de setores para departamentos
+const SETOR_DEPARTMENT_MAP: { [key: string]: string } = {
+  'Setor 1': 'Diáconos / Obreiros',
+  'Setor 2': 'Diáconos / Obreiros',
+  'Setor 3': 'Diáconos / Obreiros',
+  'Setor 4': 'Diáconos / Obreiros',
+  'Maquininhas': 'Diáconos / Obreiros',
+  'Recepção': 'Diáconos / Obreiros',
+  'Externo': 'Diáconos / Obreiros',
+  
+  'Infantil': 'Departamento Infantil',
+  'Berçário': 'Departamento Infantil',
+  'Escola Bíblica': 'Departamento Infantil',
+  
+  'Louvor': 'Departamento de Louvor',
+  'Música': 'Departamento de Louvor',
+  'Canto': 'Departamento de Louvor',
+  'Violão': 'Departamento de Louvor',
+  'Teclado': 'Departamento de Louvor',
+  'Bateria': 'Departamento de Louvor',
+  
+  'Mídia': 'Departamento de Mídia',
+  'Som': 'Departamento de Mídia',
+  'Câmera': 'Departamento de Mídia',
+  'Transmissão': 'Departamento de Mídia',
+  'Redes Sociais': 'Departamento de Mídia',
+  
+  'Intercessão': 'Departamento de Intercessão',
+  'Oração': 'Departamento de Intercessão',
+};
+
+// Ordem fixa dos departamentos
+const DEPARTMENT_ORDER = [
+  'Diáconos / Obreiros',
+  'Departamento Infantil',
+  'Departamento de Louvor',
+  'Departamento de Mídia',
+  'Departamento de Intercessão',
+];
+
 function groupScalesByDepartment(scales: Scale[]): DepartmentGroup[] {
-  // Manter a ordem original dos setores como aparecem nas escalas
-  const seenDepts = new Map<string, DepartmentGroup>();
-  const orderList: string[] = []; // Rastrear ordem de aparição
+  // Agrupar escalas por departamento usando o mapeamento
+  const deptMap = new Map<string, Scale[]>();
   
   for (const scale of scales) {
-    const deptName = (scale.sector_name || 'Sem Setor');
+    const sectorName = scale.sector_name || 'Sem Setor';
+    // Procurar o departamento deste setor no mapeamento
+    const deptName = SETOR_DEPARTMENT_MAP[sectorName] || sectorName;
     
-    // Se é a primeira vez vendo este departamento, adicionar à lista de ordem
-    if (!seenDepts.has(deptName)) {
-      orderList.push(deptName);
-      seenDepts.set(deptName, { 
-        name: deptName, 
-        scales: [] 
-      });
+    if (!deptMap.has(deptName)) {
+      deptMap.set(deptName, []);
     }
-    
-    // Adicionar escala ao departamento
-    seenDepts.get(deptName)!.scales.push(scale);
+    deptMap.get(deptName)!.push(scale);
   }
   
-  // Retornar na ordem de aparição
-  return orderList.map(name => seenDepts.get(name)!);
+  // Retornar na ordem fixa dos departamentos
+  const result: DepartmentGroup[] = [];
+  for (const deptName of DEPARTMENT_ORDER) {
+    if (deptMap.has(deptName)) {
+      result.push({
+        name: deptName,
+        scales: deptMap.get(deptName)!
+      });
+      deptMap.delete(deptName);
+    }
+  }
+  
+  // Adicionar departamentos não mapeados
+  for (const [deptName, scales] of deptMap) {
+    result.push({ name: deptName, scales });
+  }
+  
+  return result;
 }
 
 async function exportSingleCultBlocksPDF(
@@ -498,48 +548,42 @@ function groupScalesByDepartmentForMonth(scales: Scale[]): DepartmentGroup[] {
     return [];
   }
   
+  // Usar o mesmo mapeamento que no culto individual
   const deptMap = new Map<string, Scale[]>();
   
-  // Mapear cada escala para um departamento
   for (const scale of scales) {
-    let deptName = 'Outro';
+    const sectorName = scale.sector_name || 'Sem Setor';
+    const deptName = SETOR_DEPARTMENT_MAP[sectorName] || sectorName;
     
-    // Detectar departamento pelo nome do setor
-    const sectorLower = (scale.sector_name || '').toLowerCase();
-    
-    if (sectorLower.includes('infantil') || sectorLower.includes('criança')) {
-      deptName = 'Infantil';
-    } else if (sectorLower.includes('louvor') || sectorLower.includes('música') || sectorLower.includes('canto')) {
-      deptName = 'Louvor';
-    } else if (sectorLower.includes('mídia') || sectorLower.includes('transmissão') || sectorLower.includes('som') || sectorLower.includes('câmera')) {
-      deptName = 'Mídia';
-    } else if (sectorLower.includes('obreiro') || sectorLower.includes('diácono') || sectorLower.includes('recepção') || sectorLower.includes('boas-vindas')) {
-      deptName = 'Diáconos / Obreiros';
-    } else if (sectorLower.includes('intercessão') || sectorLower.includes('oração')) {
-      deptName = 'Intercessão';
-    }
-    
-    // Adicionar à mapa
     if (!deptMap.has(deptName)) {
       deptMap.set(deptName, []);
     }
     deptMap.get(deptName)!.push(scale);
   }
   
-  // Ordenar departamentos
-  const order = ['Diáconos / Obreiros', 'Infantil', 'Louvor', 'Mídia', 'Intercessão'];
+  // Retornar na ordem fixa dos departamentos (versão curta dos nomes)
   const result: DepartmentGroup[] = [];
+  const shortNames: { [key: string]: string } = {
+    'Diáconos / Obreiros': 'Diáconos',
+    'Departamento Infantil': 'Infantil',
+    'Departamento de Louvor': 'Louvor',
+    'Departamento de Mídia': 'Mídia',
+    'Departamento de Intercessão': 'Intercessão',
+  };
   
-  for (const name of order) {
-    if (deptMap.has(name)) {
-      result.push({ name, scales: deptMap.get(name)! });
-      deptMap.delete(name);
+  for (const deptName of DEPARTMENT_ORDER) {
+    if (deptMap.has(deptName)) {
+      result.push({
+        name: shortNames[deptName] || deptName,
+        scales: deptMap.get(deptName)!
+      });
+      deptMap.delete(deptName);
     }
   }
   
-  // Adicionar departamentos restantes
-  for (const [name, scaleList] of deptMap) {
-    result.push({ name, scales: scaleList });
+  // Adicionar departamentos não mapeados
+  for (const [deptName, scaleList] of deptMap) {
+    result.push({ name: deptName, scales: scaleList });
   }
   
   return result;
