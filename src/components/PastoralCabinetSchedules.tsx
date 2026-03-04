@@ -1,15 +1,20 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Plus, Trash2, Clock, Loader2, AlertCircle, ChevronLeft, ChevronRight, Calendar, CheckCircle, XCircle, CalendarClock } from 'lucide-react';
 import { Card, Button, Modal, Badge } from '../components/ui';
 import api from '../utils/api';
 import type { PastoralCabinetSchedule } from '../types';
+
+export interface CabinetSchedulesRef {
+  openNew: (date?: string) => void;
+}
 
 interface Props { title?: string; }
 const DURATION_OPTIONS = [15, 30, 45, 60, 90, 120];
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
-export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibilidade de Gabinete' }: Props) {
+const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
+  function PastoralCabinetSchedules({ title = 'Gerenciar Disponibilidade de Gabinete' }, ref) {
   const [schedules, setSchedules] = useState<PastoralCabinetSchedule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -25,6 +30,10 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [formData, setFormData] = useState({ date: '', time: '', duration_minutes: 60 });
+
+  useImperativeHandle(ref, () => ({
+    openNew: (date?: string) => openNew(date),
+  }));
 
   useEffect(() => { loadSchedules(); }, []);
 
@@ -369,4 +378,7 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
       </Modal>
     </div>
   );
-}
+  }
+);
+
+export default PastoralCabinetSchedules;

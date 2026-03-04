@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import PastoralCabinetSchedules from '../components/PastoralCabinetSchedules';
+import { useState, useEffect, useRef } from 'react';
+import PastoralCabinetSchedules, { type CabinetSchedulesRef } from '../components/PastoralCabinetSchedules';
 import PastoralCabinetBooking from '../components/PastoralCabinetBooking';
 import { Plus, Edit, Trash2, CalendarClock, Clock, User, FileText, CheckCircle, XCircle, RefreshCw, Loader2, KeyRound, Shield, ShieldCheck, Calendar } from 'lucide-react';
 import { Card, Button, Modal, Input, Badge } from '../components/ui';
@@ -25,6 +25,7 @@ const EMPTY_FORM: Partial<PastoralAppointment> = {
 
 export default function PastoralPage({ user }: Props) {
   const { data: appointments, loading, refetch } = useApi<PastoralAppointment[]>('/pastoral');
+  const cabinetRef = useRef<CabinetSchedulesRef>(null);
   const [tab, setTab] = useState<Tab>(
     (user.role === 'Membro' || user.role === 'Líder') ? 'cabinet' : 'upcoming'
   );
@@ -87,6 +88,10 @@ export default function PastoralPage({ user }: Props) {
   const list = tab === 'upcoming' ? upcoming : history;
 
   function openNew() {
+    if (tab === 'cabinet') {
+      cabinetRef.current?.openNew();
+      return;
+    }
     setEditing({ ...EMPTY_FORM, date: today });
     setError('');
     setModalOpen(true);
@@ -177,7 +182,9 @@ export default function PastoralPage({ user }: Props) {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <h1 className="text-xl font-bold text-stone-100">Atendimento Pastoral</h1>
         {(isSuperAdmin(user) || isAdmin(user) || user.role === 'Secretaria') && (
-          <Button onClick={openNew} size="sm"><Plus size={16} /> Novo Agendamento</Button>
+          <Button onClick={openNew} size="sm">
+            <Plus size={16} /> {tab === 'cabinet' ? 'Adicionar Horário' : 'Novo Agendamento'}
+          </Button>
         )}
       </div>
 
@@ -294,7 +301,7 @@ export default function PastoralPage({ user }: Props) {
       {/* ─── Aba: Gabinete Pastoral ─────────────────────────────────────────── */}
       {tab === 'cabinet' && (
         (isSuperAdmin(user) || isAdmin(user) || user.role === 'Secretaria')
-          ? <PastoralCabinetSchedules />
+          ? <PastoralCabinetSchedules ref={cabinetRef} />
           : <PastoralCabinetBooking user={user} />
       )}
 
