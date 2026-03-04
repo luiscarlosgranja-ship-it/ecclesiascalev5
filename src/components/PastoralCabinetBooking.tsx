@@ -5,7 +5,8 @@ import api from '../utils/api';
 import type { AvailableTimeSlot, PastoralCabinetBooking } from '../types';
 
 interface Props {
-  user: { member_id?: number | null; name?: string; email?: string };
+  volunteerId: number;
+  volunteerName: string;
   onBookingSuccess: () => void;
 }
 
@@ -14,9 +15,7 @@ interface MonthAvailability {
   hasAvailable: boolean;
 }
 
-export default function PastoralCabinetBooking({ user, onBookingSuccess }: Props) {
-  const volunteerId = user.member_id ?? null;
-  const volunteerName = user.name || user.email || 'Voluntário';
+export default function PastoralCabinetBooking({ volunteerId, volunteerName, onBookingSuccess }: Props) {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
