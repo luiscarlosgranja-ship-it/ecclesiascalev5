@@ -673,7 +673,7 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
   const { type, cult_id, month } = req.body;
   const today = new Date().toISOString().slice(0, 10);
 
-  let cultsQuery = db.from('cults').select('*').eq('status', 'Agendado');
+  let cultsQuery = db.from('cults').select('*').neq('status', 'Cancelado');
   if (type === 'month' && month)  cultsQuery = cultsQuery.like('date', `${month}%`);
   else if (cult_id)               cultsQuery = cultsQuery.eq('id', cult_id);
   else                            cultsQuery = cultsQuery.gte('date', today);
