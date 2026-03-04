@@ -3,7 +3,7 @@ import { Users, Calendar, CheckCircle, Clock, Repeat, Settings, Eye, EyeOff } fr
 import { Card, Badge, Spinner } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import { useTrialStatus } from '../hooks/useTrialStatus';
-import { getSupabase } from '../utils/supabaseClient';
+import { supabase } from '../utils/supabaseClient';
 import type { AuthUser, DashboardStats, DashboardWidget, Scale, Cult } from '../types';
 import { isAdmin, isLeader } from '../utils/permissions';
 import { format } from 'date-fns';
@@ -39,10 +39,9 @@ export default function DashboardPage({ user, setPage }: DashboardPageProps) {
 
   // ─── Supabase Realtime (opcional) ────────────────────────────────────────────
   useEffect(() => {
-    const sb = getSupabase();
-    if (!sb) return; // Realtime desativado se env vars não configuradas
+    if (!supabase) return; // Realtime desativado se env vars não configuradas
 
-    const channel = sb
+    const channel = supabase
       .channel('dashboard-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cults' }, () => {
         refetchCults();
@@ -57,7 +56,7 @@ export default function DashboardPage({ user, setPage }: DashboardPageProps) {
       })
       .subscribe();
 
-    return () => { sb.removeChannel(channel); };
+    return () => { supabase.removeChannel(channel); };
   }, [refetchCults, refetchScales, refetchStats]);
 
   const toggleWidget = (id: string) => {
@@ -255,17 +254,16 @@ function PendingSwapsWidget({ userId, role }: { userId: number; role: string }) 
 
   // Realtime para trocas pendentes (opcional)
   useEffect(() => {
-    const sb = getSupabase();
-    if (!sb) return;
+    if (!supabase) return;
 
-    const channel = sb
+    const channel = supabase
       .channel('swaps-dashboard')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'swaps' }, () => {
         refetch();
       })
       .subscribe();
 
-    return () => { sb.removeChannel(channel); };
+    return () => { supabase.removeChannel(channel); };
   }, [refetch]);
 
   return (
