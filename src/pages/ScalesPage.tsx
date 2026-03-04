@@ -324,9 +324,16 @@ export default function ScalesPage({ user }: Props) {
   }
 
   async function handlePrintMonth() {
-    const month = new Date().toISOString().slice(0, 7);
+    // Usa o mês do culto selecionado, ou o mês atual como fallback
+    const month = selectedCultData
+      ? selectedCultData.date.slice(0, 7)
+      : new Date().toISOString().slice(0, 7);
+
     const monthCults = availableCults.filter(c => c.date.startsWith(month));
-    if (monthCults.length === 0) return;
+    if (monthCults.length === 0) {
+      setError('Nenhum culto encontrado para este mês');
+      return;
+    }
 
     const token = localStorage.getItem('token') || '';
 
@@ -370,7 +377,11 @@ export default function ScalesPage({ user }: Props) {
         deptBlocks, // ← dados reais da API por departamento
       );
     } else {
-      const month = new Date().toISOString().slice(0, 7);
+      // Usa o mês do culto selecionado, ou o mês atual como fallback
+      const month = selectedCultData
+        ? selectedCultData.date.slice(0, 7)
+        : new Date().toISOString().slice(0, 7);
+
       const monthCults = availableCults.filter(c => c.date.startsWith(month));
       if (monthCults.length === 0) return;
 
