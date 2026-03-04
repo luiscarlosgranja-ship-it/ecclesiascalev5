@@ -3,9 +3,6 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
-// ─── Cliente para uso em componentes (Realtime, queries diretas) ──────────────
-// Exporta null-safe via getSupabase() para não crashar quando as env vars
-// não estiverem configuradas (ex: dev local sem Supabase)
 let _supabase: SupabaseClient | null = null;
 
 if (SUPABASE_URL && SUPABASE_ANON_KEY) {
@@ -23,16 +20,13 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY) {
   );
 }
 
-/**
- * Retorna o cliente Supabase se as variáveis de ambiente estiverem configuradas,
- * ou null caso contrário. Sempre use este helper antes de usar o cliente:
- *
- * const sb = getSupabase();
- * if (!sb) return; // Realtime não disponível
- */
+// Exporta como named export "supabase" (pode ser null se env vars não configuradas)
+export const supabase = _supabase;
+
+// Helper null-safe — use antes de qualquer operação Realtime:
+// const sb = getSupabase(); if (!sb) return;
 export function getSupabase(): SupabaseClient | null {
   return _supabase;
 }
 
-/** @deprecated Use getSupabase() para evitar crashes quando env vars não estão definidas */
-export const supabase = _supabase!;
+export default _supabase;
