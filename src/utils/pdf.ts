@@ -2,7 +2,22 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Scale, Cult } from '../types';
 
-// ─── Paleta ───────────────────────────────────────────────────────────────────
+// ─── Tipo DeptBlock (espelho do que vem da API /scales/by-department) ─────────
+export interface DeptBlock {
+  department_id: number | null;
+  department_name: string;
+  scales: {
+    id: number;
+    status: string;
+    member_name: string;
+    member_id: number;
+    sector_name: string;
+    department_id: number | null;
+    department_name: string;
+  }[];
+}
+
+// ─── Paleta ──────────────────────────────────────────────────────────────────
 const C_HEADER_BG:  [number,number,number] = [28,  25,  23 ];  // stone-900
 const C_HEADER_FG:  [number,number,number] = [251, 191, 36 ];  // amber-400
 const C_BLOCK_HDR:  [number,number,number] = [55,  48,  44 ];  // stone-700  (cabeçalho do bloco)
@@ -105,209 +120,57 @@ function drawFooter(doc: jsPDF, page: number, total: number, pw: number, ph: num
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  CULTO ÚNICO COM BLOCOS DE DEPARTAMENTO
-//  Layout: retrato, blocos em grade (2 colunas ou 1 linha)
+//  Usa DeptBlock[] direto da API /scales/by-department — sem mapeamento hardcoded
 // ─────────────────────────────────────────────────────────────────────────────
-interface DepartmentGroup {
-  name: string;
-  scales: Scale[];
-}
-
-// Mapeamento explícito de setores para departamentos (case-insensitive)
-const SETOR_DEPARTMENT_MAP: { [key: string]: string } = {
-  // Diáconos / Obreiros
-  'setor 1': 'Diáconos / Obreiros',
-  'setor 2': 'Diáconos / Obreiros',
-  'setor 3': 'Diáconos / Obreiros',
-  'setor 4': 'Diáconos / Obreiros',
-  'maquininhas': 'Diáconos / Obreiros',
-  'máquina de cartão': 'Diáconos / Obreiros',
-  'maquina de cartao': 'Diáconos / Obreiros',
-  'máquinas de cartão': 'Diáconos / Obreiros',
-  'maquinas de cartao': 'Diáconos / Obreiros',
-  'recepção': 'Diáconos / Obreiros',
-  'recepcao': 'Diáconos / Obreiros',
-  'externo': 'Diáconos / Obreiros',
-  
-  // Mídia
-  'som': 'Mídia',
-  'filmagem': 'Mídia',
-  'foto': 'Mídia',
-  'transmissão': 'Mídia',
-  'transmissao': 'Mídia',
-  'câmera': 'Mídia',
-  'camera': 'Mídia',
-  'iluminação': 'Mídia',
-  'iluminacao': 'Mídia',
-  'redes sociais': 'Mídia',
-  'mídia': 'Mídia',
-  'media': 'Mídia',
-  
-  // Infantil
-  'infantil': 'Infantil',
-  'berçário': 'Infantil',
-  'bercario': 'Infantil',
-  'escola bíblica': 'Infantil',
-  'escola biblica': 'Infantil',
-  
-  // Louvor
-  'bateria': 'Louvor',
-  'back 1': 'Louvor',
-  'back 2': 'Louvor',
-  'back 3': 'Louvor',
-  'back 4': 'Louvor',
-  'vocal': 'Louvor',
-  'violão': 'Louvor',
-  'violao': 'Louvor',
-  'baixo': 'Louvor',
-  'guitarra': 'Louvor',
-  'teclado': 'Louvor',
-  'louvor': 'Louvor',
-  'música': 'Louvor',
-  'musica': 'Louvor',
-  'canto': 'Louvor',
-  
-  // Una
-  'una': 'Una',
-  'una 1': 'Una',
-  'una 2': 'Una',
-  
-  // Bem-Vindos
-  'bem-vindos': 'Bem-Vindos',
-  'bem vindos': 'Bem-Vindos',
-  'bem-vindo': 'Bem-Vindos',
-  'bem vindo': 'Bem-Vindos',
-  'recepção de bem-vindos': 'Bem-Vindos',
-  'recepcao de bem-vindos': 'Bem-Vindos',
-  'boas-vindas': 'Bem-Vindos',
-  'boas vindas': 'Bem-Vindos',
-};
-
-// Ordem fixa dos departamentos
-const DEPARTMENT_ORDER = [
-  'Diáconos / Obreiros',
-  'Mídia',
-  'Infantil',
-  'Louvor',
-  'Una',
-  'Bem-Vindos',
-];
-
-function groupScalesByDepartment(scales: Scale[]): DepartmentGroup[] {
-  // Agrupar escalas por departamento usando o mapeamento
-  const deptMap = new Map<string, Scale[]>();
-  
-  console.log('=== AGRUPAMENTO DE DEPARTAMENTOS ===');
-  console.log('Escalas recebidas:', scales.length);
-  console.log('Mapeamento disponível:', Object.keys(SETOR_DEPARTMENT_MAP).length, 'setores mapeados');
-  
-  for (const scale of scales) {
-    const sectorName = scale.sector_name || 'Sem Setor';
-    const sectorLower = sectorName.toLowerCase().trim();
-    
-    // Procurar no mapeamento
-    let deptName = SETOR_DEPARTMENT_MAP[sectorLower];
-    
-    // Se não encontrou, mostrar aviso e usar o nome do setor como departamento
-    if (!deptName) {
-      console.warn(`⚠️ Setor não mapeado: "${sectorName}" (${sectorLower})`);
-      deptName = sectorName;
-    }
-    
-    console.log(`"${sectorName}" → "${deptName}"`);
-    
-    if (!deptMap.has(deptName)) {
-      deptMap.set(deptName, []);
-    }
-    deptMap.get(deptName)!.push(scale);
-  }
-  
-  console.log('Departamentos encontrados:', Array.from(deptMap.keys()));
-  console.log('Ordem esperada:', DEPARTMENT_ORDER);
-  
-  // Retornar na ordem fixa dos departamentos
-  const result: DepartmentGroup[] = [];
-  
-  // Primeiro: adicionar departamentos na ordem fixa (se houver escalas)
-  for (const deptName of DEPARTMENT_ORDER) {
-    if (deptMap.has(deptName)) {
-      result.push({
-        name: deptName,
-        scales: deptMap.get(deptName)!
-      });
-      console.log(`✅ Adicionado: ${deptName} (${deptMap.get(deptName)!.length} escalas)`);
-      deptMap.delete(deptName);
-    }
-  }
-  
-  // Depois: adicionar departamentos não mapeados no final
-  for (const [deptName, scaleList] of deptMap) {
-    console.warn(`⚠️ Departamento não padrão encontrado: "${deptName}" (${scaleList.length} escalas)`);
-    result.push({ name: deptName, scales: scaleList });
-  }
-  
-  console.log('Resultado final:', result.map(r => ({ name: r.name, count: r.scales.length })));
-  console.log('=== FIM DO AGRUPAMENTO ===');
-  
-  return result;
-}
 
 async function exportSingleCultBlocksPDF(
-  scales: Scale[],
+  deptBlocks: DeptBlock[],
   cult: Cult,
   title: string,
 ) {
   const logo = await fetchLogo();
   const doc = new jsPDF({ orientation: 'portrait', format: 'a4', unit: 'mm' });
-  const PW = doc.internal.pageSize.getWidth();  // 210mm
-  const PH = doc.internal.pageSize.getHeight(); // 297mm
+  const PW = doc.internal.pageSize.getWidth();
+  const PH = doc.internal.pageSize.getHeight();
   const MX = 12;
   const MY = 8;
-  
+
   const subtitle = `${fmtDate(cult.date)}  ·  ${fmtTime(cult.time)}`;
   let curY = drawMainHeader(doc, logo, title, subtitle, PW);
   curY += 4;
 
-  const deptGroups = groupScalesByDepartment(scales);
   const contentW = PW - MX * 2;
-  const blockW = contentW / 2 - 2; // 2 colunas com espaço entre
+  const blockW = contentW / 2 - 2;
   const blockPadding = 3;
   const blockBorderW = 0.3;
+  const headerH = 6;
+  const sectorHeaderH = 4;
+  const rowH = 4;
+  const footerH = 2;
 
   let col = 0;
   let maxRowH = 0;
 
-  for (let i = 0; i < deptGroups.length; i++) {
-    const deptGroup = deptGroups[i];
-    
-    // Agrupar escalas por setor dentro do departamento
-    const sectorMap = new Map<string, Scale[]>();
-    for (const scale of deptGroup.scales) {
-      const sectorName = scale.sector_name || 'Sem Setor';
-      if (!sectorMap.has(sectorName)) {
-        sectorMap.set(sectorName, []);
-      }
-      sectorMap.get(sectorName)!.push(scale);
+  for (let i = 0; i < deptBlocks.length; i++) {
+    const dept = deptBlocks[i];
+
+    // Agrupa escalas do bloco por setor
+    const sectorMap = new Map<string, typeof dept.scales>();
+    for (const scale of dept.scales) {
+      const k = scale.sector_name || 'Sem Setor';
+      if (!sectorMap.has(k)) sectorMap.set(k, []);
+      sectorMap.get(k)!.push(scale);
     }
-    const sectors = Array.from(sectorMap.entries()).map(([name, scales]) => ({
-      sectorName: name,
-      scales: scales
-    }));
-    
-    // Calcula altura do bloco
-    const headerH = 6;
-    const sectorHeaderH = 4;
-    const rowH = 4;
-    const footerH = 2;
-    const totalScales = sectors.reduce((sum, s) => sum + s.scales.length, 0);
-    const blockH = headerH + (sectors.length * sectorHeaderH) + (totalScales * rowH) + footerH;
-    
+    const sectors = Array.from(sectorMap.entries()).map(([name, s]) => ({ sectorName: name, scales: s }));
+
+    const blockH = headerH + (sectors.length * sectorHeaderH) + (dept.scales.length * rowH) + footerH;
+
     if (col === 0) {
       maxRowH = blockH;
     } else {
       maxRowH = Math.max(maxRowH, blockH);
     }
 
-    // Verificar quebra de página
     if (curY + maxRowH > PH - 15 && col === 0) {
       doc.addPage();
       curY = drawMainHeader(doc, logo, title, subtitle, PW) + 4;
@@ -318,26 +181,23 @@ async function exportSingleCultBlocksPDF(
     const bx = MX + col * (blockW + 4);
     const by = curY;
 
-    // ── Desenha o bloco ─────────────────────────────────────────────
-    
     // Borda do bloco
     doc.setDrawColor(...C_BORDER);
     doc.setLineWidth(blockBorderW);
     doc.rect(bx, by, blockW, blockH, 'S');
 
-    // Cabeçalho do bloco (DEPARTAMENTO)
+    // Cabeçalho do departamento
     doc.setFillColor(...C_BLOCK_HDR);
     doc.rect(bx, by, blockW, headerH, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
     doc.setTextColor(...C_BLOCK_FG);
-    doc.text(deptGroup.name.toUpperCase(), bx + blockPadding, by + 4.5, { maxWidth: blockW - blockPadding * 2 });
+    doc.text(dept.department_name.toUpperCase(), bx + blockPadding, by + 4.5, { maxWidth: blockW - blockPadding * 2 });
 
-    // Conteúdo: Setores e Voluntários
     let contentY = by + headerH;
-    
+
     sectors.forEach((sector) => {
-      // Cabeçalho do setor (sub-header)
+      // Sub-header do setor
       doc.setFillColor(200, 190, 180);
       doc.rect(bx, contentY, blockW, sectorHeaderH, 'F');
       doc.setFont('helvetica', 'bold');
@@ -346,10 +206,8 @@ async function exportSingleCultBlocksPDF(
       doc.text(sector.sectorName, bx + blockPadding, contentY + 3, { maxWidth: blockW - blockPadding * 2 });
       contentY += sectorHeaderH;
 
-      // Voluntários do setor
-      sector.scales.forEach((scale, scaleIdx) => {
-        const bgColor = scaleIdx % 2 === 0 ? C_ROW_ODD : C_ROW_EVEN;
-        doc.setFillColor(...bgColor);
+      sector.scales.forEach((scale, idx) => {
+        doc.setFillColor(...(idx % 2 === 0 ? C_ROW_ODD : C_ROW_EVEN));
         doc.rect(bx, contentY, blockW, rowH, 'F');
 
         doc.setFont('helvetica', 'normal');
@@ -360,8 +218,7 @@ async function exportSingleCultBlocksPDF(
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...statusColor(scale.status));
         doc.setFontSize(5);
-        const statusText = typeof scale.status === 'object' ? 'Pendente' : scale.status;
-        doc.text(statusText, bx + blockW - blockPadding - 8, contentY + 2.5, { maxWidth: 8 });
+        doc.text(scale.status || 'Pendente', bx + blockW - blockPadding - 8, contentY + 2.5, { maxWidth: 8 });
 
         contentY += rowH;
       });
@@ -374,84 +231,64 @@ async function exportSingleCultBlocksPDF(
     }
   }
 
-  // Rodapé
   const total = (doc as any).internal.getNumberOfPages();
   for (let p = 1; p <= total; p++) {
     doc.setPage(p);
     drawFooter(doc, p, total, PW, PH);
   }
 
-  doc.save(`escala_${(cult?.date || 'culto').replace(/-/g,'')}.pdf`);
+  doc.save(`escala_${(cult?.date || 'culto').replace(/-/g, '')}.pdf`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  GRADE DE CULTOS — layout igual à imagem de referência
-//  Landscape A4, 4 colunas, cada célula = bloco de um culto com mini-blocos de departamentos
+//  GRADE DE CULTOS — landscape A4, 4 colunas
+//  Recebe deptBlocksByCult: Map<cult_id, DeptBlock[]> com dados reais da API
 // ─────────────────────────────────────────────────────────────────────────────
 async function exportMonthGridPDF(
-  allScales: Scale[],
+  deptBlocksByCult: Map<number, DeptBlock[]>,
   allCults: Cult[],
   title: string,
 ) {
   const logo = await fetchLogo();
   const doc = new jsPDF({ orientation: 'landscape', format: 'a4', unit: 'mm' });
-  const PW = doc.internal.pageSize.getWidth();   // ~297
-  const PH = doc.internal.pageSize.getHeight();  // ~210
-  const MX = 8;   // margem horizontal
-  const MY_TOP = 4; // margem topo extra após header
+  const PW = doc.internal.pageSize.getWidth();
+  const PH = doc.internal.pageSize.getHeight();
+  const MX = 8;
+  const MY_TOP = 4;
   const COLS = 4;
-  const GAP = 3;   // espaço entre blocos
+  const GAP = 3;
 
-  // Ordena cultos por data
   const sorted = [...allCults].sort((a, b) => a.date.localeCompare(b.date));
-
-  const totalVol = allScales.length;
+  const totalVol = Array.from(deptBlocksByCult.values()).reduce((sum, blocks) => sum + blocks.reduce((s, b) => s + b.scales.length, 0), 0);
   const subtitle = `${sorted.length} culto(s)  ·  ${totalVol} voluntário(s) escalado(s)  ·  ${new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}`;
 
   let headerY = drawMainHeader(doc, logo, title, subtitle, PW);
   let curY = headerY + MY_TOP;
-  let pageNum = 1;
 
   const colW = (PW - MX * 2 - GAP * (COLS - 1)) / COLS;
-
-  // Mapear culturas por id para acesso rápido
-  const cultMap = new Map(sorted.map(c => [c.id, c]));
-
-  // Calcula altura de um bloco dado o nº de voluntários
-  const blockHeaderH = 8;     // cabeçalho do bloco principal
-  const deptMiniH = 22;       // altura aprox de cada mini-bloco de departamento (aumentado)
-  const blockPadB = 2;        // padding inferior do bloco
+  const blockHeaderH = 8;
+  const deptMiniH = 22;
+  const blockPadB = 2;
 
   function blockHeight(cultId: number): number {
-    const cScales = allScales.filter(s => s.cult_id === cultId);
-    const deptGroups = groupScalesByDepartmentForMonth(cScales);
-    // Estima altura: cabeçalho + (num depts * altura mini)
-    const deptHeight = Math.max(deptMiniH * deptGroups.length, 40);
+    const blocks = deptBlocksByCult.get(cultId) || [];
+    const deptHeight = Math.max(deptMiniH * blocks.length, 40);
     return blockHeaderH + deptHeight + blockPadB;
   }
 
-  // Altura disponível por página
-  const availH = PH - (headerY + MY_TOP) - 12; // 12 = rodapé
-
-  // Distribui blocos em linhas de 4
   let col = 0;
-  let rowMaxH = 0; // altura máxima do bloco na linha atual
+  let rowMaxH = 0;
 
   for (let i = 0; i < sorted.length; i++) {
     const cult = sorted[i];
-    const bh = blockHeight(cult.id);
 
-    // Nova linha?
     if (col === 0) {
-      // Pré-calcula a altura máxima desta linha
       rowMaxH = 0;
       for (let j = i; j < Math.min(i + COLS, sorted.length); j++) {
         rowMaxH = Math.max(rowMaxH, blockHeight(sorted[j].id));
       }
-      // Nova página se não couber
       if (curY + rowMaxH > PH - 12) {
         doc.addPage();
-        pageNum++;
         headerY = drawMainHeader(doc, logo, title, subtitle, PW);
         curY = headerY + MY_TOP;
       }
@@ -460,30 +297,24 @@ async function exportMonthGridPDF(
     const bx = MX + col * (colW + GAP);
     const by = curY;
 
-    // ── Desenha o bloco do culto ───────────────────────────────────────────────────
-
-    // Borda do bloco
     doc.setDrawColor(...C_BORDER);
     doc.setLineWidth(0.25);
     doc.rect(bx, by, colW, rowMaxH, 'S');
 
-    // Cabeçalho do bloco
+    // Cabeçalho do bloco do culto
     doc.setFillColor(...C_BLOCK_HDR);
     doc.rect(bx, by, colW, blockHeaderH, 'F');
 
-    // Data — esquerda
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
     doc.setTextColor(...C_BLOCK_FG);
     doc.text(fmtDate(cult.date), bx + 2, by + 3);
 
-    // Hora — direita
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(6);
     doc.setTextColor(180, 175, 165);
     doc.text(fmtTime(cult.time), bx + colW - 2, by + 3, { align: 'right' });
 
-    // Tipo/nome do culto
     const typeName = cult.type_name || cult.name || '';
     if (typeName) {
       doc.setFont('helvetica', 'italic');
@@ -492,41 +323,34 @@ async function exportMonthGridPDF(
       doc.text(typeName, bx + 2, by + 6.5, { maxWidth: colW - 4 });
     }
 
-    // ── Mini-blocos de departamentos ───────────────────────────────────────────────
-    const cScales = allScales.filter(s => s.cult_id === cult.id);
-    const deptGroups = groupScalesByDepartmentForMonth(cScales);
-    
-    // Se não há departamentos, mostrar mensagem
+    // Mini-blocos de departamentos (dados reais da API)
+    const deptGroups = deptBlocksByCult.get(cult.id) || [];
+
     if (deptGroups.length === 0) {
       doc.setFont('helvetica', 'italic');
       doc.setFontSize(5);
       doc.setTextColor(160, 150, 140);
-      const contentY = by + blockHeaderH + 5;
-      doc.text('Sem escalas', bx + 2, contentY, { maxWidth: colW - 4 });
+      doc.text('Sem escalas', bx + 2, by + blockHeaderH + 5, { maxWidth: colW - 4 });
     } else {
-      let deptY = by + blockHeaderH + 1;
       const miniBlockH = Math.floor((rowMaxH - blockHeaderH - 2) / Math.max(1, deptGroups.length));
-      
-      deptGroups.forEach((deptGroup, deptIdx) => {
+
+      deptGroups.forEach((dept, deptIdx) => {
         const mbx = bx + 1;
-        const mby = deptY + deptIdx * miniBlockH;
+        const mby = by + blockHeaderH + 1 + deptIdx * miniBlockH;
         const mbw = colW - 2;
         const mbh = miniBlockH - 0.5;
 
-        // Mini-bloco background
         doc.setFillColor(245, 243, 240);
         doc.setDrawColor(220, 215, 210);
         doc.setLineWidth(0.15);
         doc.rect(mbx, mby, mbw, mbh, 'FD');
 
-        // Nome do departamento (pequeno, no topo)
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(4);
         doc.setTextColor(80, 70, 60);
-        doc.text(deptGroup.name, mbx + 1, mby + 2, { maxWidth: mbw - 2 });
+        doc.text(dept.department_name, mbx + 1, mby + 2, { maxWidth: mbw - 2 });
 
-        // Lista de voluntários
-        if (deptGroup.scales.length === 0) {
+        if (dept.scales.length === 0) {
           doc.setFont('helvetica', 'italic');
           doc.setFontSize(3);
           doc.setTextColor(160, 150, 140);
@@ -534,38 +358,33 @@ async function exportMonthGridPDF(
         } else {
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(3.2);
-          
+
           let miniY = mby + 4;
           const lineHeight = 1.8;
           const maxLines = Math.max(1, Math.floor((mbh - 3) / lineHeight));
-          
-          // Mostrar até maxLines voluntários
-          for (let i = 0; i < Math.min(maxLines, deptGroup.scales.length); i++) {
-            const scale = deptGroup.scales[i];
-            const statusSymbol = scale.status === 'Confirmado' ? '✓' : 
-                                 scale.status === 'Pendente' ? '○' : 
+
+          for (let k = 0; k < Math.min(maxLines, dept.scales.length); k++) {
+            const scale = dept.scales[k];
+            const statusSymbol = scale.status === 'Confirmado' ? '✓' :
+                                 scale.status === 'Pendente' ? '○' :
                                  scale.status === 'Troca' ? '⇄' : '✗';
-            
-            // Símbolo de status
+
             doc.setTextColor(...statusColor(scale.status));
             doc.setFont('helvetica', 'bold');
             doc.text(statusSymbol, mbx + 0.8, miniY);
-            
-            // Nome do voluntário
+
             doc.setFont('helvetica', 'normal');
             doc.setTextColor(40, 35, 30);
-            const volName = (scale.member_name || '?').substring(0, 14);
-            doc.text(volName, mbx + 2, miniY, { maxWidth: mbw - 3.5 });
-            
+            doc.text((scale.member_name || '?').substring(0, 14), mbx + 2, miniY, { maxWidth: mbw - 3.5 });
+
             miniY += lineHeight;
           }
-          
-          // Se houver mais voluntários, mostrar "+N"
-          if (deptGroup.scales.length > maxLines) {
+
+          if (dept.scales.length > maxLines) {
             doc.setFont('helvetica', 'bold');
             doc.setFontSize(2.8);
             doc.setTextColor(150, 140, 130);
-            doc.text(`+${deptGroup.scales.length - maxLines}`, mbx + 0.8, miniY);
+            doc.text(`+${dept.scales.length - maxLines}`, mbx + 0.8, miniY);
           }
         }
       });
@@ -597,64 +416,13 @@ async function exportMonthGridPDF(
     lx += 26;
   }
 
-  // Rodapé em todas as páginas
   const total = (doc as any).internal.getNumberOfPages();
   for (let p = 1; p <= total; p++) {
     doc.setPage(p);
     drawFooter(doc, p, total, PW, PH);
   }
 
-  doc.save(`escalas_${new Date().toISOString().slice(0,7)}.pdf`);
-}
-
-function groupScalesByDepartmentForMonth(scales: Scale[]): DepartmentGroup[] {
-  // Se não há escalas, retorna array vazio
-  if (!scales || scales.length === 0) {
-    return [];
-  }
-  
-  // Usar o mesmo mapeamento que no culto individual
-  const deptMap = new Map<string, Scale[]>();
-  
-  for (const scale of scales) {
-    const sectorName = scale.sector_name || 'Sem Setor';
-    // Converter para lowercase para buscar no mapeamento
-    const sectorLower = sectorName.toLowerCase().trim();
-    const deptName = SETOR_DEPARTMENT_MAP[sectorLower] || sectorName;
-    
-    if (!deptMap.has(deptName)) {
-      deptMap.set(deptName, []);
-    }
-    deptMap.get(deptName)!.push(scale);
-  }
-  
-  // Retornar na ordem fixa dos departamentos (nomes curtos para mês)
-  const result: DepartmentGroup[] = [];
-  const shortNames: { [key: string]: string } = {
-    'Diáconos / Obreiros': 'Diáconos',
-    'Mídia': 'Mídia',
-    'Infantil': 'Infantil',
-    'Louvor': 'Louvor',
-    'Una': 'Una',
-    'Bem-Vindos': 'Bem-Vindos',
-  };
-  
-  for (const deptName of DEPARTMENT_ORDER) {
-    if (deptMap.has(deptName)) {
-      result.push({
-        name: shortNames[deptName] || deptName,
-        scales: deptMap.get(deptName)!
-      });
-      deptMap.delete(deptName);
-    }
-  }
-  
-  // Adicionar departamentos não mapeados
-  for (const [deptName, scaleList] of deptMap) {
-    result.push({ name: deptName, scales: scaleList });
-  }
-  
-  return result;
+  doc.save(`escalas_${new Date().toISOString().slice(0, 7)}.pdf`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -668,61 +436,34 @@ export async function exportScalePDF(
   allCults?: Cult[],
   selectedSectors?: string[],
   selectedDepartmentIds?: number[],
+  // Dados reais da API — usados quando disponíveis
+  deptBlocks?: DeptBlock[],
+  deptBlocksByCult?: Map<number, DeptBlock[]>,
 ) {
-  // Mapeamento de department_id para nome
-  const DEPT_MAP: { [key: number]: string } = {
-    1: 'Diáconos / Obreiros',
-    2: 'Mídia',
-    3: 'Infantil',
-    4: 'Louvor',
-    5: 'Una',
-    6: 'Bem-Vindos',
-  };
-  
-  // Filtrar escalas pelos departamentos selecionados se fornecido
-  let filteredScales = scales;
-  if (selectedDepartmentIds && selectedDepartmentIds.length > 0) {
-    // Precisamos agrupar por departamento através do setor
-    // Usar o mapeamento do pdf.ts
-    filteredScales = scales.filter(s => {
-      const sectorLower = (s.sector_name || '').toLowerCase().trim();
-      let deptName = SETOR_DEPARTMENT_MAP[sectorLower] || s.sector_name;
-      
-      // Procurar se este departamento está selecionado
-      return selectedDepartmentIds.some(deptId => {
-        const selectedDeptName = DEPT_MAP[deptId];
-        return deptName === selectedDeptName;
-      });
-    });
-  }
-
-  // Filtrar escalas pelos setores selecionados, se informados
-  if (selectedSectors && selectedSectors.length > 0) {
-    filteredScales = filteredScales.filter(s => selectedSectors.includes(s.sector_name || ''));
-  }
-
-  // Mês inteiro → grade landscape
-  if (allScales && allCults && allCults.length > 1) {
-    let filteredAllScales = allScales;
+  // ── Culto único com blocos reais da API ───────────────────────────────────
+  if (cult && deptBlocks) {
+    let filtered = deptBlocks;
     if (selectedDepartmentIds && selectedDepartmentIds.length > 0) {
-      filteredAllScales = allScales.filter(s => {
-        const sectorLower = (s.sector_name || '').toLowerCase().trim();
-        let deptName = SETOR_DEPARTMENT_MAP[sectorLower] || s.sector_name;
-        return selectedDepartmentIds.some(deptId => {
-          const selectedDeptName = DEPT_MAP[deptId];
-          return deptName === selectedDeptName;
-        });
-      });
+      filtered = deptBlocks.filter(b => b.department_id !== null && selectedDepartmentIds.includes(b.department_id));
     }
-    if (selectedSectors && selectedSectors.length > 0) {
-      filteredAllScales = filteredAllScales.filter(s => selectedSectors.includes(s.sector_name || ''));
-    }
-    return exportMonthGridPDF(filteredAllScales, allCults, title);
+    return exportSingleCultBlocksPDF(filtered, cult, title);
   }
 
-  // Culto único → blocos de departamento
+  // ── Mês inteiro com blocos reais da API ───────────────────────────────────
+  if (allCults && allCults.length > 1 && deptBlocksByCult) {
+    let filteredMap = deptBlocksByCult;
+    if (selectedDepartmentIds && selectedDepartmentIds.length > 0) {
+      filteredMap = new Map();
+      for (const [cultId, blocks] of deptBlocksByCult) {
+        filteredMap.set(cultId, blocks.filter(b => b.department_id !== null && selectedDepartmentIds.includes(b.department_id!)));
+      }
+    }
+    return exportMonthGridPDF(filteredMap, allCults, title);
+  }
+
+  // ── Fallback sem dados da API (não deve ocorrer no fluxo normal) ──────────
   if (cult) {
-    return exportSingleCultBlocksPDF(filteredScales, cult, title);
+    return exportSingleCultBlocksPDF([], cult, title);
   }
 
   // Fallback (não deve chegar aqui)

@@ -6,7 +6,7 @@ import api from '../utils/api';
 import { getSupabase } from '../utils/supabaseClient';
 import type { AuthUser, Scale, Cult, Member, Sector, CultType } from '../types';
 import { isAdmin, isLeader, isSuperAdmin } from '../utils/permissions';
-import { exportScalePDF } from '../utils/pdf';
+import { exportScalePDF, type DeptBlock as PdfDeptBlock } from '../utils/pdf';
 
 interface Props { user: AuthUser; }
 
@@ -369,36 +369,48 @@ export default function ScalesPage({ user }: Props) {
     if (printingMode === 'cult') {
       if (!scales || !selectedCultData) return;
       await exportScalePDF(
-        scales, 
-        selectedCultData, 
+        scales,
+        selectedCultData,
         `Escala — ${selectedCultData.type_name || selectedCultData.name || 'Culto'}`,
         undefined,
         undefined,
         undefined,
-        selectedDepartmentsForPrint
+        selectedDepartmentsForPrint,
+        deptBlocks, // ← dados reais da API por departamento
       );
     } else {
       const month = new Date().toISOString().slice(0, 7);
       const monthCults = availableCults.filter(c => c.date.startsWith(month));
       if (monthCults.length === 0) return;
-      
+
       const token = localStorage.getItem('token') || '';
-      const results = await Promise.all(
-        monthCults.map(c =>
-          fetch(`/api/scales?cult_id=${c.id}`, { headers: { Authorization: `Bearer ${token}` } })
-            .then(r => r.json()).then((s: Scale[]) => s).catch(() => [] as Scale[])
-        )
+
+      // Buscar deptBlocks para cada culto do mês via /scales/by-department
+      const deptBlocksMap = new Map<number, DeptBlock[]>();
+      await Promise.all(
+        monthCults.map(async (c) => {
+          try {
+            const res = await fetch(`/api/scales/by-department/${c.id}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            const blocks: DeptBlock[] = await res.json();
+            deptBlocksMap.set(c.id, blocks);
+          } catch {
+            deptBlocksMap.set(c.id, []);
+          }
+        })
       );
-      
-      const allMonthScales = results.flat();
+
       await exportScalePDF(
-        allMonthScales, 
-        null, 
-        `Escalas — ${month}`, 
-        allMonthScales, 
+        [],
+        null,
+        `Escalas — ${month}`,
+        undefined,
         monthCults,
         undefined,
-        selectedDepartmentsForPrint
+        selectedDepartmentsForPrint,
+        undefined,
+        deptBlocksMap, // ← dados reais da API por culto
       );
     }
     setPrintConfigModal(false);
