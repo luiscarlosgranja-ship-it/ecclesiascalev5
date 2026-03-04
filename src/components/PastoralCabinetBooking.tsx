@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { supabase } from '../utils/supabaseClient';
 import { Calendar, Clock, AlertCircle, Loader2, CheckCircle } from 'lucide-react';
 import { Card, Button, Modal, Badge } from './ui';
 import api from '../utils/api';
@@ -36,7 +37,6 @@ export default function PastoralCabinetBooking({ volunteerId, volunteerName, onB
     const year = currentMonth.getFullYear();
     const month = String(currentMonth.getMonth() + 1).padStart(2, '0');
     const monthStr = `${year}-${month}`;
-    
     loadMonthAvailability(monthStr);
   }, [currentMonth]);
 
@@ -46,6 +46,28 @@ export default function PastoralCabinetBooking({ volunteerId, volunteerName, onB
       loadAvailableSlots(selectedDate);
     }
   }, [selectedDate]);
+
+  // ─── Realtime: atualiza calendário e horários quando secretaria altera ───────
+  useEffect(() => {
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel('cabinet-schedules-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pastoral_cabinet_schedules' }, () => {
+        // Recarrega o mês atual
+        const year = currentMonth.getFullYear();
+        const month = String(currentMonth.getMonth() + 1).padStart(2, '0');
+        loadMonthAvailability(`${year}-${month}`);
+        // Recarrega horários do dia se estiver selecionado
+        if (selectedDate) loadAvailableSlots(selectedDate);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pastoral_cabinet_bookings' }, () => {
+        if (selectedDate) loadAvailableSlots(selectedDate);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [currentMonth, selectedDate]);
 
   async function loadMonthAvailability(monthStr: string) {
     try {
