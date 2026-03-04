@@ -3,7 +3,7 @@ import { Plus, Printer, Zap, Trash2, CheckCircle, Repeat, Calendar, Users, Chevr
 import { Card, Button, Modal, Badge, Select, Spinner, Input } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
-import { getSupabase } from '../utils/supabaseClient';
+import { supabase } from '../utils/supabaseClient';
 import type { AuthUser, Scale, Cult, Member, Sector, CultType } from '../types';
 import { isAdmin, isLeader, isSuperAdmin } from '../utils/permissions';
 import { exportScalePDF } from '../utils/pdf';
@@ -109,9 +109,9 @@ export default function ScalesPage({ user }: Props) {
   useEffect(() => { refetchCultsRef.current = refetchCults; }, [refetchCults]);
 
   useEffect(() => {
-    const sb = getSupabase();
-    if (!sb) return;
-    const channel = sb
+    
+    if (!supabase) return;
+    const channel = supabase
       .channel('scales-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'scales' }, () => {
         if (suppressRealtimeRef.current) return;
@@ -128,7 +128,7 @@ export default function ScalesPage({ user }: Props) {
       .subscribe();
     return () => {
       if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
-      sb.removeChannel(channel);
+      supabase.removeChannel(channel);
     };
   }, []);
 
