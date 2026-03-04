@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import PastoralCabinetSchedules from '../components/PastoralCabinetSchedules';
-import { Plus, Edit, Trash2, CalendarClock, Clock, User, FileText, CheckCircle, XCircle, RefreshCw, Loader2, KeyRound, Shield, ShieldCheck, Calendar } from 'lucide-react';
+import { Plus, Edit, Trash2, CalendarClock, Clock, User, FileText, CheckCircle, XCircle, RefreshCw, Loader2, KeyRound, Shield, ShieldCheck } from 'lucide-react';
 import { Card, Button, Modal, Input, Badge } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
@@ -185,12 +185,6 @@ export default function PastoralPage({ user }: Props) {
           <Calendar size={14} /> Gabinete Pastoral
         </button>
       </div>
-          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === 'history' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
-          <FileText size={14} /> Histórico
-          <span className="text-xs opacity-60">({history.length})</span>
-        </button>
-
-      </div>
 
       {/* Lista */}
       <Card className="overflow-hidden">
@@ -266,11 +260,6 @@ export default function PastoralPage({ user }: Props) {
           </div>
         )}
       </Card>
-
-      {/* ─── Aba: Gabinete Pastoral ─────────────────────────────────────────── */}
-      {tab === 'cabinet' && (
-        <PastoralCabinetSchedules />
-      )}
 
       {/* ─── Aba: Ativar Sistema ─────────────────────────────────────────────────── */}
       {tab === 'activation' && (
