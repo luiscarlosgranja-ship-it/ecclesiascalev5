@@ -1,5 +1,6 @@
 // ─── EcclesiaScale API Server (Supabase Edition) ─────────────────────────────
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { createClient } from '@supabase/supabase-js';
@@ -85,7 +86,15 @@ app.get('/api/public/cult_types', async (req, res) => {
 });
 
 // ─── Auth Routes ──────────────────────────────────────────────────────────────
-app.post('/api/login', async (req, res) => {
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 10,                   // máximo 10 tentativas por IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Muitas tentativas de login. Tente novamente em 15 minutos.' },
+});
+
+app.post('/api/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ message: 'Dados incompletos' });
 
