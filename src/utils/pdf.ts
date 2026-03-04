@@ -53,8 +53,16 @@ async function fetchLogo(): Promise<string | null> {
   try {
     const r = await fetch('/api/settings/logo');
     const d = await r.json();
-    return d?.value || null;
+    return d?.logo || d?.value || null;
   } catch { return null; }
+}
+
+async function fetchChurchName(): Promise<string> {
+  try {
+    const r = await fetch('/api/public/church-name');
+    const d = await r.json();
+    return d?.name || 'EcclesiaScale';
+  } catch { return 'EcclesiaScale'; }
 }
 
 // ─── Cabeçalho global da página ───────────────────────────────────────────────
@@ -64,6 +72,7 @@ function drawMainHeader(
   title: string,
   subtitle: string,
   pw: number,
+  churchName?: string,
 ): number {
   const MX = 10;
   const y0 = 8;
@@ -73,25 +82,31 @@ function drawMainHeader(
   doc.rect(MX, y0, pw - MX * 2, hh, 'F');
 
   // Logo
-  let textX = MX + 4;
   if (logo && !logo.startsWith('data:image/svg')) {
     try {
       const fmt = logo.includes('jpeg') || logo.includes('jpg') ? 'JPEG' : 'PNG';
       doc.addImage(logo, fmt, MX + 2, y0 + 2, 12, 12);
-      textX = MX + 17;
     } catch { /* ignora */ }
+  }
+
+  // Nome da igreja — esquerda (abaixo do logo se houver)
+  if (churchName) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.setTextColor(180, 170, 155);
+    doc.text(churchName, MX + (logo ? 16 : 4), y0 + 5);
   }
 
   // Título centralizado
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(...C_HEADER_FG);
-  doc.text(title, pw / 2, y0 + 7, { align: 'center' });
+  doc.text(title, pw / 2, y0 + 8, { align: 'center' });
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(180, 170, 155);
-  doc.text(subtitle, pw / 2, y0 + 13, { align: 'center' });
+  doc.text(subtitle, pw / 2, y0 + 14, { align: 'center' });
 
   // Data emissão — direita
   const now = new Date();
@@ -99,14 +114,14 @@ function drawMainHeader(
   doc.setTextColor(130, 120, 110);
   doc.text(
     `Emitido ${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`,
-    pw - MX - 2, y0 + 13, { align: 'right' }
+    pw - MX - 2, y0 + 14, { align: 'right' }
   );
 
   return y0 + hh + 4;
 }
 
 // ─── Rodapé ───────────────────────────────────────────────────────────────────
-function drawFooter(doc: jsPDF, page: number, total: number, pw: number, ph: number) {
+function drawFooter(doc: jsPDF, page: number, total: number, pw: number, ph: number, churchName?: string) {
   const y = ph - 6;
   doc.setDrawColor(...C_BORDER);
   doc.setLineWidth(0.2);
@@ -114,7 +129,7 @@ function drawFooter(doc: jsPDF, page: number, total: number, pw: number, ph: num
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(6.5);
   doc.setTextColor(150, 140, 130);
-  doc.text('EcclesiaScale', 10, y + 2);
+  doc.text(churchName || 'EcclesiaScale', 10, y + 2);
   doc.text(`Página ${page} / ${total}`, pw - 10, y + 2, { align: 'right' });
 }
 
@@ -128,7 +143,7 @@ async function exportSingleCultBlocksPDF(
   cult: Cult,
   title: string,
 ) {
-  const logo = await fetchLogo();
+  const [logo, churchName] = await Promise.all([fetchLogo(), fetchChurchName()]);
   const doc = new jsPDF({ orientation: 'portrait', format: 'a4', unit: 'mm' });
   const PW = doc.internal.pageSize.getWidth();
   const PH = doc.internal.pageSize.getHeight();
@@ -136,7 +151,7 @@ async function exportSingleCultBlocksPDF(
   const MY = 8;
 
   const subtitle = `${fmtDate(cult.date)}  ·  ${fmtTime(cult.time)}`;
-  let curY = drawMainHeader(doc, logo, title, subtitle, PW);
+  let curY = drawMainHeader(doc, logo, title, subtitle, PW, churchName);
   curY += 4;
 
   const contentW = PW - MX * 2;
@@ -173,7 +188,7 @@ async function exportSingleCultBlocksPDF(
 
     if (curY + maxRowH > PH - 15 && col === 0) {
       doc.addPage();
-      curY = drawMainHeader(doc, logo, title, subtitle, PW) + 4;
+      curY = drawMainHeader(doc, logo, title, subtitle, PW, churchName) + 4;
       col = 0;
       maxRowH = blockH;
     }
@@ -234,7 +249,7 @@ async function exportSingleCultBlocksPDF(
   const total = (doc as any).internal.getNumberOfPages();
   for (let p = 1; p <= total; p++) {
     doc.setPage(p);
-    drawFooter(doc, p, total, PW, PH);
+    drawFooter(doc, p, total, PW, PH, churchName);
   }
 
   doc.save(`escala_${(cult?.date || 'culto').replace(/-/g, '')}.pdf`);
@@ -249,7 +264,7 @@ async function exportMonthGridPDF(
   allCults: Cult[],
   title: string,
 ) {
-  const logo = await fetchLogo();
+  const [logo, churchName] = await Promise.all([fetchLogo(), fetchChurchName()]);
   const doc = new jsPDF({ orientation: 'landscape', format: 'a4', unit: 'mm' });
   const PW = doc.internal.pageSize.getWidth();
   const PH = doc.internal.pageSize.getHeight();
@@ -262,7 +277,7 @@ async function exportMonthGridPDF(
   const totalVol = Array.from(deptBlocksByCult.values()).reduce((sum, blocks) => sum + blocks.reduce((s, b) => s + b.scales.length, 0), 0);
   const subtitle = `${sorted.length} culto(s)  ·  ${totalVol} voluntário(s) escalado(s)  ·  ${new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}`;
 
-  let headerY = drawMainHeader(doc, logo, title, subtitle, PW);
+  let headerY = drawMainHeader(doc, logo, title, subtitle, PW, churchName);
   let curY = headerY + MY_TOP;
 
   const colW = (PW - MX * 2 - GAP * (COLS - 1)) / COLS;
@@ -289,7 +304,7 @@ async function exportMonthGridPDF(
       }
       if (curY + rowMaxH > PH - 12) {
         doc.addPage();
-        headerY = drawMainHeader(doc, logo, title, subtitle, PW);
+        headerY = drawMainHeader(doc, logo, title, subtitle, PW, churchName);
         curY = headerY + MY_TOP;
       }
     }
@@ -419,7 +434,7 @@ async function exportMonthGridPDF(
   const total = (doc as any).internal.getNumberOfPages();
   for (let p = 1; p <= total; p++) {
     doc.setPage(p);
-    drawFooter(doc, p, total, PW, PH);
+    drawFooter(doc, p, total, PW, PH, churchName);
   }
 
   doc.save(`escalas_${new Date().toISOString().slice(0, 7)}.pdf`);
@@ -450,7 +465,7 @@ export async function exportScalePDF(
   }
 
   // ── Mês inteiro com blocos reais da API ───────────────────────────────────
-  if (allCults && allCults.length > 1 && deptBlocksByCult) {
+  if (allCults && allCults.length >= 1 && deptBlocksByCult) {
     let filteredMap = deptBlocksByCult;
     if (selectedDepartmentIds && selectedDepartmentIds.length > 0) {
       filteredMap = new Map();
@@ -467,14 +482,14 @@ export async function exportScalePDF(
   }
 
   // Fallback (não deve chegar aqui)
-  const logo = await fetchLogo();
+  const [logo, churchName] = await Promise.all([fetchLogo(), fetchChurchName()]);
   const doc = new jsPDF({ orientation: 'portrait', format: 'a4', unit: 'mm' });
   const PW = doc.internal.pageSize.getWidth();
   const MX = 14;
 
   const subtitle = `${scales.length} voluntário(s)`;
 
-  let y = drawMainHeader(doc, logo, title, subtitle, PW);
+  let y = drawMainHeader(doc, logo, title, subtitle, PW, churchName);
 
   const bySetor = new Map<string, Scale[]>();
   for (const s of [...scales].sort((a,b)=>(a.sector_name||'').localeCompare(b.sector_name||''))) {
@@ -513,7 +528,7 @@ export async function exportScalePDF(
   const total = (doc as any).internal.getNumberOfPages();
   for (let p = 1; p <= total; p++) {
     doc.setPage(p);
-    drawFooter(doc, p, total, PW, doc.internal.pageSize.getHeight());
+    drawFooter(doc, p, total, PW, doc.internal.pageSize.getHeight(), churchName);
   }
 
   doc.save(`escala_${(cult?.date || 'culto').replace(/-/g,'')}.pdf`);
@@ -523,14 +538,14 @@ export async function exportScalePDF(
 //  exportMemberScalePDF — painel individual, agrupado por mês
 // ─────────────────────────────────────────────────────────────────────────────
 export async function exportMemberScalePDF(scales: Scale[], memberName: string) {
-  const logo = await fetchLogo();
+  const [logo, churchName] = await Promise.all([fetchLogo(), fetchChurchName()]);
   const doc = new jsPDF({ orientation: 'portrait', format: 'a4', unit: 'mm' });
   const PW = doc.internal.pageSize.getWidth();
   const MX = 14;
 
   const title = 'Minha Escala de Voluntariado';
   const subtitle = `${memberName}  ·  ${scales.length} escala(s)`;
-  let y = drawMainHeader(doc, logo, title, subtitle, PW);
+  let y = drawMainHeader(doc, logo, title, subtitle, PW, churchName);
 
   const byMonth = new Map<string, Scale[]>();
   for (const s of [...scales].sort((a,b)=>(a.cult_date||'').localeCompare(b.cult_date||''))) {
@@ -547,7 +562,7 @@ export async function exportMemberScalePDF(scales: Scale[], memberName: string) 
 
     if (y + 12 > 280) {
       doc.addPage();
-      y = drawMainHeader(doc, logo, title, subtitle, PW);
+      y = drawMainHeader(doc, logo, title, subtitle, PW, churchName);
     }
 
     // Faixa do mês
@@ -584,7 +599,7 @@ export async function exportMemberScalePDF(scales: Scale[], memberName: string) 
   }
 
   // Resumo
-  if (y + 10 > 280) { doc.addPage(); y = drawMainHeader(doc, logo, title, subtitle, PW); }
+  if (y + 10 > 280) { doc.addPage(); y = drawMainHeader(doc, logo, title, subtitle, PW, churchName); }
   doc.setDrawColor(...[210,205,200] as [number,number,number]);
   doc.setLineWidth(0.2);
   doc.line(MX, y, PW - MX, y);
@@ -605,7 +620,7 @@ export async function exportMemberScalePDF(scales: Scale[], memberName: string) 
   const total = (doc as any).internal.getNumberOfPages();
   for (let p = 1; p <= total; p++) {
     doc.setPage(p);
-    drawFooter(doc, p, total, PW, doc.internal.pageSize.getHeight());
+    drawFooter(doc, p, total, PW, doc.internal.pageSize.getHeight(), churchName);
   }
   doc.save(`minha_escala_${memberName.replace(/\s+/g,'_')}.pdf`);
 }
