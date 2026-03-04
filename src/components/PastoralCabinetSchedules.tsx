@@ -122,12 +122,6 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <h2 className="text-lg font-bold text-stone-100">{title}</h2>
-        <Button onClick={() => openNew()} size="sm"><Plus size={16} /> Adicionar Horário</Button>
-      </div>
-
       {error && (
         <div className="bg-red-900/20 border border-red-700/40 rounded-lg p-3 flex items-center gap-3">
           <AlertCircle size={16} className="text-red-400 flex-shrink-0" />
