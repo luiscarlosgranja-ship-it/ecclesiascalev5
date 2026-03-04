@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import PastoralCabinetSchedules from '../components/PastoralCabinetSchedules';
+import PastoralCabinetBooking from '../components/PastoralCabinetBooking';
 import { Plus, Edit, Trash2, CalendarClock, Clock, User, FileText, CheckCircle, XCircle, RefreshCw, Loader2, KeyRound, Shield, ShieldCheck, Calendar } from 'lucide-react';
 import { Card, Button, Modal, Input, Badge } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
 import type { AuthUser, PastoralAppointment } from '../types';
-import { isSuperAdmin, isAdmin } from '../utils/permissions';
+import { isSuperAdmin, isAdmin, isLeader } from '../utils/permissions';
 
 interface Props { user: AuthUser; }
 
@@ -24,7 +25,9 @@ const EMPTY_FORM: Partial<PastoralAppointment> = {
 
 export default function PastoralPage({ user }: Props) {
   const { data: appointments, loading, refetch } = useApi<PastoralAppointment[]>('/pastoral');
-  const [tab, setTab] = useState<Tab>('upcoming');
+  const [tab, setTab] = useState<Tab>(
+    (user.role === 'Membro' || user.role === 'Líder') ? 'cabinet' : 'upcoming'
+  );
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Partial<PastoralAppointment>>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -165,29 +168,35 @@ export default function PastoralPage({ user }: Props) {
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <h1 className="text-xl font-bold text-stone-100">Atendimento Pastoral</h1>
-        <Button onClick={openNew} size="sm"><Plus size={16} /> Novo Agendamento</Button>
+        {(isSuperAdmin(user) || isAdmin(user) || user.role === 'Secretaria') && (
+          <Button onClick={openNew} size="sm"><Plus size={16} /> Novo Agendamento</Button>
+        )}
       </div>
 
       {/* Tabs */}
       <div className="flex border-b border-stone-700">
-        <button onClick={() => setTab('upcoming')}
-          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === 'upcoming' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
-          <CalendarClock size={14} /> Agendamentos
-          <span className="text-xs opacity-60">({upcoming.length})</span>
-        </button>
-        <button onClick={() => setTab('history')}
-          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === 'history' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
-          <FileText size={14} /> Histórico
-          <span className="text-xs opacity-60">({history.length})</span>
-        </button>
+        {(isSuperAdmin(user) || isAdmin(user) || user.role === 'Secretaria') && (
+          <>
+            <button onClick={() => setTab('upcoming')}
+              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === 'upcoming' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
+              <CalendarClock size={14} /> Agendamentos
+              <span className="text-xs opacity-60">({upcoming.length})</span>
+            </button>
+            <button onClick={() => setTab('history')}
+              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === 'history' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
+              <FileText size={14} /> Histórico
+              <span className="text-xs opacity-60">({history.length})</span>
+            </button>
+          </>
+        )}
         <button onClick={() => setTab('cabinet')}
           className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === 'cabinet' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
           <Calendar size={14} /> Gabinete Pastoral
         </button>
       </div>
 
-      {/* Lista */}
-      <Card className="overflow-hidden">
+      {/* Lista - apenas para admins/secretaria */}
+      {(isSuperAdmin(user) || isAdmin(user) || user.role === 'Secretaria') && <Card className="overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="animate-spin text-amber-500" size={24} />
@@ -260,11 +269,13 @@ export default function PastoralPage({ user }: Props) {
             )}
           </div>
         )}
-      </Card>
+      </Card>}
 
       {/* ─── Aba: Gabinete Pastoral ─────────────────────────────────────────── */}
       {tab === 'cabinet' && (
-        <PastoralCabinetSchedules />
+        (isSuperAdmin(user) || isAdmin(user) || user.role === 'Secretaria')
+          ? <PastoralCabinetSchedules />
+          : <PastoralCabinetBooking user={user} />
       )}
 
       {/* ─── Aba: Ativar Sistema ─────────────────────────────────────────────────── */}
