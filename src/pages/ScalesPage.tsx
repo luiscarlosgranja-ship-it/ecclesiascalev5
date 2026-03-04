@@ -220,51 +220,32 @@ export default function ScalesPage({ user }: Props) {
   }
 
   async function removeScale(id: number) {
-    if (!confirm('Remover desta escala? O membro ficará disponível novamente.')) return;
-    const remaining = (scales || []).filter(s => s.id !== id);
-    const cultToDelete = remaining.length === 0 ? selectedCult : null;
-    if (cultToDelete) {
-      suppressRealtimeRef.current = true;
-      setSelectedCult(null);
-      setDeptBlocks([]);
-    }
+    if (!confirm('Remover este voluntário da escala?')) return;
     try {
       await api.delete(`/scales/${id}`);
-      if (cultToDelete) {
-        await api.delete(`/cults/${cultToDelete}`);
-        await refetchCults();
-      } else {
-        refetchScales();
-        fetchDeptBlocks();
-      }
+      refetchScales();
+      fetchDeptBlocks();
     } catch (e) {
-      if (cultToDelete) setSelectedCult(cultToDelete);
-      alert(e instanceof Error ? e.message : 'Erro ao remover membro');
-    } finally {
-      if (cultToDelete) setTimeout(() => { suppressRealtimeRef.current = false; }, 1500);
+      alert(e instanceof Error ? e.message : 'Erro ao remover voluntário');
     }
   }
 
   async function deleteEntireScale() {
     if (!selectedCult) return;
     setDeletingScale(true);
-    const cultToDelete = selectedCult;
     try {
-      const freshScales = await api.get<{ id: number }[]>(`/scales?cult_id=${cultToDelete}`);
-      suppressRealtimeRef.current = true;
+      const freshScales = await api.get<{ id: number }[]>(`/scales?cult_id=${selectedCult}`);
       if (freshScales && freshScales.length > 0) {
         await Promise.all(freshScales.map(s => api.delete(`/scales/${s.id}`)));
       }
-      await api.delete(`/cults/${cultToDelete}`);
       setDeleteScaleModal(false);
-      setSelectedCult(null);
       setDeptBlocks([]);
-      await refetchCults();
+      refetchScales();
+      fetchDeptBlocks();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Erro ao remover escala');
     } finally {
       setDeletingScale(false);
-      setTimeout(() => { suppressRealtimeRef.current = false; }, 1500);
     }
   }
 
@@ -1014,7 +995,7 @@ export default function ScalesPage({ user }: Props) {
             <div>
               <p className="text-red-300 text-sm font-semibold">Ação irreversível</p>
               <p className="text-red-400/80 text-xs mt-1">
-                Todos os voluntários serão removidos desta escala e o culto será desfeito. Esta ação não pode ser desfeita.
+                Todos os voluntários serão removidos desta escala. O culto permanece agendado. Esta ação não pode ser desfeita.
               </p>
             </div>
           </div>

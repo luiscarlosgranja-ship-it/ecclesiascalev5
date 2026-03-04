@@ -38,6 +38,11 @@ export default function CultsPage({ user }: Props) {
   const [error, setError] = useState('');
   const [result, setResult] = useState<GenerateResult | null>(null);
 
+  // Remoção em lote de cultos
+  const [deleteCultsModal, setDeleteCultsModal] = useState(false);
+  const [cultsToDelete, setCultsToDelete] = useState<Set<number>>(new Set());
+  const [deletingCults, setDeletingCults] = useState(false);
+
   const { data: cults, refetch } = useApi<Cult[]>('/cults');
   const { data: cultTypes } = useApi<CultType[]>('/cult_types');
   const { data: sectors } = useApi<Sector[]>('/sectors?is_active=1');
@@ -55,6 +60,36 @@ export default function CultsPage({ user }: Props) {
 
   function getCultName(c: Cult): string {
     return c.name || c.type_name || '(Sem nome)';
+  }
+
+  function toggleCultToDelete(id: number) {
+    setCultsToDelete(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllCultsToDelete() {
+    const list = activeTab === 'active' ? active : history;
+    if (cultsToDelete.size === list.length) {
+      setCultsToDelete(new Set());
+    } else {
+      setCultsToDelete(new Set(list.map(c => c.id)));
+    }
+  }
+
+  async function deleteSelectedCults() {
+    if (cultsToDelete.size === 0) return;
+    setDeletingCults(true);
+    try {
+      await Promise.all(Array.from(cultsToDelete).map(id => api.delete(`/cults/${id}`)));
+      setCultsToDelete(new Set());
+      setDeleteCultsModal(false);
+      refetch();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao remover cultos');
+    } finally { setDeletingCults(false); }
   }
 
   function openGenerateModal() {
@@ -141,6 +176,9 @@ export default function CultsPage({ user }: Props) {
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" onClick={openGenerateModal}>
             <Calendar size={16} /> Gerar Mês
+          </Button>
+          <Button variant="danger" size="sm" onClick={() => { setCultsToDelete(new Set()); setDeleteCultsModal(true); }}>
+            <Trash2 size={16} /> Remover Cultos
           </Button>
           <Button size="sm" onClick={() => { setEditModal({ status: 'Agendado' }); setError(''); }}>
             <Plus size={16} /> Novo Culto
@@ -413,6 +451,59 @@ export default function CultsPage({ user }: Props) {
           </div>
         )}
       </Modal>
+      {/* ─── Modal: Remover Cultos ────────────────────────────────────────────── */}
+      <Modal open={deleteCultsModal} onClose={() => setDeleteCultsModal(false)} title="Remover Cultos" size="sm">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-stone-300 text-sm">
+              Selecione os cultos a remover ({activeTab === 'active' ? 'Ativos' : 'Histórico'}):
+            </p>
+            <button onClick={toggleAllCultsToDelete} className="text-amber-400 text-xs hover:text-amber-300 transition-colors">
+              {cultsToDelete.size === (activeTab === 'active' ? active : history).length ? 'Desmarcar todos' : 'Selecionar todos'}
+            </button>
+          </div>
+
+          <div className="max-h-64 overflow-y-auto space-y-1 pr-1">
+            {(activeTab === 'active' ? active : history).length === 0 ? (
+              <p className="text-stone-500 text-sm text-center py-4">Nenhum culto nesta lista.</p>
+            ) : (
+              (activeTab === 'active' ? active : history).map(c => (
+                <label key={c.id} className="flex items-center gap-3 p-2 rounded-lg border border-stone-700 hover:border-red-600/50 cursor-pointer transition-all">
+                  <input
+                    type="checkbox"
+                    checked={cultsToDelete.has(c.id)}
+                    onChange={() => toggleCultToDelete(c.id)}
+                    className="accent-red-500 w-4 h-4"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-stone-200 text-sm font-medium truncate">{getCultName(c)}</p>
+                    <p className="text-stone-500 text-xs">{c.date} às {c.time}</p>
+                  </div>
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                    c.status === 'Agendado' ? 'bg-blue-900/40 text-blue-400' :
+                    c.status === 'Realizado' ? 'bg-stone-700 text-stone-400' :
+                    'bg-red-900/40 text-red-400'
+                  }`}>{c.status}</span>
+                </label>
+              ))
+            )}
+          </div>
+
+          {cultsToDelete.size > 0 && (
+            <div className="bg-red-900/20 border border-red-700/30 rounded-lg px-3 py-2 text-xs text-red-400">
+              ⚠️ {cultsToDelete.size} culto(s) serão removidos permanentemente.
+            </div>
+          )}
+
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setDeleteCultsModal(false)}>Cancelar</Button>
+            <Button variant="danger" onClick={deleteSelectedCults} loading={deletingCults} disabled={cultsToDelete.size === 0}>
+              <Trash2 size={15} /> Remover {cultsToDelete.size > 0 ? `(${cultsToDelete.size})` : ''}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
     </div>
   );
 }
