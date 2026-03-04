@@ -76,6 +76,14 @@ export default function PastoralPage({ user }: Props) {
     a.status === 'Realizado' || a.status === 'Cancelado'
   ).sort((a, b) => b.date.localeCompare(a.date));
 
+  // Agrupa por source para exibição
+  function sourceLabel(a: any) {
+    return a.source === 'gabinete' ? 'Gabinete Pastoral' : 'Secretaria';
+  }
+  function sourceBadgeColor(a: any): 'blue' | 'gray' {
+    return a.source === 'gabinete' ? 'blue' : 'gray';
+  }
+
   const list = tab === 'upcoming' ? upcoming : history;
 
   function openNew() {
@@ -223,11 +231,18 @@ export default function PastoralPage({ user }: Props) {
                         <Badge color={STATUS_COLOR[a.status] || 'gray'}>{a.status}</Badge>
                       </div>
                       {a.notes && <p className="text-xs text-stone-500 mt-2">{a.notes}</p>}
-                      {a.created_by_name && (
-                        <p className="text-xs text-amber-600/70 mt-1 flex items-center gap-1">
-                          <User size={10} /> Agendado por: {a.created_by_name}
-                        </p>
-                      )}
+                      <div className="flex items-center gap-2 mt-2 flex-wrap">
+                        {(a as any).source === 'gabinete' && (
+                          <span className="text-xs bg-blue-900/30 border border-blue-700/40 text-blue-300 px-2 py-0.5 rounded-full">
+                            Via Gabinete Pastoral
+                          </span>
+                        )}
+                        {(a as any).created_by_name && (
+                          <span className="text-xs text-amber-500/80 flex items-center gap-1">
+                            <User size={10} /> Agendado por: {(a as any).created_by_name}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     {tab === 'upcoming' && (
                       <div className="flex items-center gap-2">
