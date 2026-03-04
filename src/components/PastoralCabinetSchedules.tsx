@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { Calendar } from 'lucide-react';
 import { Plus, Trash2, Calendar, Clock, Loader2, AlertCircle } from 'lucide-react';
 import { Card, Button, Modal, Input, Badge } from '../components/ui';
 import api from '../utils/api';
