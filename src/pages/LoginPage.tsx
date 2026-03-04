@@ -17,6 +17,10 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [tempToken, setTempToken] = useState('');
+  const [mustChangePw, setMustChangePw] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
+  const [pendingUser, setPendingUser] = useState<any>(null);
   const [departments, setDepartments] = useState<{ id: number; name: string }[]>([]);
   const [cultTypes, setCultTypes] = useState<{ id: number; name: string }[]>([]);
   const [availability, setAvailability] = useState<Record<number, boolean>>({});
@@ -48,6 +52,54 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       .then(data => { if (data.logo) setLogoUrl(data.logo); })
       .catch(() => {});
   }, []);
+
+  async function handleChangePassword() {
+    if (!newPassword || newPassword.length < 8) { setError('Senha deve ter mínimo 8 caracteres'); return; }
+    if (newPassword !== newPasswordConfirm) { setError('As senhas não coincidem'); return; }
+    setError(''); setLoading(true);
+    try {
+      await api.post('/security/change-password', { member_id: pendingUser.member_id, password: newPassword });
+      onLogin(pendingUser);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao alterar senha');
+    } finally { setLoading(false); }
+  }
+
+  // Tela de troca obrigatória de senha
+  if (mustChangePw) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#0c0a09', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
+        <div style={{ width: '100%', maxWidth: '400px', background: '#1c1917', border: '1px solid #44403c', borderRadius: '16px', padding: '32px' }}>
+          <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+            <div style={{ width: '48px', height: '48px', background: '#f59e0b22', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+              🔑
+            </div>
+            <h2 style={{ color: '#e7e5e4', fontSize: '18px', fontWeight: 700, margin: '0 0 8px' }}>Troca de Senha Obrigatória</h2>
+            <p style={{ color: '#a8a29e', fontSize: '13px', margin: 0 }}>Por segurança, defina uma nova senha para continuar.</p>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', color: '#a8a29e', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>Nova Senha *</label>
+              <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
+                placeholder="Mínimo 8 caracteres"
+                style={{ width: '100%', background: '#292524', border: '1px solid #44403c', borderRadius: '8px', padding: '10px 12px', color: '#e7e5e4', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', color: '#a8a29e', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>Confirmar Senha *</label>
+              <input type="password" value={newPasswordConfirm} onChange={e => setNewPasswordConfirm(e.target.value)}
+                placeholder="Repita a nova senha"
+                style={{ width: '100%', background: '#292524', border: '1px solid #44403c', borderRadius: '8px', padding: '10px 12px', color: '#e7e5e4', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }} />
+            </div>
+            {error && <p style={{ color: '#f87171', fontSize: '13px', margin: 0 }}>{error}</p>}
+            <button onClick={handleChangePassword} disabled={loading}
+              style={{ background: '#f59e0b', color: '#1c1917', border: 'none', borderRadius: '8px', padding: '12px', fontWeight: 700, fontSize: '14px', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1, marginTop: '4px' }}>
+              {loading ? 'Salvando...' : 'Definir Nova Senha e Entrar'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 

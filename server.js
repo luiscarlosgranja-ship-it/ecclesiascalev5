@@ -111,7 +111,7 @@ app.post('/api/login', loginLimiter, async (req, res) => {
   }
 
   const token = jwt.sign({ id: user.id, email: user.email, role: user.role, member_id: user.member_id }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ id: user.id, email: user.email, role: user.role, member_id: user.member_id, name: memberName, token });
+  res.json({ id: user.id, email: user.email, role: user.role, member_id: user.member_id, name: memberName, token, must_change_password: !!user.must_change_password });
 });
 
 app.post('/api/register', async (req, res) => {
@@ -249,8 +249,42 @@ app.post('/api/members', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asy
   if (email) {
     const { data: existingUser } = await db.from('users').select('id').eq('email', email).maybeSingle();
     if (!existingUser) {
-      const hash = bcrypt.hashSync('EcclesiaScale@' + member.id, 10);
-      await db.from('users').insert({ email, password: hash, role: role || 'Membro', member_id: member.id });
+      // Gera senha aleatória segura (12 chars: letras + números + símbolo)
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#$!';
+      const tempPassword = Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+      const hash = bcrypt.hashSync(tempPassword, 10);
+      await db.from('users').insert({ email, password: hash, role: role || 'Membro', member_id: member.id, must_change_password: true });
+
+      // Tenta enviar senha por e-mail
+      try {
+        const transporter = await getTransporter();
+        const { data: smtpCfg } = await db.from('settings').select('key,value').in('key', ['smtp_user']);
+        const fromEmail = smtpCfg?.[0]?.value || process.env.SMTP_USER || '';
+        const { data: churchRow } = await db.from('settings').select('value').eq('key', 'church_name').single();
+        const churchName = churchRow?.value || 'EcclesiaScale';
+        await transporter.sendMail({
+          from: `${churchName} <${fromEmail}>`,
+          to: email,
+          subject: `Bem-vindo(a) ao ${churchName} — Suas credenciais de acesso`,
+          html: `
+            <div style="font-family:sans-serif;max-width:480px;margin:auto;background:#1c1917;color:#e7e5e4;padding:32px;border-radius:12px">
+              <h2 style="color:#f59e0b;margin-bottom:8px">Bem-vindo(a), ${name}!</h2>
+              <p style="color:#a8a29e">Sua conta foi criada no sistema <strong style="color:#e7e5e4">${churchName}</strong>.</p>
+              <div style="background:#292524;border-radius:8px;padding:20px;margin:24px 0;border:1px solid #44403c">
+                <p style="margin:0 0 8px;color:#a8a29e;font-size:13px">LOGIN:</p>
+                <p style="margin:0 0 16px;color:#e7e5e4;font-weight:bold">${email}</p>
+                <p style="margin:0 0 8px;color:#a8a29e;font-size:13px">SENHA TEMPORÁRIA:</p>
+                <p style="margin:0;color:#f59e0b;font-size:20px;font-weight:bold;letter-spacing:2px">${tempPassword}</p>
+              </div>
+              <p style="color:#f97316;font-size:13px">⚠️ Você será solicitado a criar uma nova senha no primeiro acesso.</p>
+              <p style="color:#78716c;font-size:12px;margin-top:24px">Se não esperava este e-mail, ignore-o com segurança.</p>
+            </div>
+          `,
+        });
+      } catch (emailErr) {
+        // E-mail falhou — registra no log mas não impede o cadastro
+        console.warn('⚠️ Não foi possível enviar e-mail de boas-vindas:', emailErr.message);
+      }
     }
   }
 
@@ -922,6 +956,17 @@ app.post('/api/activation-codes/activate', auth, async (req, res) => {
   await db.from('settings').upsert({ key: 'activated', value: '1' }, { onConflict: 'key' });
 
   res.json({ message: 'Sistema ativado com sucesso!' });
+});
+
+// ─── Change Password (first login) ───────────────────────────────────────────
+app.post('/api/security/change-password', auth, async (req, res) => {
+  const { password } = req.body;
+  if (!password || password.length < 8)
+    return res.status(400).json({ message: 'Senha deve ter mínimo 8 caracteres' });
+
+  const hash = bcrypt.hashSync(password, 10);
+  await db.from('users').update({ password: hash, must_change_password: false }).eq('id', req.user.id);
+  res.json({ message: 'Senha alterada com sucesso' });
 });
 
 // ─── Church Settings ──────────────────────────────────────────────────────────
