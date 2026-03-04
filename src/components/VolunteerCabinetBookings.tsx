@@ -30,7 +30,7 @@ export default function VolunteerCabinetBookings({ volunteerId, onRefresh }: Pro
       setLoading(true);
       setError('');
       const response = await api.get<PastoralCabinetBooking[]>(
-        `/api/pastoral-cabinet/bookings/volunteer/${volunteerId}`
+        `/pastoral-cabinet/bookings/volunteer/${volunteerId}`
       );
       if (response) {
         setBookings(response);

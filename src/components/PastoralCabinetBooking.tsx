@@ -51,7 +51,7 @@ export default function PastoralCabinetBooking({ volunteerId, volunteerName, onB
     try {
       setLoading(true);
       const response = await api.get<MonthAvailability[]>(
-        `/api/pastoral-cabinet/availability/${monthStr}`
+        `/pastoral-cabinet/availability/${monthStr}`
       );
       if (response) {
         setMonthDays(response);
@@ -69,7 +69,7 @@ export default function PastoralCabinetBooking({ volunteerId, volunteerName, onB
       setLoading(true);
       setAvailableSlots([]);
       const response = await api.get<AvailableTimeSlot[]>(
-        `/api/pastoral-cabinet/available-slots/${date}`
+        `/pastoral-cabinet/available-slots/${date}`
       );
       if (response) {
         setAvailableSlots(response);
@@ -102,7 +102,7 @@ export default function PastoralCabinetBooking({ volunteerId, volunteerName, onB
         notes: notes || undefined,
       };
 
-      await api.post('/api/pastoral-cabinet/bookings', booking);
+      await api.post('/pastoral-cabinet/bookings', booking);
       
       setSuccess(true);
       setTimeout(() => {

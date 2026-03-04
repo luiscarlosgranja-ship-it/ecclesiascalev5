@@ -34,7 +34,7 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
       setLoading(true);
       setError('');
       const response = await api.get<PastoralCabinetSchedule[]>(
-        '/api/pastoral-cabinet/schedules'
+        '/pastoral-cabinet/schedules'
       );
       if (response) {
         setSchedules(response.sort((a, b) =>
@@ -69,7 +69,7 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
     setError('');
 
     try {
-      await api.post('/api/pastoral-cabinet/schedules', {
+      await api.post('/pastoral-cabinet/schedules', {
         date: formData.date,
         time: formData.time,
         duration_minutes: formData.duration_minutes,
@@ -92,7 +92,7 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
   async function confirmDelete() {
     if (!deleteTarget) return;
     try {
-      await api.delete(`/api/pastoral-cabinet/schedules/${deleteTarget.id}`);
+      await api.delete(`/pastoral-cabinet/schedules/${deleteTarget.id}`);
       setDeleteModal(false);
       setDeleteTarget(null);
       loadSchedules();
