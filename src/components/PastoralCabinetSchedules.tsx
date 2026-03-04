@@ -96,7 +96,15 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
     availByDate[s.date].push(s);
   });
 
+  // Map date -> occupied schedules
+  const occupiedByDate: Record<string, PastoralCabinetSchedule[]> = {};
+  occupied.forEach(s => {
+    if (!occupiedByDate[s.date]) occupiedByDate[s.date] = [];
+    occupiedByDate[s.date].push(s);
+  });
+
   const selectedSlots = selectedDay ? (availByDate[selectedDay] || []) : [];
+  const selectedOccupied = selectedDay ? (occupiedByDate[selectedDay] || []) : [];
 
   const cells: (number | null)[] = [
     ...Array(firstDay).fill(null),
@@ -169,30 +177,60 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
                 if (!day) return <div key={`empty-${i}`} />;
                 const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                 const slots = availByDate[dateStr] || [];
+                const occ = occupiedByDate[dateStr] || [];
                 const hasSlots = slots.length > 0;
+                const hasOcc = occ.length > 0;
+                const hasAny = hasSlots || hasOcc;
                 const isToday = dateStr === todayStr;
                 const isSelected = selectedDay === dateStr;
                 const isPast = dateStr < todayStr;
 
+                // Build tooltip
+                const tooltipLines: string[] = [];
+                if (slots.length) tooltipLines.push(`✅ ${slots.length} disponível(is): ${slots.map(s => s.time).join(', ')}`);
+                if (occ.length) tooltipLines.push(`🔴 ${occ.length} ocupado(s): ${occ.map(s => `${s.time}${(s as any).booked_by_name ? ' - ' + (s as any).booked_by_name : ''}`).join(', ')}`);
+                const tooltipText = tooltipLines.join(' | ') || 'Clique para adicionar horário';
+
                 return (
                   <button key={dateStr}
-                    onClick={() => hasSlots ? setSelectedDay(isSelected ? null : dateStr) : openNew(dateStr)}
+                    onClick={() => hasAny ? setSelectedDay(isSelected ? null : dateStr) : openNew(dateStr)}
                     className={`
-                      relative aspect-square rounded-xl flex flex-col items-center justify-center text-sm font-medium transition-all
+                      relative aspect-square rounded-xl flex flex-col items-center justify-center text-sm font-medium transition-all group
                       ${isPast ? 'opacity-30 cursor-default' : 'cursor-pointer'}
                       ${isSelected ? 'bg-amber-500 text-stone-900 shadow-lg shadow-amber-500/30' :
                         isToday ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50' :
+                        hasSlots && hasOcc ? 'bg-gradient-to-br from-emerald-500/15 to-red-500/15 border border-stone-600/50 hover:border-stone-500 text-stone-200' :
                         hasSlots ? 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 border border-emerald-500/30' :
+                        hasOcc ? 'bg-red-500/10 text-red-300 hover:bg-red-500/20 border border-red-500/20' :
                         'text-stone-400 hover:bg-stone-700/50'}
                     `}
                     disabled={isPast}
-                    title={hasSlots ? `${slots.length} horário(s) disponível(is)` : 'Clique para adicionar horário'}
+                    title={tooltipText}
                   >
                     <span>{day}</span>
-                    {hasSlots && !isSelected && (
-                      <span className={`text-xs font-bold mt-0.5 ${isToday ? 'text-amber-400' : 'text-emerald-400'}`}>
-                        {slots.length}
-                      </span>
+                    {!isSelected && (hasSlots || hasOcc) && (
+                      <div className="flex gap-0.5 mt-0.5">
+                        {hasSlots && <span className="text-xs font-bold text-emerald-400">{slots.length}</span>}
+                        {hasSlots && hasOcc && <span className="text-xs text-stone-500">/</span>}
+                        {hasOcc && <span className="text-xs font-bold text-red-400">{occ.length}</span>}
+                      </div>
+                    )}
+                    {/* Hover tooltip */}
+                    {!isPast && hasAny && (
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 hidden group-hover:block w-52 bg-stone-900 border border-stone-600 rounded-lg p-2.5 shadow-xl text-left pointer-events-none">
+                        {slots.map(s => (
+                          <div key={s.id} className="flex items-center gap-1.5 text-xs text-emerald-300 mb-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+                            <span>{s.time} • {s.duration_minutes}min • Livre</span>
+                          </div>
+                        ))}
+                        {occ.map(s => (
+                          <div key={s.id} className="flex items-start gap-1.5 text-xs text-red-300 mb-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0 mt-0.5" />
+                            <span>{s.time} • {(s as any).booked_by_name || 'Ocupado'}</span>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </button>
                 );
@@ -200,15 +238,15 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
             </div>
 
             {/* Legend */}
-            <div className="flex items-center gap-4 mt-4 pt-3 border-t border-stone-700">
+            <div className="flex items-center gap-3 mt-4 pt-3 border-t border-stone-700 flex-wrap">
               <span className="flex items-center gap-1.5 text-xs text-stone-500">
-                <span className="w-3 h-3 rounded bg-emerald-500/20 border border-emerald-500/40 inline-block" /> Com horários
+                <span className="w-3 h-3 rounded bg-emerald-500/20 border border-emerald-500/40 inline-block" /> Disponível
+              </span>
+              <span className="flex items-center gap-1.5 text-xs text-stone-500">
+                <span className="w-3 h-3 rounded bg-red-500/15 border border-red-500/30 inline-block" /> Ocupado
               </span>
               <span className="flex items-center gap-1.5 text-xs text-stone-500">
                 <span className="w-3 h-3 rounded bg-amber-500/20 border border-amber-500/50 inline-block" /> Hoje
-              </span>
-              <span className="flex items-center gap-1.5 text-xs text-stone-500">
-                <span className="w-3 h-3 rounded bg-stone-700 inline-block" /> Clique para adicionar
               </span>
             </div>
           </Card>
@@ -226,11 +264,12 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
                 </div>
                 <div className="space-y-2">
                   {selectedSlots.map(slot => (
-                    <div key={slot.id} className="flex items-center justify-between p-2.5 bg-stone-800/60 rounded-lg border border-stone-700/50">
+                    <div key={slot.id} className="flex items-center justify-between p-2.5 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
                       <div>
                         <div className="flex items-center gap-1.5">
-                          <Clock size={12} className="text-amber-400" />
+                          <Clock size={12} className="text-emerald-400" />
                           <span className="text-stone-200 text-sm font-medium">{slot.time}</span>
+                          <Badge color="green">Livre</Badge>
                         </div>
                         <span className="text-xs text-stone-500 mt-0.5 block">{slot.duration_minutes} min</span>
                       </div>
@@ -240,6 +279,24 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
                       </button>
                     </div>
                   ))}
+                  {selectedOccupied.map(slot => (
+                    <div key={slot.id} className="flex items-center justify-between p-2.5 bg-red-500/10 rounded-lg border border-red-500/20">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <Clock size={12} className="text-red-400" />
+                          <span className="text-stone-200 text-sm font-medium">{slot.time}</span>
+                          <Badge color="red">Ocupado</Badge>
+                        </div>
+                        <span className="text-xs text-stone-500 mt-0.5 block">{slot.duration_minutes} min</span>
+                        {(slot as any).booked_by_name && (
+                          <span className="text-xs text-amber-400/80 mt-0.5 block">👤 {(slot as any).booked_by_name}</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {selectedSlots.length === 0 && selectedOccupied.length === 0 && (
+                    <p className="text-stone-500 text-xs text-center py-4">Nenhum horário neste dia</p>
+                  )}
                 </div>
               </>
             ) : (
