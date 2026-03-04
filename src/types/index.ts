@@ -142,3 +142,40 @@ export interface PastoralAppointment {
   created_by_name?: string;
   created_at: string;
 }
+
+// ─── Agendamento de Gabinete Pastoral ──────────────────────────────────────
+
+export interface PastoralCabinetSchedule {
+  id: number;
+  date: string;
+  time: string;
+  duration_minutes: number; // Duração do atendimento (ex: 30, 60)
+  is_available: boolean;
+  volunteer_id?: number;
+  volunteer_name?: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PastoralCabinetBooking {
+  id: number;
+  volunteer_id: number;
+  volunteer_name?: string;
+  schedule_id: number;
+  date: string;
+  time: string;
+  duration_minutes: number;
+  status: 'Agendado' | 'Confirmado' | 'Cancelado' | 'Realizado';
+  notes?: string;
+  created_at: string;
+  created_by?: number;
+  updated_at: string;
+}
+
+export interface AvailableTimeSlot {
+  date: string;
+  time: string;
+  duration_minutes: number;
+  schedule_id: number;
+}
