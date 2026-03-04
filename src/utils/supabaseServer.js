@@ -7,12 +7,6 @@ if (!supabaseUrl || !supabaseKey) {
   throw new Error('SUPABASE_URL e SUPABASE_SERVICE_KEY devem estar configurados no .env');
 }
 
-const _supabase = createClient(supabaseUrl, supabaseKey);
+export const supabase = createClient(supabaseUrl, supabaseKey);
 
-export const supabase = _supabase;
-
-export function getSupabase() {
-  return _supabase;
-}
-
-export default _supabase;
+export default supabase;

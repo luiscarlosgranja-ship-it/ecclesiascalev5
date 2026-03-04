@@ -1,0 +1,13 @@
+
+> ecclesiascale@5.0.0 build
+> vite build type erro.txt
+
+[36mvite v5.4.21 [32mbuilding for production...[36m[39m
+[32m✓[39m 0 modules transformed.
+[31mx[39m Build failed in 10ms
+[31merror during build:
+[31mCould not resolve entry module "type/index.html".[31m
+    at getRollupError (file:///D:/Projeto%20ScaleChurch/Projetos%20de%20Aplicativo/Projeto%20ScaleChurch%20V5/Ecclesiascale%20online/node_modules/rollup/dist/es/shared/parseAst.js:402:41)
+    at error (file:///D:/Projeto%20ScaleChurch/Projetos%20de%20Aplicativo/Projeto%20ScaleChurch%20V5/Ecclesiascale%20online/node_modules/rollup/dist/es/shared/parseAst.js:398:42)
+    at ModuleLoader.loadEntryModule (file:///D:/Projeto%20ScaleChurch/Projetos%20de%20Aplicativo/Projeto%20ScaleChurch%20V5/Ecclesiascale%20online/node_modules/rollup/dist/es/shared/node-entry.js:21731:20)
+    at async Promise.all (index 0)[39m
