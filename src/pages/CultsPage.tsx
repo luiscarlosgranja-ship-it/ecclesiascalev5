@@ -12,9 +12,6 @@ interface Props { user: AuthUser; }
 
 interface GenerateResult {
   cultsCreated: number;
-  scalesCreated: number;
-  cultNames: string[];
-  errors: string[];
 }
 
 const OPTIONAL_SCALE_SECTORS = [
@@ -117,16 +114,11 @@ export default function CultsPage({ user }: Props) {
         { month: format(selectedMonth, 'yyyy-MM'), cult_type_ids: selectedTypes }
       );
 
-      // A API retorna apenas { message: "X culto(s) criado(s)" } — extrai o número do texto
-      const createdCount = cultRes?.created
-        ?? (cultRes?.message ? parseInt(cultRes.message) || 0 : 0);
+      // A API retorna { message: "X culto(s) criado(s)" } — extrai o número do texto
+      const msgMatch = cultRes?.message ? cultRes.message.match(/\d+/) : null;
+      const createdCount = cultRes?.created ?? (msgMatch ? parseInt(msgMatch[0]) : 0);
 
-      setResult({
-        cultsCreated: createdCount,
-        scalesCreated: 0,
-        cultNames: [],
-        errors: [],
-      });
+      setResult({ cultsCreated: createdCount });
 
       refetch();
     } catch (e) {
