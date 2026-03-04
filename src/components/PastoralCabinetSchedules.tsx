@@ -1,31 +1,29 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Clock, Loader2, AlertCircle, CheckCircle, XCircle, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { Plus, Trash2, Clock, Loader2, AlertCircle, ChevronLeft, ChevronRight, Calendar, CheckCircle, XCircle, CalendarClock } from 'lucide-react';
 import { Card, Button, Modal, Badge } from '../components/ui';
 import api from '../utils/api';
 import type { PastoralCabinetSchedule } from '../types';
 
 interface Props { title?: string; }
 const DURATION_OPTIONS = [15, 30, 45, 60, 90, 120];
-type Tab = 'calendar' | 'occupied' | 'history';
-
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
 export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibilidade de Gabinete' }: Props) {
   const [schedules, setSchedules] = useState<PastoralCabinetSchedule[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>('calendar');
+  const [error, setError] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<PastoralCabinetSchedule | null>(null);
   const [deleteModal, setDeleteModal] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [filter, setFilter] = useState<'all' | 'available' | 'occupied'>('all');
 
   const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
-
   const [formData, setFormData] = useState({ date: '', time: '', duration_minutes: 60 });
 
   useEffect(() => { loadSchedules(); }, []);
@@ -41,7 +39,7 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
   }
 
   function openNew(date?: string) {
-    setFormData({ date: date || today.toISOString().slice(0, 10), time: '09:00', duration_minutes: 60 });
+    setFormData({ date: date || todayStr, time: '09:00', duration_minutes: 60 });
     setError(''); setModalOpen(true);
   }
 
@@ -66,7 +64,7 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
   function formatDate(d: string) {
     const [y, m, day] = d.split('-');
     return new Date(parseInt(y), parseInt(m) - 1, parseInt(day))
-      .toLocaleDateString('pt-BR', { weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit' });
+      .toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
   }
 
   function prevMonth() {
@@ -80,156 +78,136 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
     setSelectedDay(null);
   }
 
-  // Build calendar grid
+  const future = schedules.filter(s => s.date >= todayStr);
+  const available = future.filter(s => s.is_available);
+  const occupied  = future.filter(s => !s.is_available);
+  const thisWeek  = future.filter(s => {
+    const d = new Date(s.date + 'T00:00:00');
+    const start = new Date(today); start.setDate(today.getDate() - today.getDay());
+    const end = new Date(start); end.setDate(start.getDate() + 6);
+    return d >= start && d <= end;
+  });
+
+  // Maps
+  const availByDate: Record<string, PastoralCabinetSchedule[]> = {};
+  const occByDate: Record<string, PastoralCabinetSchedule[]> = {};
+  available.forEach(s => { availByDate[s.date] = [...(availByDate[s.date]||[]), s]; });
+  occupied.forEach(s => { occByDate[s.date] = [...(occByDate[s.date]||[]), s]; });
+
+  // Calendar grid
   const firstDay = new Date(viewYear, viewMonth, 1).getDay();
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
-  const todayStr = today.toISOString().slice(0, 10);
-
-  const available = schedules.filter(s => s.is_available);
-  const occupied  = schedules.filter(s => !s.is_available && s.date >= todayStr);
-  const history   = schedules.filter(s => s.date < todayStr);
-
-  // Map date -> available schedules
-  const availByDate: Record<string, PastoralCabinetSchedule[]> = {};
-  available.forEach(s => {
-    if (!availByDate[s.date]) availByDate[s.date] = [];
-    availByDate[s.date].push(s);
-  });
-
-  // Map date -> occupied schedules
-  const occupiedByDate: Record<string, PastoralCabinetSchedule[]> = {};
-  occupied.forEach(s => {
-    if (!occupiedByDate[s.date]) occupiedByDate[s.date] = [];
-    occupiedByDate[s.date].push(s);
-  });
-
-  const selectedSlots = selectedDay ? (availByDate[selectedDay] || []) : [];
-  const selectedOccupied = selectedDay ? (occupiedByDate[selectedDay] || []) : [];
-
-  const cells: (number | null)[] = [
-    ...Array(firstDay).fill(null),
-    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
-  ];
-  // Pad to complete last row
+  const cells: (number|null)[] = [...Array(firstDay).fill(null), ...Array.from({length: daysInMonth}, (_,i) => i+1)];
   while (cells.length % 7 !== 0) cells.push(null);
 
+  // List to show on right panel
+  const listData = (() => {
+    if (selectedDay) {
+      const a = availByDate[selectedDay] || [];
+      const o = occByDate[selectedDay] || [];
+      return [...a, ...o].sort((x,y) => x.time.localeCompare(y.time));
+    }
+    const base = filter === 'available' ? available : filter === 'occupied' ? occupied : future;
+    return base.slice(0, 20);
+  })();
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
+      {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <h2 className="text-lg font-bold text-stone-100">{title}</h2>
         <Button onClick={() => openNew()} size="sm"><Plus size={16} /> Adicionar Horário</Button>
       </div>
 
       {error && (
-        <div className="bg-red-900/20 border border-red-700/40 rounded-lg p-4 flex items-start gap-3">
-          <AlertCircle size={18} className="text-red-400 flex-shrink-0 mt-0.5" />
+        <div className="bg-red-900/20 border border-red-700/40 rounded-lg p-3 flex items-center gap-3">
+          <AlertCircle size={16} className="text-red-400 flex-shrink-0" />
           <p className="text-red-200 text-sm">{error}</p>
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex border-b border-stone-700">
-        <button onClick={() => setTab('calendar')}
-          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === 'calendar' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
-          <Calendar size={14} /> Disponíveis <span className="text-xs opacity-60">({available.length})</span>
+      {/* ── Summary Cards ── */}
+      <div className="grid grid-cols-3 gap-3">
+        <button onClick={() => { setFilter('available'); setSelectedDay(null); }}
+          className={`rounded-xl p-3 border text-left transition-all ${filter === 'available' && !selectedDay ? 'bg-emerald-500/20 border-emerald-500/50' : 'bg-stone-800/50 border-stone-700/50 hover:border-emerald-500/30'}`}>
+          <div className="flex items-center gap-2 mb-1">
+            <CheckCircle size={16} className="text-emerald-400" />
+            <span className="text-xs text-stone-400 uppercase tracking-wide">Disponíveis</span>
+          </div>
+          <p className="text-2xl font-bold text-emerald-300">{available.length}</p>
+          <p className="text-xs text-stone-500 mt-0.5">horários livres</p>
         </button>
-        <button onClick={() => setTab('occupied')}
-          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === 'occupied' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
-          <XCircle size={14} /> Ocupados <span className="text-xs opacity-60">({occupied.length})</span>
+
+        <button onClick={() => { setFilter('occupied'); setSelectedDay(null); }}
+          className={`rounded-xl p-3 border text-left transition-all ${filter === 'occupied' && !selectedDay ? 'bg-red-500/20 border-red-500/50' : 'bg-stone-800/50 border-stone-700/50 hover:border-red-500/30'}`}>
+          <div className="flex items-center gap-2 mb-1">
+            <XCircle size={16} className="text-red-400" />
+            <span className="text-xs text-stone-400 uppercase tracking-wide">Ocupados</span>
+          </div>
+          <p className="text-2xl font-bold text-red-300">{occupied.length}</p>
+          <p className="text-xs text-stone-500 mt-0.5">agendamentos</p>
         </button>
-        <button onClick={() => setTab('history')}
-          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === 'history' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
-          <Clock size={14} /> Histórico <span className="text-xs opacity-60">({history.length})</span>
+
+        <button onClick={() => { setFilter('all'); setSelectedDay(null); }}
+          className={`rounded-xl p-3 border text-left transition-all ${filter === 'all' && !selectedDay ? 'bg-amber-500/20 border-amber-500/50' : 'bg-stone-800/50 border-stone-700/50 hover:border-amber-500/30'}`}>
+          <div className="flex items-center gap-2 mb-1">
+            <CalendarClock size={16} className="text-amber-400" />
+            <span className="text-xs text-stone-400 uppercase tracking-wide">Esta semana</span>
+          </div>
+          <p className="text-2xl font-bold text-amber-300">{thisWeek.length}</p>
+          <p className="text-xs text-stone-500 mt-0.5">horários</p>
         </button>
       </div>
 
+      {/* ── Main Grid: Calendar + List ── */}
       {loading ? (
         <Card className="flex items-center justify-center py-12">
           <Loader2 size={24} className="animate-spin text-amber-500" />
         </Card>
-      ) : tab === 'calendar' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Calendar */}
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+
+          {/* Compact Calendar */}
           <Card className="lg:col-span-2 p-4">
-            {/* Month nav */}
-            <div className="flex items-center justify-between mb-4">
-              <button onClick={prevMonth} className="p-1.5 rounded-lg text-stone-400 hover:text-stone-100 hover:bg-stone-700 transition-colors">
-                <ChevronLeft size={18} />
+            <div className="flex items-center justify-between mb-3">
+              <button onClick={prevMonth} className="p-1 rounded-lg text-stone-400 hover:text-stone-100 hover:bg-stone-700 transition-colors">
+                <ChevronLeft size={16} />
               </button>
-              <h3 className="text-stone-100 font-semibold text-sm">
-                {MONTHS[viewMonth]} de {viewYear}
-              </h3>
-              <button onClick={nextMonth} className="p-1.5 rounded-lg text-stone-400 hover:text-stone-100 hover:bg-stone-700 transition-colors">
-                <ChevronRight size={18} />
+              <span className="text-stone-200 font-semibold text-sm">{MONTHS[viewMonth]} {viewYear}</span>
+              <button onClick={nextMonth} className="p-1 rounded-lg text-stone-400 hover:text-stone-100 hover:bg-stone-700 transition-colors">
+                <ChevronRight size={16} />
               </button>
             </div>
 
-            {/* Weekday headers */}
             <div className="grid grid-cols-7 mb-1">
-              {WEEKDAYS.map(d => (
-                <div key={d} className="text-center text-xs text-stone-500 font-medium py-1">{d}</div>
-              ))}
+              {WEEKDAYS.map(d => <div key={d} className="text-center text-xs text-stone-600 py-0.5">{d[0]}</div>)}
             </div>
 
-            {/* Day cells */}
-            <div className="grid grid-cols-7 gap-1">
+            <div className="grid grid-cols-7 gap-0.5">
               {cells.map((day, i) => {
-                if (!day) return <div key={`empty-${i}`} />;
-                const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                const slots = availByDate[dateStr] || [];
-                const occ = occupiedByDate[dateStr] || [];
-                const hasSlots = slots.length > 0;
-                const hasOcc = occ.length > 0;
-                const hasAny = hasSlots || hasOcc;
-                const isToday = dateStr === todayStr;
-                const isSelected = selectedDay === dateStr;
-                const isPast = dateStr < todayStr;
-
-                // Build tooltip
-                const tooltipLines: string[] = [];
-                if (slots.length) tooltipLines.push(`✅ ${slots.length} disponível(is): ${slots.map(s => s.time).join(', ')}`);
-                if (occ.length) tooltipLines.push(`🔴 ${occ.length} ocupado(s): ${occ.map(s => `${s.time}${(s as any).booked_by_name ? ' - ' + (s as any).booked_by_name : ''}`).join(', ')}`);
-                const tooltipText = tooltipLines.join(' | ') || 'Clique para adicionar horário';
+                if (!day) return <div key={`e-${i}`} />;
+                const ds = `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                const av = availByDate[ds]?.length || 0;
+                const oc = occByDate[ds]?.length || 0;
+                const isToday = ds === todayStr;
+                const isSel = selectedDay === ds;
+                const isPast = ds < todayStr;
 
                 return (
-                  <button key={dateStr}
-                    onClick={() => hasAny ? setSelectedDay(isSelected ? null : dateStr) : openNew(dateStr)}
-                    className={`
-                      relative aspect-square rounded-xl flex flex-col items-center justify-center text-sm font-medium transition-all group
-                      ${isPast ? 'opacity-30 cursor-default' : 'cursor-pointer'}
-                      ${isSelected ? 'bg-amber-500 text-stone-900 shadow-lg shadow-amber-500/30' :
-                        isToday ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50' :
-                        hasSlots && hasOcc ? 'bg-gradient-to-br from-emerald-500/15 to-red-500/15 border border-stone-600/50 hover:border-stone-500 text-stone-200' :
-                        hasSlots ? 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 border border-emerald-500/30' :
-                        hasOcc ? 'bg-red-500/10 text-red-300 hover:bg-red-500/20 border border-red-500/20' :
-                        'text-stone-400 hover:bg-stone-700/50'}
-                    `}
+                  <button key={ds} onClick={() => !isPast && setSelectedDay(isSel ? null : ds)}
                     disabled={isPast}
-                    title={tooltipText}
-                  >
-                    <span>{day}</span>
-                    {!isSelected && (hasSlots || hasOcc) && (
+                    title={av || oc ? `${av} livre(s), ${oc} ocupado(s)` : 'Sem horários'}
+                    className={`relative aspect-square rounded-lg flex flex-col items-center justify-center text-xs font-medium transition-all
+                      ${isPast ? 'opacity-25 cursor-default' : 'cursor-pointer'}
+                      ${isSel ? 'bg-amber-500 text-stone-900 shadow-md' :
+                        isToday ? 'ring-1 ring-amber-500 text-amber-300' :
+                        (av||oc) ? 'hover:bg-stone-700' : 'text-stone-500 hover:bg-stone-800'}
+                    `}>
+                    <span className={isSel ? 'text-stone-900' : isToday ? 'text-amber-300' : 'text-stone-300'}>{day}</span>
+                    {(av > 0 || oc > 0) && !isSel && (
                       <div className="flex gap-0.5 mt-0.5">
-                        {hasSlots && <span className="text-xs font-bold text-emerald-400">{slots.length}</span>}
-                        {hasSlots && hasOcc && <span className="text-xs text-stone-500">/</span>}
-                        {hasOcc && <span className="text-xs font-bold text-red-400">{occ.length}</span>}
-                      </div>
-                    )}
-                    {/* Hover tooltip */}
-                    {!isPast && hasAny && (
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 hidden group-hover:block w-52 bg-stone-900 border border-stone-600 rounded-lg p-2.5 shadow-xl text-left pointer-events-none">
-                        {slots.map(s => (
-                          <div key={s.id} className="flex items-center gap-1.5 text-xs text-emerald-300 mb-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
-                            <span>{s.time} • {s.duration_minutes}min • Livre</span>
-                          </div>
-                        ))}
-                        {occ.map(s => (
-                          <div key={s.id} className="flex items-start gap-1.5 text-xs text-red-300 mb-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0 mt-0.5" />
-                            <span>{s.time} • {(s as any).booked_by_name || 'Ocupado'}</span>
-                          </div>
-                        ))}
+                        {av > 0 && <span className="w-1 h-1 rounded-full bg-emerald-400 inline-block" />}
+                        {oc > 0 && <span className="w-1 h-1 rounded-full bg-red-400 inline-block" />}
                       </div>
                     )}
                   </button>
@@ -237,135 +215,117 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
               })}
             </div>
 
-            {/* Legend */}
-            <div className="flex items-center gap-3 mt-4 pt-3 border-t border-stone-700 flex-wrap">
-              <span className="flex items-center gap-1.5 text-xs text-stone-500">
-                <span className="w-3 h-3 rounded bg-emerald-500/20 border border-emerald-500/40 inline-block" /> Disponível
+            {/* Mini legend */}
+            <div className="flex items-center gap-3 mt-3 pt-2 border-t border-stone-800">
+              <span className="flex items-center gap-1 text-xs text-stone-600">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" /> Livre
               </span>
-              <span className="flex items-center gap-1.5 text-xs text-stone-500">
-                <span className="w-3 h-3 rounded bg-red-500/15 border border-red-500/30 inline-block" /> Ocupado
+              <span className="flex items-center gap-1 text-xs text-stone-600">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block" /> Ocupado
               </span>
-              <span className="flex items-center gap-1.5 text-xs text-stone-500">
-                <span className="w-3 h-3 rounded bg-amber-500/20 border border-amber-500/50 inline-block" /> Hoje
-              </span>
+              {selectedDay && (
+                <button onClick={() => openNew(selectedDay)}
+                  className="ml-auto text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1 transition-colors">
+                  <Plus size={11} /> Horário em {formatDate(selectedDay)}
+                </button>
+              )}
             </div>
           </Card>
 
-          {/* Day detail panel */}
-          <Card className="p-4">
-            {selectedDay ? (
-              <>
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-stone-200 font-semibold text-sm">{formatDate(selectedDay)}</h4>
-                  <button onClick={() => openNew(selectedDay)}
-                    className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-1 rounded-lg transition-colors">
-                    <Plus size={12} /> Horário
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {selectedSlots.map(slot => (
-                    <div key={slot.id} className="flex items-center justify-between p-2.5 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <Clock size={12} className="text-emerald-400" />
-                          <span className="text-stone-200 text-sm font-medium">{slot.time}</span>
-                          <Badge color="green">Livre</Badge>
-                        </div>
-                        <span className="text-xs text-stone-500 mt-0.5 block">{slot.duration_minutes} min</span>
-                      </div>
-                      <button onClick={() => { setDeleteTarget(slot); setDeleteModal(true); }}
-                        className="text-stone-600 hover:text-red-400 p-1 rounded transition-colors">
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  ))}
-                  {selectedOccupied.map(slot => (
-                    <div key={slot.id} className="flex items-center justify-between p-2.5 bg-red-500/10 rounded-lg border border-red-500/20">
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <Clock size={12} className="text-red-400" />
-                          <span className="text-stone-200 text-sm font-medium">{slot.time}</span>
-                          <Badge color="red">Ocupado</Badge>
-                        </div>
-                        <span className="text-xs text-stone-500 mt-0.5 block">{slot.duration_minutes} min</span>
-                        {(slot as any).booked_by_name && (
-                          <span className="text-xs text-amber-400/80 mt-0.5 block">👤 {(slot as any).booked_by_name}</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                  {selectedSlots.length === 0 && selectedOccupied.length === 0 && (
-                    <p className="text-stone-500 text-xs text-center py-4">Nenhum horário neste dia</p>
+          {/* Right Panel: List */}
+          <Card className="lg:col-span-3 p-4 flex flex-col">
+            {/* Panel header */}
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                {selectedDay ? (
+                  <>
+                    <p className="text-stone-200 font-semibold text-sm">{formatDate(selectedDay)}</p>
+                    <p className="text-stone-500 text-xs">
+                      {(availByDate[selectedDay]?.length||0)} livre(s) · {(occByDate[selectedDay]?.length||0)} ocupado(s)
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-stone-200 font-semibold text-sm">
+                      {filter === 'available' ? 'Horários Disponíveis' : filter === 'occupied' ? 'Horários Ocupados' : 'Todos os Horários'}
+                    </p>
+                    <p className="text-stone-500 text-xs">Selecione um dia no calendário para filtrar</p>
+                  </>
+                )}
+              </div>
+              {selectedDay && (
+                <button onClick={() => setSelectedDay(null)}
+                  className="text-xs text-stone-500 hover:text-stone-300 transition-colors px-2 py-1 rounded-lg hover:bg-stone-700">
+                  Ver todos
+                </button>
+              )}
+            </div>
+
+            {/* Scrollable list */}
+            <div className="space-y-2 overflow-y-auto max-h-80 pr-1">
+              {listData.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-center">
+                  <Calendar size={32} className="text-stone-700 mb-2" />
+                  <p className="text-stone-500 text-sm">Nenhum horário encontrado</p>
+                  {selectedDay && (
+                    <button onClick={() => openNew(selectedDay)}
+                      className="mt-3 text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1 bg-amber-500/10 px-3 py-1.5 rounded-lg transition-colors">
+                      <Plus size={12} /> Adicionar horário neste dia
+                    </button>
                   )}
                 </div>
-              </>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full py-8 text-center">
-                <Calendar size={32} className="text-stone-600 mb-3" />
-                <p className="text-stone-500 text-sm">Selecione um dia no calendário para ver os horários</p>
-                <p className="text-stone-600 text-xs mt-2">Dias em verde possuem horários disponíveis</p>
-              </div>
-            )}
-          </Card>
-        </div>
-      ) : (
-        /* Occupied / History list */
-        (tab === 'occupied' ? occupied : history).length === 0 ? (
-          <Card className="text-center py-10">
-            <Calendar size={36} className="mx-auto mb-3 text-stone-600" />
-            <p className="text-stone-400 text-sm">
-              {tab === 'occupied' ? 'Nenhum horário ocupado' : 'Nenhum registro no histórico'}
-            </p>
-          </Card>
-        ) : (
-          <Card>
-            <div className="space-y-2">
-              {(tab === 'occupied' ? occupied : history).map(schedule => (
-                <div key={schedule.id}
-                  className={`flex items-center justify-between gap-4 p-3 rounded-lg border transition-colors ${
-                    tab === 'history' ? 'bg-stone-900/40 border-stone-700/30 opacity-60' :
-                    'bg-stone-800/30 border-stone-700/50'
+              ) : listData.map(s => (
+                <div key={s.id}
+                  className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                    s.is_available
+                      ? 'bg-emerald-500/8 border-emerald-500/20 hover:border-emerald-500/40'
+                      : 'bg-red-500/8 border-red-500/20'
                   }`}>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Clock size={14} className={tab === 'history' ? 'text-stone-600' : 'text-amber-400'} />
-                      <p className={`text-sm font-medium ${tab === 'history' ? 'text-stone-500' : 'text-stone-200'}`}>
-                        {formatDate(schedule.date)} às {schedule.time}
-                      </p>
+                  {/* Date badge */}
+                  {!selectedDay && (
+                    <div className="flex-shrink-0 w-10 text-center">
+                      <p className="text-xs text-stone-500">{s.date.slice(5).replace('-','/')}</p>
                     </div>
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      <Badge color={schedule.is_available ? 'green' : 'red'}>
-                        {schedule.is_available ? 'Disponível' : 'Ocupado'}
-                      </Badge>
-                      <span className="text-xs text-stone-500">{schedule.duration_minutes} min</span>
-                      {(schedule as any).booked_by_name && (
-                        <span className="text-xs text-amber-400/80 flex items-center gap-1">
-                          👤 Agendado por: {(schedule as any).booked_by_name}
-                        </span>
-                      )}
-                    </div>
+                  )}
+                  {/* Time */}
+                  <div className={`flex-shrink-0 flex items-center gap-1.5 ${s.is_available ? 'text-emerald-300' : 'text-red-300'}`}>
+                    <Clock size={13} />
+                    <span className="text-sm font-semibold">{s.time.slice(0,5)}</span>
                   </div>
-                  {tab === 'history' && (
-                    <button onClick={() => { setDeleteTarget(schedule); setDeleteModal(true); }}
-                      className="text-stone-600 hover:text-red-400 p-1.5 rounded-lg hover:bg-stone-700 transition-colors flex-shrink-0">
-                      <Trash2 size={16} />
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Badge color={s.is_available ? 'green' : 'red'}>
+                        {s.is_available ? 'Livre' : 'Ocupado'}
+                      </Badge>
+                      <span className="text-xs text-stone-500">{s.duration_minutes} min</span>
+                    </div>
+                    {(s as any).booked_by_name && (
+                      <p className="text-xs text-amber-400/80 mt-0.5 truncate">👤 {(s as any).booked_by_name}</p>
+                    )}
+                  </div>
+                  {/* Actions */}
+                  {s.is_available && (
+                    <button onClick={() => { setDeleteTarget(s); setDeleteModal(true); }}
+                      className="flex-shrink-0 text-stone-600 hover:text-red-400 p-1 rounded transition-colors">
+                      <Trash2 size={14} />
                     </button>
                   )}
                 </div>
               ))}
             </div>
           </Card>
-        )
+        </div>
       )}
 
-      {/* Modal: Adicionar Horário */}
+      {/* Modal: Adicionar */}
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Adicionar Horário de Gabinete" size="md">
         <div className="space-y-4">
           <p className="text-sm text-stone-400">Defina um novo horário disponível para os voluntários agendarem atendimento pastoral.</p>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 block">Data *</label>
-              <input type="date" value={formData.date} min={today.toISOString().slice(0, 10)}
+              <input type="date" value={formData.date} min={todayStr}
                 onChange={e => setFormData(p => ({ ...p, date: e.target.value }))}
                 className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500" />
             </div>
@@ -377,7 +337,7 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
             </div>
           </div>
           <div>
-            <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 block">Duração do Atendimento *</label>
+            <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 block">Duração *</label>
             <select value={formData.duration_minutes}
               onChange={e => setFormData(p => ({ ...p, duration_minutes: parseInt(e.target.value) }))}
               className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500">
@@ -392,12 +352,12 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
         </div>
       </Modal>
 
-      {/* Modal: Confirmar Exclusão */}
+      {/* Modal: Excluir */}
       <Modal open={deleteModal} onClose={() => setDeleteModal(false)} title="Excluir Horário" size="sm">
         <div className="space-y-4">
           <div className="bg-red-900/20 border border-red-700/50 rounded-lg p-4">
             <p className="text-stone-200 text-sm">Deseja excluir o horário de <strong className="text-red-300">
-              {deleteTarget && `${formatDate(deleteTarget.date)} às ${deleteTarget.time}`}
+              {deleteTarget && `${formatDate(deleteTarget.date)} às ${deleteTarget.time.slice(0,5)}`}
             </strong>?</p>
             <p className="text-stone-500 text-xs mt-2">Se houver agendamento neste horário, a ação será recusada.</p>
           </div>
