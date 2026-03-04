@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import PastoralCabinetSchedules from '../components/PastoralCabinetSchedules';
-import { Plus, Edit, Trash2, CalendarClock, Clock, User, FileText, CheckCircle, XCircle, RefreshCw, Loader2, KeyRound, Shield, ShieldCheck } from 'lucide-react';
+import { Plus, Edit, Trash2, CalendarClock, Clock, User, FileText, CheckCircle, XCircle, RefreshCw, Loader2, KeyRound, Shield, ShieldCheck, Calendar } from 'lucide-react';
 import { Card, Button, Modal, Input, Badge } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
@@ -192,74 +192,80 @@ export default function PastoralPage({ user }: Props) {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="animate-spin text-amber-500" size={24} />
           </div>
-        ) : list.length === 0 ? (
-          <div className="py-12 text-center">
-            <CalendarClock className="mx-auto text-stone-600 mb-3" size={32} />
-            <p className="text-stone-500 text-sm">
-              {tab === 'upcoming' ? 'Nenhum agendamento pendente' : 'Nenhum registro no histórico'}
-            </p>
-          </div>
-        ) : (
-          <div className="divide-y divide-stone-800">
-            {list.map(a => (
-              <div key={a.id} className="p-4 hover:bg-stone-800/30 transition-colors">
-                <div className="flex items-start justify-between gap-4 flex-wrap">
-                  <div className="space-y-1 flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-stone-100 font-medium">{a.name}</p>
-                      <Badge label={a.status} color={STATUS_COLOR[a.status] || 'gray'} />
-                    </div>
-                    <div className="flex items-center gap-4 text-stone-400 text-xs flex-wrap">
-                      <span className="flex items-center gap-1">
-                        <CalendarClock size={12} /> {formatDate(a.date)}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Clock size={12} /> {a.time}
-                      </span>
-                      {a.created_by_name && (
+        ) : (tab === 'upcoming' || tab === 'history') && (
+          <div className="divide-y divide-stone-700">
+            {list.length === 0 ? (
+              <div className="px-6 py-8 text-center text-stone-500 text-sm">
+                {tab === 'upcoming' ? 'Nenhum agendamento pendente' : 'Nenhum agendamento no histórico'}
+              </div>
+            ) : (
+              list.map(a => (
+                <div key={a.id} className="px-6 py-4 hover:bg-stone-800/50 transition-colors">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <p className="font-medium text-stone-200">{a.name}</p>
+                      <div className="flex items-center gap-4 mt-2 text-xs text-stone-400">
                         <span className="flex items-center gap-1">
-                          <User size={12} /> {a.created_by_name}
+                          <CalendarClock size={12} /> {formatDate(a.date)}
                         </span>
-                      )}
+                        <span className="flex items-center gap-1">
+                          <Clock size={12} /> {a.time}
+                        </span>
+                        <Badge color={STATUS_COLOR[a.status] || 'gray'}>{a.status}</Badge>
+                      </div>
+                      {a.notes && <p className="text-xs text-stone-500 mt-2">{a.notes}</p>}
                     </div>
-                    {a.notes && (
-                      <p className="text-stone-500 text-xs mt-1 line-clamp-2">{a.notes}</p>
+                    {tab === 'upcoming' && (
+                      <div className="flex items-center gap-2">
+                        {isSuperAdmin(user) || isAdmin(user) ? (
+                          <>
+                            <button onClick={() => openEdit(a)} title="Editar"
+                              className="text-stone-500 hover:text-amber-400 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
+                              <Edit size={15} />
+                            </button>
+                            <button onClick={() => { setRescheduleTarget(a); setRescheduleModal(true); }} title="Reagendar"
+                              className="text-stone-500 hover:text-blue-400 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
+                              <RefreshCw size={15} />
+                            </button>
+                            <button onClick={() => markDone(a)} title="Marcar como Realizado"
+                              className="text-stone-500 hover:text-green-400 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
+                              <CheckCircle size={15} />
+                            </button>
+                            <button onClick={() => cancelAppointment(a)} title="Cancelar"
+                              className="text-stone-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
+                              <XCircle size={15} />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => markDone(a)} title="Marcar como Realizado"
+                              className="text-stone-500 hover:text-green-400 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
+                              <CheckCircle size={15} />
+                            </button>
+                            <button onClick={() => cancelAppointment(a)} title="Cancelar"
+                              className="text-stone-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
+                              <XCircle size={15} />
+                            </button>
+                          </>
+                        )}
+                        <button onClick={() => { setDeleteTarget(a); setDeleteModal(true); }} title="Excluir"
+                          className="text-stone-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
                     )}
-                  </div>
-
-                  {/* Ações */}
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    <button onClick={() => openEdit(a)} title="Editar"
-                      className="text-amber-400 hover:text-amber-300 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
-                      <Edit size={15} />
-                    </button>
-                    {(a.status === 'Agendado' || a.status === 'Reagendado') && (
-                      <>
-                        <button onClick={() => markDone(a)} title="Marcar como Realizado"
-                          className="text-emerald-400 hover:text-emerald-300 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
-                          <CheckCircle size={15} />
-                        </button>
-                        <button onClick={() => { setRescheduleTarget(a); setNewDate(a.date); setNewTime(a.time); setRescheduleModal(true); }} title="Reagendar"
-                          className="text-blue-400 hover:text-blue-300 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
-                          <RefreshCw size={15} />
-                        </button>
-                        <button onClick={() => cancelAppointment(a)} title="Cancelar agendamento"
-                          className="text-red-400 hover:text-red-300 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
-                          <XCircle size={15} />
-                        </button>
-                      </>
-                    )}
-                    <button onClick={() => { setDeleteTarget(a); setDeleteModal(true); }} title="Excluir"
-                      className="text-stone-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
-                      <Trash2 size={15} />
-                    </button>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         )}
       </Card>
+
+      {/* ─── Aba: Gabinete Pastoral ─────────────────────────────────────────── */}
+      {tab === 'cabinet' && (
+        <PastoralCabinetSchedules />
+      )}
 
       {/* ─── Aba: Ativar Sistema ─────────────────────────────────────────────────── */}
       {tab === 'activation' && (
