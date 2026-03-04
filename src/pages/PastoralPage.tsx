@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import PastoralCabinetSchedules, { type CabinetSchedulesRef } from '../components/PastoralCabinetSchedules';
 import PastoralCabinetBooking from '../components/PastoralCabinetBooking';
+import VolunteerCabinetBookings from '../components/VolunteerCabinetBookings';
 import { Plus, Edit, Trash2, CalendarClock, Clock, User, FileText, CheckCircle, XCircle, RefreshCw, Loader2, KeyRound, Shield, ShieldCheck, Calendar } from 'lucide-react';
 import { Card, Button, Modal, Input, Badge } from '../components/ui';
 import { useApi } from '../hooks/useApi';
@@ -293,7 +294,14 @@ export default function PastoralPage({ user }: Props) {
       {tab === 'cabinet' && (
         (isSuperAdmin(user) || isAdmin(user) || user.role === 'Secretaria')
           ? <PastoralCabinetSchedules ref={cabinetRef} title="Disponibilidade do Gabinete" />
-          : <PastoralCabinetBooking user={user} />
+          : (
+            <div className="space-y-5">
+              <PastoralCabinetBooking user={user} onBookingSuccess={() => {}} />
+              {user.member_id && (
+                <VolunteerCabinetBookings volunteerId={user.member_id} />
+              )}
+            </div>
+          )
       )}
 
       {/* ─── Aba: Ativar Sistema ─────────────────────────────────────────────────── */}
