@@ -673,109 +673,88 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
   const { type, cult_id, month } = req.body;
   const today = new Date().toISOString().slice(0, 10);
 
+  console.log('[auto-generate] payload:', { type, cult_id, month });
+
+  // Busca cultos
   let cultsQuery = db.from('cults').select('*').neq('status', 'Cancelado');
   if (type === 'month' && month)  cultsQuery = cultsQuery.like('date', `${month}%`);
   else if (cult_id)               cultsQuery = cultsQuery.eq('id', cult_id);
   else                            cultsQuery = cultsQuery.gte('date', today);
 
-  const [{ data: cults }, { data: members }, { data: sectors }] = await Promise.all([
-    cultsQuery,
-    db.from('members').select('id, name, department_id').eq('is_active', true).eq('status', 'Ativo'),
-    db.from('sectors').select('id, name, department_id').eq('is_active', true),
-  ]);
+  const { data: cults } = await cultsQuery;
+  const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
+  const { data: members } = await db.from('members').select('id, name, department_id').eq('is_active', true).eq('status', 'Ativo');
+
+  console.log('[auto-generate] cults:', cults?.length, '| members:', members?.length, '| sectors:', sectors?.length);
 
   if (!cults?.length)   return res.json({ message: 'Nenhum culto encontrado', created: 0, cults_count: 0 });
   if (!members?.length) return res.json({ message: 'Nenhum voluntário ativo', created: 0, cults_count: 0 });
   if (!sectors?.length) return res.json({ message: 'Nenhum setor ativo', created: 0, cults_count: 0 });
 
-  const months = [...new Set(cults.map(c => c.date.slice(0, 7)))];
-  const cultIds = cults.map(c => c.id);
-
-  const { data: existingScales } = await db.from('scales')
-    .select('cult_id, member_id, sector_id')
-    .in('cult_id', cultIds.slice(0, 500));
-
-  // Contagens mensais em paralelo
-  const monthCountResults = await Promise.all(
-    months.map(m =>
-      db.from('scales')
-        .select('member_id, cults!inner(date)')
-        .like('cults.date', `${m}%`)
-        .neq('status', 'Recusado')
-    )
-  );
-
-  const memberMonthCount = {};
-  for (let i = 0; i < months.length; i++) {
-    const m = months[i];
-    for (const row of monthCountResults[i]?.data || []) {
-      const key = `${row.member_id}:${m}`;
-      memberMonthCount[key] = (memberMonthCount[key] || 0) + 1;
-    }
-  }
-
-  const cultMemberSet = new Set();
-  const cultSectorSet = new Set();
-  for (const s of existingScales || []) {
-    cultMemberSet.add(`${s.cult_id}:${s.member_id}`);
-    cultSectorSet.add(`${s.cult_id}:${s.sector_id}`);
-  }
-
-  const toInsert = [];
+  let totalCreated = 0;
 
   for (const cult of cults) {
     const monthStr = cult.date.slice(0, 7);
-    const freeSectors = sectors.filter(s => !cultSectorSet.has(`${cult.id}:${s.id}`));
-    if (!freeSectors.length) continue;
 
+    // Setores e membros já alocados neste culto
+    const { data: existing } = await db.from('scales').select('member_id, sector_id').eq('cult_id', cult.id);
+    const usedMemberIds = new Set((existing || []).map(s => s.member_id));
+    const usedSectorIds = new Set((existing || []).map(s => s.sector_id));
+    const pendingSectors = sectors.filter(s => !usedSectorIds.has(s.id));
+    if (!pendingSectors.length) continue;
+
+    // Contagem mensal de cada membro para este mês
+    const monthCountMap = {};
+    for (const m of members) {
+      const { count } = await db.from('scales')
+        .select('*, cults!inner(date)', { count: 'exact', head: true })
+        .eq('member_id', m.id)
+        .not('status', 'eq', 'Recusado')
+        .like('cults.date', `${monthStr}%`);
+      monthCountMap[m.id] = count || 0;
+    }
+
+    // Limite dinâmico: evita bloquear quando há poucos voluntários
+    const maxPerMonth = Math.max(3, Math.ceil((cults.length * sectors.length) / Math.max(members.length, 1)) + 1);
     const shuffled = [...members].sort(() => Math.random() - 0.5);
 
-    const usedInCult = new Set(
-      [...cultMemberSet]
-        .filter(k => k.startsWith(`${cult.id}:`))
-        .map(k => Number(k.split(':')[1]))
-    );
-
-    for (const sector of freeSectors) {
-      // ✅ Prioriza membro do mesmo departamento do setor
+    for (const sector of pendingSectors) {
       const candidate =
-        shuffled.find(m => {
-          if (usedInCult.has(m.id)) return false;
-          if ((memberMonthCount[`${m.id}:${monthStr}`] || 0) >= 3) return false;
-          return m.department_id === sector.department_id;
-        }) ||
-        shuffled.find(m => {
-          if (usedInCult.has(m.id)) return false;
-          return (memberMonthCount[`${m.id}:${monthStr}`] || 0) < 3;
-        });
+        shuffled.find(m =>
+          !usedMemberIds.has(m.id) &&
+          (monthCountMap[m.id] || 0) < maxPerMonth &&
+          m.department_id === sector.department_id
+        ) ||
+        shuffled.find(m =>
+          !usedMemberIds.has(m.id) &&
+          (monthCountMap[m.id] || 0) < maxPerMonth
+        ) ||
+        shuffled.find(m => !usedMemberIds.has(m.id));
 
       if (!candidate) continue;
 
-      toInsert.push({
+      const { error } = await db.from('scales').insert({
         cult_id: cult.id,
         member_id: candidate.id,
         sector_id: sector.id,
-        department_id: candidate.department_id || null, // ✅ department do membro
+        department_id: candidate.department_id || null,
       });
 
-      usedInCult.add(candidate.id);
-      cultMemberSet.add(`${cult.id}:${candidate.id}`);
-      cultSectorSet.add(`${cult.id}:${sector.id}`);
-      const key = `${candidate.id}:${monthStr}`;
-      memberMonthCount[key] = (memberMonthCount[key] || 0) + 1;
+      if (!error) {
+        usedMemberIds.add(candidate.id);
+        monthCountMap[candidate.id] = (monthCountMap[candidate.id] || 0) + 1;
+        totalCreated++;
+      }
     }
   }
 
-  const BATCH = 500;
-  for (let i = 0; i < toInsert.length; i += BATCH) {
-    await db.from('scales').insert(toInsert.slice(i, i + BATCH));
-  }
+  console.log('[auto-generate] totalCreated:', totalCreated, '| cults:', cults.length);
 
   res.json({
-    message: `${toInsert.length} escala(s) gerada(s)`,
-    created: toInsert.length,
+    message: `${totalCreated} escala(s) gerada(s) em ${cults.length} culto(s)`,
+    created: totalCreated,
     cults_count: cults.length,
-    scales_count: toInsert.length,
+    scales_count: totalCreated,
   });
 });
 

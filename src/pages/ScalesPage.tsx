@@ -724,20 +724,25 @@ export default function ScalesPage({ user }: Props) {
                 </div>
 
                 {/* Contadores */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className={`grid gap-3 ${autoResult.created > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                   <div className="bg-amber-900/30 rounded-lg p-3 text-center">
                     <p className="text-amber-200 text-2xl font-bold">{autoResult.cultsCount ?? 1}</p>
                     <p className="text-amber-400 text-xs mt-0.5">
                       {(autoResult.cultsCount ?? 1) === 1 ? 'culto processado' : 'cultos processados'}
                     </p>
                   </div>
-                  <div className="bg-emerald-900/30 rounded-lg p-3 text-center">
-                    <p className="text-emerald-200 text-2xl font-bold">{autoResult.created}</p>
-                    <p className="text-emerald-400 text-xs mt-0.5">
-                      {autoResult.created === 1 ? 'voluntário alocado' : 'voluntários alocados'}
-                    </p>
-                  </div>
+                  {autoResult.created > 0 && (
+                    <div className="bg-emerald-900/30 rounded-lg p-3 text-center">
+                      <p className="text-emerald-200 text-2xl font-bold">{autoResult.created}</p>
+                      <p className="text-emerald-400 text-xs mt-0.5">
+                        {autoResult.created === 1 ? 'voluntário alocado' : 'voluntários alocados'}
+                      </p>
+                    </div>
+                  )}
                 </div>
+                <p className="text-stone-400 text-xs leading-relaxed">
+                  Selecione um culto e use <strong className="text-amber-400">Preencher Automático</strong> para alocar voluntários, ou adicione-os manualmente.
+                </p>
               </div>
 
               <Button onClick={closeAutoModal} className="w-full">Fechar</Button>
