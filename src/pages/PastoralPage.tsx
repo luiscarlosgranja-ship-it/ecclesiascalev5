@@ -76,6 +76,7 @@ export default function PastoralPage({ user }: Props) {
     a.status === 'Realizado' || a.status === 'Cancelado'
   ).sort((a, b) => b.date.localeCompare(a.date));
 
+
   // Agrupa por source para exibição
   function sourceLabel(a: any) {
     return a.source === 'gabinete' ? 'Gabinete Pastoral' : 'Secretaria';
@@ -212,7 +213,7 @@ export default function PastoralPage({ user }: Props) {
           <div className="divide-y divide-stone-700">
             {history.length === 0 ? (
               <div className="px-6 py-8 text-center text-stone-500 text-sm">
-                {tab === 'upcoming' ? 'Nenhum agendamento pendente' : 'Nenhum agendamento no histórico'}
+                'Nenhum agendamento no histórico'
               </div>
             ) : (
               history.map(a => (

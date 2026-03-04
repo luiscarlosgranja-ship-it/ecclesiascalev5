@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Printer, Repeat, CheckCircle } from 'lucide-react';
+import { Printer, Repeat, CheckCircle, HeartHandshake } from 'lucide-react';
 import { Card, Button, Badge } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
 import type { AuthUser, Scale, Swap } from '../types';
+import VolunteerCabinetBookings from '../components/VolunteerCabinetBookings';
 import { exportMemberScalePDF } from '../utils/pdf';
 import { isAdmin, isLeader } from '../utils/permissions';
 
@@ -12,7 +13,7 @@ interface Props { user: AuthUser; setPage?: (p: string) => void; }
 export default function MyPanelPage({ user, setPage }: Props) {
   const { data: scales, refetch } = useApi<Scale[]>(user.member_id ? `/scales?member_id=${user.member_id}` : null);
   const { data: swaps } = useApi<Swap[]>(user.member_id ? `/swaps?member_id=${user.member_id}` : null);
-  const [tab, setTab] = useState<'scales' | 'swaps'>('scales');
+  const [tab, setTab] = useState<'scales' | 'swaps' | 'pastoral'>('scales');
 
   async function confirm(id: number) {
     await api.put(`/scales/${id}/confirm`, {});
@@ -56,6 +57,11 @@ export default function MyPanelPage({ user, setPage }: Props) {
         <button onClick={() => setTab('swaps')} className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${tab === 'swaps' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
           Trocas
         </button>
+        {user.member_id && (
+          <button onClick={() => setTab('pastoral')} className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-1.5 ${tab === 'pastoral' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
+            <HeartHandshake size={14} /> Gabinete Pastoral
+          </button>
+        )}
       </div>
 
       {tab === 'scales' && (
@@ -103,6 +109,10 @@ export default function MyPanelPage({ user, setPage }: Props) {
             {(!scales || scales.length === 0) && <p className="text-center text-stone-500 text-sm py-10">Você não está escalado</p>}
           </div>
         </Card>
+      )}
+
+      {tab === 'pastoral' && user.member_id && (
+        <VolunteerCabinetBookings volunteerId={user.member_id} />
       )}
 
       {tab === 'swaps' && (

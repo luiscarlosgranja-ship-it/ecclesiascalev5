@@ -1044,7 +1044,7 @@ app.delete('/api/settings/logo', auth, requireRole('SuperAdmin'), async (req, re
 });
 
 // ─── Pastoral Appointments ────────────────────────────────────────────────────
-app.get('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
+app.get('/api/pastoral', auth, async (req, res) => {
   // Busca agendamentos da secretaria
   const { data: appointments, error: apptError } = await db
     .from('pastoral_appointments')
@@ -1595,10 +1595,17 @@ app.get('/api/pastoral-cabinet/bookings/volunteer/:volunteerId', async (req, res
 });
 
 // PUT: Atualizar status do agendamento
-app.put('/api/pastoral-cabinet/bookings/:id', async (req, res) => {
+app.put('/api/pastoral-cabinet/bookings/:id', auth, async (req, res) => {
   try {
     const { id } = req.params;
     const { status, notes } = req.body;
+
+    // Busca booking atual para notificar voluntário
+    const { data: existing } = await db
+      .from('pastoral_cabinet_bookings')
+      .select('*, members(name, id)')
+      .eq('id', id)
+      .single();
 
     const { data, error } = await db
       .from('pastoral_cabinet_bookings')
@@ -1609,6 +1616,26 @@ app.put('/api/pastoral-cabinet/bookings/:id', async (req, res) => {
     if (error) {
       console.error('Erro ao atualizar:', error);
       return res.status(500).json({ error: error.message });
+    }
+
+    // Notifica o voluntário se status mudou
+    if (existing && status && status !== existing.status) {
+      const { data: userRow } = await db
+        .from('users')
+        .select('id')
+        .eq('member_id', existing.volunteer_id)
+        .single();
+
+      if (userRow) {
+        const dateFormatted = existing.date?.split('-').reverse().join('/') || '';
+        const msgs = {
+          'Confirmado': `Seu agendamento de gabinete em ${dateFormatted} às ${existing.time} foi confirmado! ✅`,
+          'Cancelado':  `Seu agendamento de gabinete em ${dateFormatted} às ${existing.time} foi cancelado.`,
+          'Realizado':  `Seu atendimento pastoral em ${dateFormatted} foi marcado como realizado.`,
+        };
+        const msg = msgs[status];
+        if (msg) await notify(userRow.id, 'Gabinete Pastoral', msg);
+      }
     }
 
     res.json(data[0]);
