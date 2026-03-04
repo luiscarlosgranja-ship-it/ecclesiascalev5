@@ -978,6 +978,101 @@ app.post('/api/security/change-password', auth, async (req, res) => {
   res.json({ message: 'Senha alterada com sucesso' });
 });
 
+// ─── User Management (SuperAdmin only) ────────────────────────────────────────
+
+// GET: List all users with member info
+app.get('/api/users', auth, requireRole('SuperAdmin'), async (req, res) => {
+  const { data, error } = await db
+    .from('users')
+    .select('id, email, role, is_active, last_login, must_change_password, created_at, member_id, members(name)')
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ message: error.message });
+  const result = (data || []).map(u => ({
+    id: u.id,
+    email: u.email,
+    role: u.role,
+    is_active: u.is_active,
+    last_login: u.last_login,
+    must_change_password: u.must_change_password,
+    created_at: u.created_at,
+    member_id: u.member_id,
+    member_name: u.members?.name || null,
+  }));
+  res.json(result);
+});
+
+// PUT: Update user role and/or active status
+app.put('/api/users/:id/role', auth, requireRole('SuperAdmin'), async (req, res) => {
+  const { role, is_active } = req.body;
+  const VALID_ROLES = ['SuperAdmin', 'Admin', 'Líder', 'Membro', 'Secretaria'];
+  if (role && !VALID_ROLES.includes(role))
+    return res.status(400).json({ message: 'Role inválido' });
+  // Prevent SuperAdmin from demoting themselves
+  if (req.user.id === Number(req.params.id) && role && role !== 'SuperAdmin')
+    return res.status(403).json({ message: 'Você não pode alterar seu próprio role' });
+
+  const updates = {};
+  if (role !== undefined) updates.role = role;
+  if (is_active !== undefined) updates.is_active = is_active;
+
+  const { error } = await db.from('users').update(updates).eq('id', req.params.id);
+  if (error) return res.status(500).json({ message: error.message });
+
+  // Sync role to members table if linked
+  if (role) {
+    const { data: u } = await db.from('users').select('member_id').eq('id', req.params.id).single();
+    if (u?.member_id) await db.from('members').update({ role }).eq('id', u.member_id);
+  }
+  res.json({ message: 'Usuário atualizado' });
+});
+
+// DELETE: Remove user account (keeps member record)
+app.delete('/api/users/:id', auth, requireRole('SuperAdmin'), async (req, res) => {
+  if (req.user.id === Number(req.params.id))
+    return res.status(403).json({ message: 'Você não pode excluir sua própria conta' });
+  const { error } = await db.from('users').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ message: error.message });
+  res.json({ message: 'Conta removida' });
+});
+
+// POST: Force password reset for a user (generates temp password + sends email)
+app.post('/api/users/:id/reset-password', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const { data: u } = await db.from('users').select('email, member_id, members(name)').eq('id', req.params.id).single();
+  if (!u) return res.status(404).json({ message: 'Usuário não encontrado' });
+
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#$!';
+  const tempPassword = Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  const hash = bcrypt.hashSync(tempPassword, 10);
+  await db.from('users').update({ password: hash, must_change_password: true }).eq('id', req.params.id);
+
+  try {
+    const transporter = await getTransporter();
+    const { data: smtpCfg } = await db.from('settings').select('key,value').in('key', ['smtp_user']);
+    const fromEmail = smtpCfg?.[0]?.value || process.env.SMTP_USER || '';
+    const { data: churchRow } = await db.from('settings').select('value').eq('key', 'church_name').single();
+    const churchName = churchRow?.value || 'EcclesiaScale';
+    const memberName = u.members?.name || u.email;
+    await transporter.sendMail({
+      from: `${churchName} <${fromEmail}>`,
+      to: u.email,
+      subject: `${churchName} — Nova senha temporária`,
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;background:#1c1917;color:#e7e5e4;padding:32px;border-radius:12px">
+          <h2 style="color:#f59e0b">Redefinição de Senha</h2>
+          <p style="color:#a8a29e">Olá, <strong style="color:#e7e5e4">${memberName}</strong>. Sua senha foi redefinida por um administrador.</p>
+          <div style="background:#292524;border-radius:8px;padding:20px;margin:24px 0;border:1px solid #44403c">
+            <p style="margin:0 0 8px;color:#a8a29e;font-size:13px">NOVA SENHA TEMPORÁRIA:</p>
+            <p style="margin:0;color:#f59e0b;font-size:20px;font-weight:bold;letter-spacing:2px">${tempPassword}</p>
+          </div>
+          <p style="color:#f97316;font-size:13px">⚠️ Você será solicitado a criar uma nova senha no próximo acesso.</p>
+        </div>`,
+    });
+  } catch (e) {
+    console.warn('Email de reset não enviado:', e.message);
+  }
+  res.json({ message: 'Senha redefinida e e-mail enviado' });
+});
+
 // ─── Church Settings ──────────────────────────────────────────────────────────
 const CHURCH_FIELDS = ['church_name','church_cnpj','church_address','church_neighborhood','church_city','church_zip','church_phone','church_pastor_dirigente','church_pastor_presidente'];
 

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Users, Calendar, Repeat, Settings, LogOut, Bell,
   BookOpen, Layers, Shield, Wifi, WifiOff,
-  Database, Menu, X, Building2, Grid3X3, Church, RefreshCcw, KeyRound,
+  Database, Menu, X, Building2, Grid3X3, Church, RefreshCcw, KeyRound, UserCog,
   Sun, Moon, HeartHandshake, Phone, Mail, Image, ChevronDown
 } from 'lucide-react';
 import type { AuthUser } from '../types';
@@ -61,6 +61,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Segurança',
     items: [
+      { id: 'users',           label: 'Usuários',            icon: <UserCog size={15} />,  roles: ['SuperAdmin'] },
       { id: 'security',        label: 'Reset de Senha',      icon: <Shield size={15} />,   roles: ['SuperAdmin', 'Admin'] },
       { id: 'activation-keys', label: 'Gerador de Chaves',   icon: <KeyRound size={15} />, roles: ['SuperAdmin'] },
       { id: 'activation',      label: 'Ativação do Sistema', icon: <KeyRound size={15} />, roles: ['Admin', 'Líder', 'Membro', 'Secretaria'] },
