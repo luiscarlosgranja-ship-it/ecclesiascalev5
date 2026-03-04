@@ -15,10 +15,9 @@ export default function SwapsPage({ user }: Props) {
 
   // ─── Supabase Realtime ───────────────────────────────────────────────────────
   useEffect(() => {
-    
     if (!supabase) return; // Realtime desativado se env vars não configuradas
 
-    const channel = sb
+    const channel = supabase
       .channel('swaps-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'swaps' }, () => {
         refetch();
