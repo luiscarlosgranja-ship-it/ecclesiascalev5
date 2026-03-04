@@ -124,11 +124,16 @@ export default function PastoralCabinetSchedules({ title = 'Gerenciar Disponibil
                       {formatDate(schedule.date)} às {schedule.time}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 mt-1">
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
                     <Badge color={schedule.is_available ? 'green' : 'red'}>
                       {schedule.is_available ? 'Disponível' : 'Ocupado'}
                     </Badge>
                     <span className="text-xs text-stone-500">{schedule.duration_minutes} min</span>
+                    {(schedule as any).booked_by_name && (
+                      <span className="text-xs text-amber-400/80 flex items-center gap-1">
+                        👤 Agendado por: {(schedule as any).booked_by_name}
+                      </span>
+                    )}
                   </div>
                 </div>
                 {tab !== 'occupied' && (

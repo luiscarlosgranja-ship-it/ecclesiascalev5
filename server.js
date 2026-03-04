@@ -982,18 +982,51 @@ app.delete('/api/settings/logo', auth, requireRole('SuperAdmin'), async (req, re
 
 // ─── Pastoral Appointments ────────────────────────────────────────────────────
 app.get('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
-  const { data, error } = await db
+  // Busca agendamentos da secretaria
+  const { data: appointments, error: apptError } = await db
     .from('pastoral_appointments')
     .select('*, users(email, member_id, members(name))')
     .order('date', { ascending: true })
     .order('time', { ascending: true });
-  if (error) return res.status(500).json({ message: error.message });
-  const result = (data || []).map(a => ({
-    ...a,
+  if (apptError) return res.status(500).json({ message: apptError.message });
+
+  // Busca agendamentos do gabinete (feitos por voluntários)
+  const { data: cabinetBookings, error: cabError } = await db
+    .from('pastoral_cabinet_bookings')
+    .select('*, members(name)')
+    .order('date', { ascending: true })
+    .order('time', { ascending: true });
+  if (cabError) return res.status(500).json({ message: cabError.message });
+
+  // Normaliza agendamentos da secretaria
+  const apptResult = (appointments || []).map(a => ({
+    id: a.id,
+    name: a.name,
+    date: a.date,
+    time: a.time,
+    status: a.status,
+    notes: a.notes,
+    source: 'secretaria',
     created_by_name: a.users?.members?.name || a.users?.email || null,
-    users: undefined,
   }));
-  res.json(result);
+
+  // Normaliza agendamentos do gabinete
+  const cabResult = (cabinetBookings || []).map(b => ({
+    id: `cab_${b.id}`,
+    name: b.members?.name || 'Voluntário',
+    date: b.date,
+    time: b.time,
+    status: b.status || 'Agendado',
+    notes: b.notes,
+    source: 'gabinete',
+    created_by_name: b.members?.name || null,
+  }));
+
+  // Combina e ordena por data/hora
+  const combined = [...apptResult, ...cabResult]
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+
+  res.json(combined);
 });
 
 app.post('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
@@ -1199,6 +1232,20 @@ app.post('/api/pastoral-cabinet/schedules', async (req, res) => {
       });
     }
 
+    // Verificar se já existe horário neste dia e hora
+    const { data: existing } = await db
+      .from('pastoral_cabinet_schedules')
+      .select('id')
+      .eq('date', date)
+      .eq('time', time)
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      return res.status(409).json({
+        error: 'Já existe um horário cadastrado nesta data e hora.'
+      });
+    }
+
     // Inserir no Supabase
     const { data, error } = await db
       .from('pastoral_cabinet_schedules')
@@ -1229,7 +1276,7 @@ app.get('/api/pastoral-cabinet/schedules', async (req, res) => {
   try {
     const { data, error } = await db
       .from('pastoral_cabinet_schedules')
-      .select('*')
+      .select('*, pastoral_cabinet_bookings(volunteer_id, members(name))')
       .order('date', { ascending: true })
       .order('time', { ascending: true });
 
@@ -1238,7 +1285,13 @@ app.get('/api/pastoral-cabinet/schedules', async (req, res) => {
       return res.status(500).json({ error: error.message });
     }
 
-    res.json(data);
+    const result = (data || []).map(s => ({
+      ...s,
+      booked_by_name: s.pastoral_cabinet_bookings?.[0]?.members?.name || null,
+      pastoral_cabinet_bookings: undefined,
+    }));
+
+    res.json(result);
   } catch (err) {
     console.error('Erro:', err);
     res.status(500).json({ error: err.message });
