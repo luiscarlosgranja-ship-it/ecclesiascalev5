@@ -511,7 +511,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
           <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.35)' }} onClick={() => setMobileOpen(false)} />
           <div style={{ position: 'absolute', top: 0, left: 0, width: 272, height: '100%', background: 'var(--bg-surface)', borderRight: '1px solid var(--border-soft)', display: 'flex', flexDirection: 'column', animation: 'spMobile .2s ease', boxShadow: 'var(--shadow-lg)' }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontFamily: "'Lora', serif", color: 'var(--text-primary)', fontWeight: 700, fontSize: 14 }}>{churchName || 'EcclesiaScale'}</span>
+              <button onClick={() => { setPage('dashboard'); setMobileOpen(false); }} style={{ fontFamily: "'Lora', serif", color: 'var(--text-primary)', fontWeight: 700, fontSize: 14, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>{churchName || 'EcclesiaScale'}</button>
               <button onClick={() => setMobileOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a8a29e' }}><X size={18} /></button>
             </div>
             <nav style={{ flex: 1, padding: 8, overflowY: 'auto' }}>

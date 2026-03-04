@@ -62,6 +62,15 @@ export default function ScalesPage({ user }: Props) {
   const [deleteScaleModal, setDeleteScaleModal] = useState(false);
   const [deletingScale, setDeletingScale] = useState(false);
 
+  // Modal de remoção seletiva de escalas
+  const [removeSelectModal, setRemoveSelectModal] = useState(false);
+  const [scalesToRemove, setScalesToRemove] = useState<Set<number>>(new Set());
+  const [removingSelected, setRemovingSelected] = useState(false);
+
+  // Mês selecionado para impressão do mês
+  const [printMonthModal, setPrintMonthModal] = useState(false);
+  const [selectedPrintMonth, setSelectedPrintMonth] = useState(new Date().toISOString().slice(0, 7));
+
   // Resultado detalhado da geração automática
   const [autoResult, setAutoResult] = useState<AutoResult | null>(null);
 
@@ -323,21 +332,59 @@ export default function ScalesPage({ user }: Props) {
     setPrintConfigModal(true);
   }
 
+  async function removeSelectedScales() {
+    if (scalesToRemove.size === 0) return;
+    setRemovingSelected(true);
+    try {
+      await Promise.all(Array.from(scalesToRemove).map(id => api.delete(`/scales/${id}`)));
+      setRemoveSelectModal(false);
+      setScalesToRemove(new Set());
+      refetchScales();
+      fetchDeptBlocks();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao remover escalas');
+    } finally { setRemovingSelected(false); }
+  }
+
+  function openRemoveSelectModal() {
+    setScalesToRemove(new Set());
+    setRemoveSelectModal(true);
+  }
+
+  function toggleScaleToRemove(id: number) {
+    setScalesToRemove(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllScalesToRemove() {
+    const allIds = (scales || []).map(s => s.id);
+    if (scalesToRemove.size === allIds.length) {
+      setScalesToRemove(new Set());
+    } else {
+      setScalesToRemove(new Set(allIds));
+    }
+  }
+
   async function handlePrintMonth() {
-    // Usa o mês do culto selecionado, ou o mês atual como fallback
-    const month = selectedCultData
+    // Pré-preenche o mês com o do culto selecionado
+    const defaultMonth = selectedCultData
       ? selectedCultData.date.slice(0, 7)
       : new Date().toISOString().slice(0, 7);
+    setSelectedPrintMonth(defaultMonth);
+    setPrintMonthModal(true);
+  }
 
-    const monthCults = availableCults.filter(c => c.date.startsWith(month));
+  async function confirmPrintMonth() {
+    const monthCults = availableCults.filter(c => c.date.startsWith(selectedPrintMonth));
     if (monthCults.length === 0) {
-      setError('Nenhum culto encontrado para este mês');
+      alert('Nenhum culto encontrado para este mês.');
       return;
     }
 
     const token = localStorage.getItem('token') || '';
-
-    // Busca deptBlocks de todos os cultos do mês
     const allBlocks = await Promise.all(
       monthCults.map(c =>
         fetch(`/api/scales/by-department/${c.id}`, { headers: { Authorization: `Bearer ${token}` } })
@@ -346,7 +393,6 @@ export default function ScalesPage({ user }: Props) {
       )
     );
 
-    // Departamentos únicos com escalas no mês
     const deptMap = new Map<number, string>();
     for (const blocks of allBlocks) {
       for (const b of blocks) {
@@ -360,6 +406,7 @@ export default function ScalesPage({ user }: Props) {
     setAvailableDepartments(uniqueDepts);
     setSelectedDepartmentsForPrint(uniqueDepts.map(d => d.id));
     setPrintingMode('month');
+    setPrintMonthModal(false);
     setPrintConfigModal(true);
   }
 
@@ -377,11 +424,7 @@ export default function ScalesPage({ user }: Props) {
         deptBlocks, // ← dados reais da API por departamento
       );
     } else {
-      // Usa o mês do culto selecionado, ou o mês atual como fallback
-      const month = selectedCultData
-        ? selectedCultData.date.slice(0, 7)
-        : new Date().toISOString().slice(0, 7);
-
+      const month = selectedPrintMonth;
       const monthCults = availableCults.filter(c => c.date.startsWith(month));
       if (monthCults.length === 0) return;
 
@@ -468,7 +511,7 @@ export default function ScalesPage({ user }: Props) {
                     <Plus size={16} /> Adicionar Voluntário
                   </Button>
                   {isAdmin(user.role) && (
-                    <Button size="sm" variant="danger" onClick={() => setDeleteScaleModal(true)}>
+                    <Button size="sm" variant="danger" onClick={openRemoveSelectModal}>
                       <Trash2 size={16} /> Remover Escala
                     </Button>
                   )}
@@ -838,6 +881,82 @@ export default function ScalesPage({ user }: Props) {
             <Button variant="outline" onClick={() => { setFillModal(false); setFillMsg(''); }}>Cancelar</Button>
             <Button onClick={fillCult} loading={fillLoading} disabled={!!fillMsg && !fillMsg.startsWith('❌')}>
               <Zap size={15} /> Preencher
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ─── Modal: Selecionar Mês para Impressão ────────────────────────── */}
+      <Modal open={printMonthModal} onClose={() => setPrintMonthModal(false)} title="Imprimir Escalas do Mês" size="sm">
+        <div className="space-y-4">
+          <p className="text-stone-400 text-sm">Selecione o mês de referência para a impressão:</p>
+          <input
+            type="month"
+            value={selectedPrintMonth}
+            onChange={e => setSelectedPrintMonth(e.target.value)}
+            className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+          />
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setPrintMonthModal(false)}>Cancelar</Button>
+            <Button onClick={confirmPrintMonth}>Continuar</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ─── Modal: Remover Escalas Selecionadas ──────────────────────────── */}
+      <Modal open={removeSelectModal} onClose={() => setRemoveSelectModal(false)} title="Remover Escalas" size="sm">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-stone-300 text-sm">Selecione os voluntários a remover:</p>
+            <button
+              onClick={toggleAllScalesToRemove}
+              className="text-amber-400 text-xs hover:text-amber-300 transition-colors"
+            >
+              {scalesToRemove.size === (scales || []).length ? 'Desmarcar todos' : 'Selecionar todos'}
+            </button>
+          </div>
+
+          <div className="max-h-64 overflow-y-auto space-y-1 pr-1">
+            {(scales || []).length === 0 ? (
+              <p className="text-stone-500 text-sm text-center py-4">Nenhuma escala neste culto.</p>
+            ) : (
+              (scales || []).map(s => (
+                <label key={s.id} className="flex items-center gap-3 p-2 rounded-lg border border-stone-700 hover:border-red-600/50 cursor-pointer transition-all">
+                  <input
+                    type="checkbox"
+                    checked={scalesToRemove.has(s.id)}
+                    onChange={() => toggleScaleToRemove(s.id)}
+                    className="accent-red-500 w-4 h-4"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-stone-200 text-sm font-medium truncate">{s.member_name}</p>
+                    <p className="text-stone-500 text-xs">{s.sector_name}</p>
+                  </div>
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                    s.status === 'Confirmado' ? 'bg-green-900/40 text-green-400' :
+                    s.status === 'Pendente' ? 'bg-amber-900/40 text-amber-400' :
+                    'bg-stone-700 text-stone-400'
+                  }`}>{s.status}</span>
+                </label>
+              ))
+            )}
+          </div>
+
+          {scalesToRemove.size > 0 && (
+            <div className="bg-red-900/20 border border-red-700/30 rounded-lg px-3 py-2 text-xs text-red-400">
+              ⚠️ {scalesToRemove.size} voluntário(s) serão removidos desta escala.
+            </div>
+          )}
+
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setRemoveSelectModal(false)}>Cancelar</Button>
+            <Button
+              variant="danger"
+              onClick={removeSelectedScales}
+              loading={removingSelected}
+              disabled={scalesToRemove.size === 0}
+            >
+              <Trash2 size={15} /> Remover {scalesToRemove.size > 0 ? `(${scalesToRemove.size})` : ''}
             </Button>
           </div>
         </div>
