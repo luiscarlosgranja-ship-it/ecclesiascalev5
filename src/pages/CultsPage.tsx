@@ -77,37 +77,20 @@ export default function CultsPage({ user }: Props) {
     if (selectedTypes.length === 0) { setError('Selecione ao menos um tipo de culto'); return; }
     setGenerating(true); setError('');
     try {
-      const cultRes = await api.post<{ created: number; cults: { id: number; name?: string; type_name?: string }[] }>(
+      const cultRes = await api.post<{ message?: string; created?: number; cults?: { id: number; name?: string; type_name?: string }[] }>(
         '/cults/generate-month',
         { month: format(selectedMonth, 'yyyy-MM'), cult_type_ids: selectedTypes }
       );
 
-      const createdCults = cultRes.cults || [];
-      let scalesCreated = 0;
-      const scaleErrors: string[] = [];
-
-      if (createdCults.length > 0) {
-        for (const cult of createdCults) {
-          try {
-            const payload = {
-              type: 'standard',
-              cult_id: cult.id,
-              include_sectors: selectedScaleSectors,
-              include_deacons: true,
-            };
-            const res = await api.post<{ created: number }>('/scales/auto-generate', payload);
-            scalesCreated += res?.created || 0;
-          } catch {
-            scaleErrors.push(getCultName(cult as Cult));
-          }
-        }
-      }
+      // A API retorna apenas { message: "X culto(s) criado(s)" } — extrai o número do texto
+      const createdCount = cultRes?.created
+        ?? (cultRes?.message ? parseInt(cultRes.message) || 0 : 0);
 
       setResult({
-        cultsCreated: cultRes.created || createdCults.length,
-        scalesCreated,
-        cultNames: createdCults.map(c => c.name || c.type_name || 'Culto'),
-        errors: scaleErrors,
+        cultsCreated: createdCount,
+        scalesCreated: 0,
+        cultNames: [],
+        errors: [],
       });
 
       refetch();
@@ -248,52 +231,13 @@ export default function CultsPage({ user }: Props) {
                   <CheckCircle2 size={18} className="text-emerald-400 flex-shrink-0" />
                   <p className="text-emerald-300 font-semibold text-sm">Geração concluída com sucesso!</p>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-emerald-900/30 rounded-lg p-3 text-center">
-                    <p className="text-emerald-200 text-2xl font-bold">{result.cultsCreated}</p>
-                    <p className="text-emerald-400 text-xs mt-0.5">
-                      {result.cultsCreated === 1 ? 'culto criado' : 'cultos criados'}
-                    </p>
-                  </div>
-                  <div className="bg-amber-900/30 rounded-lg p-3 text-center">
-                    <p className="text-amber-200 text-2xl font-bold">{result.scalesCreated}</p>
-                    <p className="text-amber-400 text-xs mt-0.5">
-                      {result.scalesCreated === 1 ? 'escala gerada' : 'escalas geradas'}
-                    </p>
-                  </div>
+                <div className="bg-emerald-900/30 rounded-lg p-4 text-center">
+                  <p className="text-emerald-200 text-3xl font-bold">{result.cultsCreated}</p>
+                  <p className="text-emerald-400 text-sm mt-1">
+                    {result.cultsCreated === 1 ? 'culto criado' : 'cultos criados'}
+                  </p>
                 </div>
               </div>
-
-              {result.cultNames.length > 0 && (
-                <div>
-                  <p className="text-xs text-stone-400 uppercase tracking-wide mb-2">
-                    Cultos criados ({result.cultNames.length})
-                  </p>
-                  <div className="bg-stone-800/50 rounded-lg divide-y divide-stone-700/50 max-h-40 overflow-y-auto">
-                    {result.cultNames.map((name, i) => (
-                      <div key={i} className="flex items-center gap-2 px-3 py-2">
-                        <CheckCircle2 size={13} className="text-emerald-400 flex-shrink-0" />
-                        <span className="text-stone-300 text-xs">{name}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {result.errors.length > 0 && (
-                <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg p-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <AlertCircle size={14} className="text-amber-400" />
-                    <p className="text-amber-300 text-xs font-semibold">
-                      Escalas não geradas automaticamente ({result.errors.length})
-                    </p>
-                  </div>
-                  <p className="text-amber-400/80 text-xs">
-                    {result.errors.join(', ')} — acesse a tela de Escalas para gerar manualmente.
-                  </p>
-                </div>
-              )}
-
               <Button onClick={closeGenerateModal} className="w-full">Fechar</Button>
             </div>
 
