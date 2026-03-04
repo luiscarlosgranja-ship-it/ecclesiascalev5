@@ -46,7 +46,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Pastoral',
     items: [
-      { id: 'pastoral', label: 'Gabinete Pastoral', icon: <HeartHandshake size={15} />, roles: ['SuperAdmin', 'Admin', 'Secretaria'] },
+      { id: 'pastoral', label: 'Gabinete Pastoral', icon: <HeartHandshake size={15} />, roles: ['SuperAdmin', 'Admin', 'Secretaria', 'Líder', 'Membro'] },
     ],
   },
   {
