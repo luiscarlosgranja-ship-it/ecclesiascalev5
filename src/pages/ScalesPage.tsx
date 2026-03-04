@@ -40,6 +40,7 @@ export default function ScalesPage({ user }: Props) {
   const [collapsedBlocks, setCollapsedBlocks] = useState<Set<string>>(new Set());
 
   const [autoModal, setAutoModal] = useState(false);
+  const [autoMonth, setAutoMonth] = useState(new Date().toISOString().slice(0, 7));
   const [fillModal, setFillModal] = useState(false);
   const [fillLoading, setFillLoading] = useState(false);
   const [fillMsg, setFillMsg] = useState('');
@@ -164,6 +165,11 @@ export default function ScalesPage({ user }: Props) {
     setAutoModal(true);
     setAutoResult(null);
     setError('');
+    // Pré-preenche com o mês do culto selecionado
+    const defaultMonth = selectedCultData
+      ? selectedCultData.date.slice(0, 7)
+      : new Date().toISOString().slice(0, 7);
+    setAutoMonth(defaultMonth);
   }
 
   function closeAutoModal() {
@@ -183,7 +189,7 @@ export default function ScalesPage({ user }: Props) {
     setSaving(true); setError(''); setAutoResult(null);
     try {
       const payload = autoType === 'month'
-        ? { type: 'month', month: new Date().toISOString().slice(0, 7) }
+        ? { type: 'month', month: autoMonth }
         : { type: autoType, cult_id: selectedCult };
 
       const res = await api.post<{ message?: string; created?: number; cults_count?: number; scales_count?: number }>(
@@ -841,6 +847,20 @@ export default function ScalesPage({ user }: Props) {
                   </label>
                 ))}
               </div>
+
+              {/* Seletor de mês — só aparece quando tipo = mês inteiro */}
+              {autoType === 'month' && (
+                <div className="space-y-1">
+                  <label className="text-stone-400 text-xs">Mês de referência</label>
+                  <input
+                    type="month"
+                    value={autoMonth}
+                    onChange={e => setAutoMonth(e.target.value)}
+                    className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              )}
+
               {!selectedCult && autoType !== 'month' && (
                 <p className="text-amber-400 text-xs">⚠️ Para gerar Cultos Padrão ou Temáticos, selecione um culto na tela principal primeiro.</p>
               )}
