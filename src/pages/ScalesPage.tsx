@@ -190,12 +190,9 @@ export default function ScalesPage({ user }: Props) {
         label: AUTO_LABELS[autoType],
       });
 
-      if (autoType !== 'month') {
-        refetchScales();
-        fetchDeptBlocks();
-      } else {
-        refetchCults();
-      }
+      // Sempre atualiza escalas e blocos — nunca refetchCults
+      refetchScales();
+      fetchDeptBlocks();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao gerar escala');
     } finally { setSaving(false); }
