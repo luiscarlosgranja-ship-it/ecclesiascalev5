@@ -6,7 +6,7 @@ import api from '../utils/api';
 import { getSupabase } from '../utils/supabaseClient';
 import type { AuthUser, Scale, Cult, Member, Sector, CultType } from '../types';
 import { isAdmin, isLeader, isSuperAdmin } from '../utils/permissions';
-import { exportScalePDF, type DeptBlock as PdfDeptBlock } from '../utils/pdf';
+import { exportScalePDF } from '../utils/pdf';
 
 interface Props { user: AuthUser; }
 
@@ -314,19 +314,12 @@ export default function ScalesPage({ user }: Props) {
 
   async function handlePrint() {
     if (!scales || !selectedCultData) return;
-    
-    // Extrair departamentos únicos das escalas
-    const { data: depts } = await api.get<Array<{ id: number; name: string }>>('/departments');
-    const uniqueDepts = (depts || []).filter(d => 
-      scales.some(s => s.sector_name && 
-        (d.name === 'Diáconos / Obreiros' || 
-         d.name === 'Mídia' || 
-         d.name === 'Infantil' || 
-         d.name === 'Louvor' || 
-         d.name === 'Una' || 
-         d.name === 'Bem-Vindos'))
-    );
-    
+
+    // Usa os deptBlocks já carregados na tela — sem mapeamento hardcoded
+    const uniqueDepts = deptBlocks
+      .filter(b => b.department_id !== null && b.scales.length > 0)
+      .map(b => ({ id: b.department_id as number, name: b.department_name }));
+
     setAvailableDepartments(uniqueDepts);
     setSelectedDepartmentsForPrint(uniqueDepts.map(d => d.id));
     setPrintingMode('cult');
@@ -337,28 +330,29 @@ export default function ScalesPage({ user }: Props) {
     const month = new Date().toISOString().slice(0, 7);
     const monthCults = availableCults.filter(c => c.date.startsWith(month));
     if (monthCults.length === 0) return;
-    
+
     const token = localStorage.getItem('token') || '';
-    const results = await Promise.all(
+
+    // Busca deptBlocks de todos os cultos do mês
+    const allBlocks = await Promise.all(
       monthCults.map(c =>
-        fetch(`/api/scales?cult_id=${c.id}`, { headers: { Authorization: `Bearer ${token}` } })
-          .then(r => r.json()).then((s: Scale[]) => s).catch(() => [] as Scale[])
+        fetch(`/api/scales/by-department/${c.id}`, { headers: { Authorization: `Bearer ${token}` } })
+          .then(r => r.json() as Promise<DeptBlock[]>)
+          .catch(() => [] as DeptBlock[])
       )
     );
-    
-    // Extrair departamentos únicos do mês
-    const allMonthScales = results.flat();
-    const { data: depts } = await api.get<Array<{ id: number; name: string }>>('/departments');
-    const uniqueDepts = (depts || []).filter(d => 
-      allMonthScales.some(s => s.sector_name && 
-        (d.name === 'Diáconos / Obreiros' || 
-         d.name === 'Mídia' || 
-         d.name === 'Infantil' || 
-         d.name === 'Louvor' || 
-         d.name === 'Una' || 
-         d.name === 'Bem-Vindos'))
-    );
-    
+
+    // Departamentos únicos com escalas no mês
+    const deptMap = new Map<number, string>();
+    for (const blocks of allBlocks) {
+      for (const b of blocks) {
+        if (b.department_id !== null && b.scales.length > 0) {
+          deptMap.set(b.department_id, b.department_name);
+        }
+      }
+    }
+    const uniqueDepts = Array.from(deptMap.entries()).map(([id, name]) => ({ id, name }));
+
     setAvailableDepartments(uniqueDepts);
     setSelectedDepartmentsForPrint(uniqueDepts.map(d => d.id));
     setPrintingMode('month');
