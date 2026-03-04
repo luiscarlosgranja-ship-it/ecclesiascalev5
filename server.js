@@ -984,13 +984,13 @@ app.delete('/api/settings/logo', auth, requireRole('SuperAdmin'), async (req, re
 app.get('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
   const { data, error } = await db
     .from('pastoral_appointments')
-    .select('*, users(email)')
+    .select('*, users(email, member_id, members(name))')
     .order('date', { ascending: true })
     .order('time', { ascending: true });
   if (error) return res.status(500).json({ message: error.message });
   const result = (data || []).map(a => ({
     ...a,
-    created_by_name: a.users?.email || null,
+    created_by_name: a.users?.members?.name || a.users?.email || null,
     users: undefined,
   }));
   res.json(result);

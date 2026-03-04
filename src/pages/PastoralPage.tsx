@@ -223,6 +223,11 @@ export default function PastoralPage({ user }: Props) {
                         <Badge color={STATUS_COLOR[a.status] || 'gray'}>{a.status}</Badge>
                       </div>
                       {a.notes && <p className="text-xs text-stone-500 mt-2">{a.notes}</p>}
+                      {a.created_by_name && (
+                        <p className="text-xs text-amber-600/70 mt-1 flex items-center gap-1">
+                          <User size={10} /> Agendado por: {a.created_by_name}
+                        </p>
+                      )}
                     </div>
                     {tab === 'upcoming' && (
                       <div className="flex items-center gap-2">
