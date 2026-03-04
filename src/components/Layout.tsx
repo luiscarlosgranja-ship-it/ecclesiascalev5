@@ -46,7 +46,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Pastoral',
     items: [
-      { id: 'pastoral', label: 'Atendimento Pastoral', icon: <HeartHandshake size={15} />, roles: ['SuperAdmin', 'Admin', 'Secretaria', 'Líder', 'Membro'] },
+      { id: 'pastoral', label: 'Gabinete Pastoral', icon: <HeartHandshake size={15} />, roles: ['SuperAdmin', 'Admin', 'Secretaria'] },
     ],
   },
   {
@@ -61,8 +61,9 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Segurança',
     items: [
-      { id: 'security',   label: 'Reset de Senha',      icon: <Shield size={15} />,   roles: ['SuperAdmin', 'Admin'] },
-      { id: 'activation', label: 'Ativação do Sistema', icon: <KeyRound size={15} />, roles: ['SuperAdmin', 'Admin', 'Líder', 'Membro', 'Secretaria'] },
+      { id: 'security',        label: 'Reset de Senha',      icon: <Shield size={15} />,   roles: ['SuperAdmin', 'Admin'] },
+      { id: 'activation-keys', label: 'Gerador de Chaves',   icon: <KeyRound size={15} />, roles: ['SuperAdmin'] },
+      { id: 'activation',      label: 'Ativação do Sistema', icon: <KeyRound size={15} />, roles: ['Admin', 'Líder', 'Membro', 'Secretaria'] },
     ],
   },
 ];
