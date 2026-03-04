@@ -178,12 +178,18 @@ export default function ScalesPage({ user }: Props) {
   };
 
   async function generateAuto() {
-    if (!selectedCult && autoType !== 'month') { setError('Selecione um culto antes de gerar'); return; }
+    if (autoType === 'specific' && !autoSpecificCult) { setError('Selecione um culto'); return; }
+    if ((autoType === 'standard' || autoType === 'thematic') && !selectedCult) { setError('Selecione um culto na tela principal'); return; }
     setSaving(true); setError(''); setAutoResult(null);
     try {
-      const payload = autoType === 'month'
-        ? { type: 'month', month: new Date().toISOString().slice(0, 7) }
-        : { type: autoType, cult_id: selectedCult };
+      let payload: Record<string, any>;
+      if (autoType === 'month') {
+        payload = { type: 'month', month: autoMonth };
+      } else if (autoType === 'specific') {
+        payload = { type: 'standard', cult_id: autoSpecificCult };
+      } else {
+        payload = { type: autoType, cult_id: selectedCult };
+      }
 
       const res = await api.post<{ message?: string; created?: number; cults_count?: number; scales_count?: number }>(
         '/scales/auto-generate', payload
@@ -198,12 +204,8 @@ export default function ScalesPage({ user }: Props) {
         label: AUTO_LABELS[autoType],
       });
 
-      if (autoType !== 'month') {
-        refetchScales();
-        fetchDeptBlocks();
-      } else {
-        refetchCults();
-      }
+      refetchScales();
+      fetchDeptBlocks();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao gerar escala');
     } finally { setSaving(false); }
@@ -722,23 +724,19 @@ export default function ScalesPage({ user }: Props) {
                 </div>
 
                 {/* Contadores */}
-                <div className={`grid gap-3 ${autoResult.cultsCount !== undefined ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                  {autoResult.cultsCount !== undefined && (
-                    <div className="bg-amber-900/30 rounded-lg p-3 text-center">
-                      <p className="text-amber-200 text-2xl font-bold">{autoResult.cultsCount}</p>
-                      <p className="text-amber-400 text-xs mt-0.5">
-                        {autoResult.cultsCount === 1 ? 'culto processado' : 'cultos processados'}
-                      </p>
-                    </div>
-                  )}
-                  {autoResult.created > 0 && (
-                    <div className="bg-emerald-900/30 rounded-lg p-3 text-center">
-                      <p className="text-emerald-200 text-2xl font-bold">{autoResult.created}</p>
-                      <p className="text-emerald-400 text-xs mt-0.5">
-                        {autoResult.created === 1 ? 'escala gerada' : 'escalas geradas'}
-                      </p>
-                    </div>
-                  )}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-amber-900/30 rounded-lg p-3 text-center">
+                    <p className="text-amber-200 text-2xl font-bold">{autoResult.cultsCount ?? 1}</p>
+                    <p className="text-amber-400 text-xs mt-0.5">
+                      {(autoResult.cultsCount ?? 1) === 1 ? 'culto processado' : 'cultos processados'}
+                    </p>
+                  </div>
+                  <div className="bg-emerald-900/30 rounded-lg p-3 text-center">
+                    <p className="text-emerald-200 text-2xl font-bold">{autoResult.created}</p>
+                    <p className="text-emerald-400 text-xs mt-0.5">
+                      {autoResult.created === 1 ? 'voluntário alocado' : 'voluntários alocados'}
+                    </p>
+                  </div>
                 </div>
               </div>
 
