@@ -71,6 +71,7 @@ export default function ScalesPage({ user }: Props) {
   // Mês selecionado para impressão do mês
   const [printMonthModal, setPrintMonthModal] = useState(false);
   const [selectedPrintMonth, setSelectedPrintMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [monthCultsForPrint, setMonthCultsForPrint] = useState<Cult[]>([]);
 
   // Resultado detalhado da geração automática
   const [autoResult, setAutoResult] = useState<AutoResult | null>(null);
@@ -384,13 +385,21 @@ export default function ScalesPage({ user }: Props) {
   }
 
   async function confirmPrintMonth() {
-    const monthCults = availableCults.filter(c => c.date.startsWith(selectedPrintMonth));
+    const token = localStorage.getItem('token') || '';
+
+    // Busca todos os cultos do mês direto da API (sem filtro de status)
+    let monthCults: Cult[] = [];
+    try {
+      const res = await fetch(`/api/cults`, { headers: { Authorization: `Bearer ${token}` } });
+      const all: Cult[] = await res.json();
+      monthCults = all.filter(c => c.date.startsWith(selectedPrintMonth));
+    } catch { monthCults = []; }
+
     if (monthCults.length === 0) {
       alert('Nenhum culto encontrado para este mês.');
       return;
     }
 
-    const token = localStorage.getItem('token') || '';
     const allBlocks = await Promise.all(
       monthCults.map(c =>
         fetch(`/api/scales/by-department/${c.id}`, { headers: { Authorization: `Bearer ${token}` } })
@@ -409,6 +418,8 @@ export default function ScalesPage({ user }: Props) {
     }
     const uniqueDepts = Array.from(deptMap.entries()).map(([id, name]) => ({ id, name }));
 
+    // Salva os cultos do mês para usar no executePrint
+    setMonthCultsForPrint(monthCults);
     setAvailableDepartments(uniqueDepts);
     setSelectedDepartmentsForPrint(uniqueDepts.map(d => d.id));
     setPrintingMode('month');
@@ -430,13 +441,11 @@ export default function ScalesPage({ user }: Props) {
         deptBlocks, // ← dados reais da API por departamento
       );
     } else {
-      const month = selectedPrintMonth;
-      const monthCults = availableCults.filter(c => c.date.startsWith(month));
+      const monthCults = monthCultsForPrint;
       if (monthCults.length === 0) return;
 
       const token = localStorage.getItem('token') || '';
 
-      // Buscar deptBlocks para cada culto do mês via /scales/by-department
       const deptBlocksMap = new Map<number, DeptBlock[]>();
       await Promise.all(
         monthCults.map(async (c) => {
@@ -455,13 +464,13 @@ export default function ScalesPage({ user }: Props) {
       await exportScalePDF(
         [],
         null,
-        `Escalas — ${month}`,
+        `Escalas — ${selectedPrintMonth}`,
         undefined,
         monthCults,
         undefined,
         selectedDepartmentsForPrint,
         undefined,
-        deptBlocksMap, // ← dados reais da API por culto
+        deptBlocksMap,
       );
     }
     setPrintConfigModal(false);
@@ -517,7 +526,7 @@ export default function ScalesPage({ user }: Props) {
                     <Plus size={16} /> Adicionar Voluntário
                   </Button>
                   {isAdmin(user.role) && (
-                    <Button size="sm" variant="danger" onClick={openRemoveSelectModal}>
+                    <Button size="sm" variant="danger" onClick={() => setDeleteScaleModal(true)}>
                       <Trash2 size={16} /> Remover Escala
                     </Button>
                   )}
@@ -886,23 +895,38 @@ export default function ScalesPage({ user }: Props) {
               <p><span className="text-stone-200 font-semibold">Data:</span> <span className="text-stone-300">{selectedCultData.date}</span></p>
             </div>
           )}
-          <div className="bg-stone-800 border border-stone-600 rounded-lg p-3 space-y-2">
-            <p className="text-stone-200 text-xs font-semibold">O sistema respeitará as seguintes regras:</p>
-            <ul className="text-stone-300 text-xs space-y-1 list-disc list-inside leading-relaxed">
-              <li>Não escalar o mesmo voluntário duas vezes no culto</li>
-              <li>Máximo 3 escalas por voluntário no mês</li>
-              <li>Setores já preenchidos serão mantidos</li>
-            </ul>
-          </div>
-          {fillMsg && (
-            <p className={`text-sm font-medium ${fillMsg.startsWith('❌') ? 'text-red-400' : 'text-emerald-400'}`}>{fillMsg}</p>
+
+          {fillMsg && !fillMsg.startsWith('❌') ? (
+            /* ── Sucesso ── */
+            <div className="space-y-4">
+              <div className="bg-emerald-900/20 border border-emerald-700/40 rounded-xl p-4 flex items-center gap-3">
+                <CheckCircle2 size={20} className="text-emerald-400 flex-shrink-0" />
+                <p className="text-emerald-300 text-sm font-medium">{fillMsg}</p>
+              </div>
+              <Button className="w-full" onClick={() => { setFillModal(false); setFillMsg(''); }}>
+                <CheckCircle size={15} /> Concluído
+              </Button>
+            </div>
+          ) : (
+            /* ── Formulário ── */
+            <>
+              <div className="bg-stone-800 border border-stone-600 rounded-lg p-3 space-y-2">
+                <p className="text-stone-200 text-xs font-semibold">O sistema respeitará as seguintes regras:</p>
+                <ul className="text-stone-300 text-xs space-y-1 list-disc list-inside leading-relaxed">
+                  <li>Não escalar o mesmo voluntário duas vezes no culto</li>
+                  <li>Máximo 3 escalas por voluntário no mês</li>
+                  <li>Setores já preenchidos serão mantidos</li>
+                </ul>
+              </div>
+              {fillMsg && <p className="text-red-400 text-sm font-medium">{fillMsg}</p>}
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={() => { setFillModal(false); setFillMsg(''); }}>Cancelar</Button>
+                <Button onClick={fillCult} loading={fillLoading}>
+                  <Zap size={15} /> Preencher
+                </Button>
+              </div>
+            </>
           )}
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={() => { setFillModal(false); setFillMsg(''); }}>Cancelar</Button>
-            <Button onClick={fillCult} loading={fillLoading} disabled={!!fillMsg && !fillMsg.startsWith('❌')}>
-              <Zap size={15} /> Preencher
-            </Button>
-          </div>
         </div>
       </Modal>
 
