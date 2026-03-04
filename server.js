@@ -7,6 +7,7 @@ import { randomBytes } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
+import pastoralCabinetRoutes from './src/routes/pastoralCabinet.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -1178,6 +1179,9 @@ app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin'), asy
     res.status(500).json({ message: 'Erro ao enviar e-mail. Verifique as configurações SMTP na aba Config. E-mail.' });
   }
 });
+
+// ─── Pastoral Cabinet ────────────────────────────────────────────────────────
+app.use('/api/pastoral-cabinet', auth, pastoralCabinetRoutes);
 
 // ─── Static (production) ──────────────────────────────────────────────────────
 if (process.env.NODE_ENV === 'production') {
