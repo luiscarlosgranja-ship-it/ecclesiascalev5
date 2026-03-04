@@ -24,6 +24,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [churchName, setChurchName] = useState('');
 
   useEffect(() => {
+    // Detecta sessão expirada vinda do interceptor de 401
+    if (sessionStorage.getItem('session_expired') === '1') {
+      sessionStorage.removeItem('session_expired');
+      setError('Sua sessão expirou. Faça login novamente.');
+    }
+
     fetch('/api/public/departments')
       .then(r => r.ok ? r.json() : [])
       .then(data => setDepartments(Array.isArray(data) ? data : []))

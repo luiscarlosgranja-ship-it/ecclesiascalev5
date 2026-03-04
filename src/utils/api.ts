@@ -40,6 +40,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
+    // Token expirado ou inválido — redireciona para login com aviso
+    if (res.status === 401) {
+      localStorage.removeItem('ecclesia_user');
+      sessionStorage.setItem('session_expired', '1');
+      window.location.reload();
+      throw new Error('Sessão expirada. Faça login novamente.');
+    }
     const message = data?.message || `Erro ${res.status}: ${res.statusText || 'Falha na requisição'}`;
     throw new Error(message);
   }
