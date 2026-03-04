@@ -3,7 +3,7 @@ import { CheckCircle, XCircle, History } from 'lucide-react';
 import { Card, Button, Badge } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
-import { getSupabase } from '../utils/supabaseClient';
+import { supabase } from '../utils/supabaseClient';
 import type { AuthUser, Swap } from '../types';
 import { isAdmin } from '../utils/permissions';
 
@@ -15,8 +15,8 @@ export default function SwapsPage({ user }: Props) {
 
   // ─── Supabase Realtime ───────────────────────────────────────────────────────
   useEffect(() => {
-    const sb = getSupabase();
-    if (!sb) return; // Realtime desativado se env vars não configuradas
+    
+    if (!supabase) return; // Realtime desativado se env vars não configuradas
 
     const channel = sb
       .channel('swaps-realtime')
@@ -25,7 +25,7 @@ export default function SwapsPage({ user }: Props) {
       })
       .subscribe();
 
-    return () => { sb.removeChannel(channel); };
+    return () => { supabase.removeChannel(channel); };
   }, [refetch]);
 
   const pending = (swaps || []).filter(s => s.status === 'Pendente');
