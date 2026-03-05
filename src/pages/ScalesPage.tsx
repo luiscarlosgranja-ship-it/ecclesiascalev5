@@ -3,7 +3,7 @@ import { Plus, Printer, Zap, Trash2, CheckCircle, Repeat, Calendar, Users, Chevr
 import { Card, Button, Modal, Badge, Select, Spinner, Input } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
-import { supabase } from "../utils/supabaseClient";
+import { getSupabase } from '../utils/supabaseClient';
 import type { AuthUser, Scale, Cult, Member, Sector, CultType } from '../types';
 import { isAdmin, isLeader, isSuperAdmin } from '../utils/permissions';
 import { exportScalePDF } from '../utils/pdf';
@@ -72,9 +72,6 @@ export default function ScalesPage({ user }: Props) {
   const [availableDepartments, setAvailableDepartments] = useState<Array<{ id: number; name: string }>>([]);
   const [selectedDepartmentsForPrint, setSelectedDepartmentsForPrint] = useState<number[]>([]);
   const [printingMode, setPrintingMode] = useState<'cult' | 'month'>('cult');
-  // Dados de impressão do mês (blocos por culto)
-  const [printDeptBlocksByCult, setPrintDeptBlocksByCult] = useState<Map<number, DeptBlock[]>>(new Map());
-  const [printMonthCults, setPrintMonthCults] = useState<Cult[]>([]);
 
   const { data: cults, refetch: refetchCults } = useApi<Cult[]>('/cults?status=Agendado');
   const { data: scales, refetch: refetchScales } = useApi<Scale[]>(
@@ -112,8 +109,9 @@ export default function ScalesPage({ user }: Props) {
   useEffect(() => { refetchCultsRef.current = refetchCults; }, [refetchCults]);
 
   useEffect(() => {
-    if (!supabase) return;
-    const channel = supabase
+    const sb = getSupabase();
+    if (!sb) return;
+    const channel = sb
       .channel('scales-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'scales' }, () => {
         if (suppressRealtimeRef.current) return;
@@ -130,7 +128,7 @@ export default function ScalesPage({ user }: Props) {
       .subscribe();
     return () => {
       if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
-      supabase.removeChannel(channel);
+      sb.removeChannel(channel);
     };
   }, []);
 
@@ -155,20 +153,6 @@ export default function ScalesPage({ user }: Props) {
   }
 
   // ─── Auto generate com resultado detalhado ───────────────────────────────────
-  // --- Feriados nacionais fixos (MM-DD) ---
-  const FERIADOS_BR = new Set([
-    '01-01','04-21','05-01','09-07','10-12','11-02','11-15','11-20','12-25',
-  ]);
-
-  function isThematicCult(cult: Cult): boolean {
-    if (!cult.date) return false;
-    const parts = cult.date.split('-').map(Number);
-    const dow = new Date(parts[0], parts[1] - 1, parts[2]).getDay();
-    const mmdd = String(parts[1]).padStart(2,'0') + '-' + String(parts[2]).padStart(2,'0');
-    // Segunda(1), Sexta(5), Sabado(6) ou feriado nacional
-    return dow === 1 || dow === 5 || dow === 6 || FERIADOS_BR.has(mmdd);
-  }
-
   function openAutoModal() {
     setAutoModal(true);
     setAutoResult(null);
@@ -187,6 +171,8 @@ export default function ScalesPage({ user }: Props) {
   }
 
   const AUTO_LABELS: Record<string, string> = {
+  'empty-month':    'Vagas vazias — Mês Inteiro',
+  'empty-specific': 'Vagas vazias — Culto Específico',
     month: 'Mês Inteiro',
     standard: 'Cultos Padrão',
     thematic: 'Cultos Temáticos',
@@ -194,29 +180,29 @@ export default function ScalesPage({ user }: Props) {
   };
 
   async function generateAuto() {
-    if (autoType === 'specific' && !autoSpecificCult) { setError('Selecione um culto'); return; }
-    if (autoType === 'standard' && !selectedCult) { setError('Selecione um culto na tela principal'); return; }
+    if ((autoType === 'specific' || autoType === 'empty-specific') && !autoSpecificCult) { setError('Selecione um culto'); return; }
+    if ((autoType === 'standard' || autoType === 'thematic') && !selectedCult) { setError('Selecione um culto na tela principal'); return; }
     setSaving(true); setError(''); setAutoResult(null);
     try {
       let payload: Record<string, any>;
-      if (autoType === 'month') {
+      let endpoint = '/scales/auto-generate';
+
+      if (autoType === 'empty-month') {
+        endpoint = '/scales/generate-empty';
+        payload = { month: autoMonth };
+      } else if (autoType === 'empty-specific') {
+        endpoint = '/scales/generate-empty';
+        payload = { cult_id: autoSpecificCult };
+      } else if (autoType === 'month') {
         payload = { type: 'month', month: autoMonth };
       } else if (autoType === 'specific') {
-        payload = { type: 'specific', cult_id: autoSpecificCult };
-      } else if (autoType === 'thematic') {
-        const thematicIds = availableCults.filter(c => isThematicCult(c)).map(c => c.id);
-        if (thematicIds.length === 0) {
-          setError('Nenhum culto tematico encontrado (Seg/Sex/Sab/Feriados) entre os cultos agendados.');
-          setSaving(false);
-          return;
-        }
-        payload = { type: 'thematic', cult_ids: thematicIds };
+        payload = { type: 'standard', cult_id: autoSpecificCult };
       } else {
         payload = { type: autoType, cult_id: selectedCult };
       }
 
       const res = await api.post<{ message?: string; created?: number; cults_count?: number; scales_count?: number }>(
-        '/scales/auto-generate', payload
+        endpoint, payload
       );
 
       const created = res?.scales_count ?? res?.created ?? 0;
@@ -328,26 +314,22 @@ export default function ScalesPage({ user }: Props) {
   const selectedCultData = availableCults.find(c => c.id === selectedCult);
 
   async function handlePrint() {
-    if (!selectedCultData) return;
-    // Usa deptBlocks já carregados para extrair departamentos reais da escala
-    const uniqueDepts: Array<{ id: number; name: string }> = deptBlocks
-      .filter(b => b.department_id !== null && b.scales.length > 0)
-      .map(b => ({ id: b.department_id as number, name: b.department_name }))
-      .filter((d, i, arr) => arr.findIndex(x => x.id === d.id) === i);
-
-    if (uniqueDepts.length === 0) {
-      try {
-        const depts = await api.get<Array<{ id: number; name: string }>>('/departments');
-        setAvailableDepartments(depts || []);
-        setSelectedDepartmentsForPrint((depts || []).map(d => d.id));
-      } catch {
-        setAvailableDepartments([]);
-        setSelectedDepartmentsForPrint([]);
-      }
-    } else {
-      setAvailableDepartments(uniqueDepts);
-      setSelectedDepartmentsForPrint(uniqueDepts.map(d => d.id));
-    }
+    if (!scales || !selectedCultData) return;
+    
+    // Extrair departamentos únicos das escalas
+    const { data: depts } = await api.get<Array<{ id: number; name: string }>>('/departments');
+    const uniqueDepts = (depts || []).filter(d => 
+      scales.some(s => s.sector_name && 
+        (d.name === 'Diáconos / Obreiros' || 
+         d.name === 'Mídia' || 
+         d.name === 'Infantil' || 
+         d.name === 'Louvor' || 
+         d.name === 'Una' || 
+         d.name === 'Bem-Vindos'))
+    );
+    
+    setAvailableDepartments(uniqueDepts);
+    setSelectedDepartmentsForPrint(uniqueDepts.map(d => d.id));
     setPrintingMode('cult');
     setPrintConfigModal(true);
   }
@@ -356,86 +338,68 @@ export default function ScalesPage({ user }: Props) {
     const month = new Date().toISOString().slice(0, 7);
     const monthCults = availableCults.filter(c => c.date.startsWith(month));
     if (monthCults.length === 0) return;
-
-    // Busca blocos por departamento para cada culto do mês
-    const blocksMap = new Map<number, typeof deptBlocks>();
-    const allDeptIds = new Set<number>();
-    const allDeptNames = new Map<number, string>();
-
-    await Promise.all(
-      monthCults.map(async c => {
-        try {
-          const blocks = await api.get<typeof deptBlocks>(`/scales/by-department/${c.id}`);
-          blocksMap.set(c.id, blocks || []);
-          (blocks || []).forEach(b => {
-            if (b.department_id !== null && b.scales.length > 0) {
-              allDeptIds.add(b.department_id as number);
-              allDeptNames.set(b.department_id as number, b.department_name);
-            }
-          });
-        } catch {
-          blocksMap.set(c.id, []);
-        }
-      })
+    
+    const token = localStorage.getItem('token') || '';
+    const results = await Promise.all(
+      monthCults.map(c =>
+        fetch(`/api/scales?cult_id=${c.id}`, { headers: { Authorization: `Bearer ${token}` } })
+          .then(r => r.json()).then((s: Scale[]) => s).catch(() => [] as Scale[])
+      )
     );
-
-    const uniqueDepts: Array<{ id: number; name: string }> = Array.from(allDeptIds).map(id => ({
-      id,
-      name: allDeptNames.get(id) || 'Sem Departamento',
-    }));
-
-    // Salva o mapa de blocos para uso em executePrint
-    setPrintDeptBlocksByCult(blocksMap);
-    setPrintMonthCults(monthCults);
-
-    if (uniqueDepts.length === 0) {
-      try {
-        const depts = await api.get<Array<{ id: number; name: string }>>('/departments');
-        setAvailableDepartments(depts || []);
-        setSelectedDepartmentsForPrint((depts || []).map(d => d.id));
-      } catch {
-        setAvailableDepartments([]);
-        setSelectedDepartmentsForPrint([]);
-      }
-    } else {
-      setAvailableDepartments(uniqueDepts);
-      setSelectedDepartmentsForPrint(uniqueDepts.map(d => d.id));
-    }
-
+    
+    // Extrair departamentos únicos do mês
+    const allMonthScales = results.flat();
+    const { data: depts } = await api.get<Array<{ id: number; name: string }>>('/departments');
+    const uniqueDepts = (depts || []).filter(d => 
+      allMonthScales.some(s => s.sector_name && 
+        (d.name === 'Diáconos / Obreiros' || 
+         d.name === 'Mídia' || 
+         d.name === 'Infantil' || 
+         d.name === 'Louvor' || 
+         d.name === 'Una' || 
+         d.name === 'Bem-Vindos'))
+    );
+    
+    setAvailableDepartments(uniqueDepts);
+    setSelectedDepartmentsForPrint(uniqueDepts.map(d => d.id));
     setPrintingMode('month');
     setPrintConfigModal(true);
   }
 
   async function executePrint() {
     if (printingMode === 'cult') {
-      if (!selectedCultData) return;
+      if (!scales || !selectedCultData) return;
       await exportScalePDF(
-        scales || [],
-        selectedCultData,
+        scales, 
+        selectedCultData, 
         `Escala — ${selectedCultData.type_name || selectedCultData.name || 'Culto'}`,
         undefined,
         undefined,
         undefined,
-        selectedDepartmentsForPrint,
-        // Passa os blocos reais para impressão por departamento
-        deptBlocks,
+        selectedDepartmentsForPrint
       );
     } else {
       const month = new Date().toISOString().slice(0, 7);
-      const cultsToUse = printMonthCults.length > 0 ? printMonthCults : availableCults.filter(c => c.date.startsWith(month));
-      if (cultsToUse.length === 0) return;
-
+      const monthCults = availableCults.filter(c => c.date.startsWith(month));
+      if (monthCults.length === 0) return;
+      
+      const token = localStorage.getItem('token') || '';
+      const results = await Promise.all(
+        monthCults.map(c =>
+          fetch(`/api/scales?cult_id=${c.id}`, { headers: { Authorization: `Bearer ${token}` } })
+            .then(r => r.json()).then((s: Scale[]) => s).catch(() => [] as Scale[])
+        )
+      );
+      
+      const allMonthScales = results.flat();
       await exportScalePDF(
-        [],
-        null,
-        `Escalas — ${month}`,
-        [],
-        cultsToUse,
+        allMonthScales, 
+        null, 
+        `Escalas — ${month}`, 
+        allMonthScales, 
+        monthCults,
         undefined,
-        selectedDepartmentsForPrint,
-        undefined,
-        // Passa o mapa de blocos por culto para impressão mensal
-        printDeptBlocksByCult,
+        selectedDepartmentsForPrint
       );
     }
     setPrintConfigModal(false);
@@ -473,7 +437,7 @@ export default function ScalesPage({ user }: Props) {
       {/* ─── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <h1 className="text-xl font-bold text-stone-100">Escalas</h1>
-        <div className="flex gap-1.5 flex-wrap items-center">
+        <div className="flex gap-2 flex-wrap">
           {canManage && (
             <>
               <Button variant="secondary" size="sm" onClick={openAutoModal}>
@@ -513,11 +477,11 @@ export default function ScalesPage({ user }: Props) {
       {/* ─── Cult selector ──────────────────────────────────────────────────── */}
       <Card className="p-4">
         <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Selecionar Culto / Evento</label>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-4">
           <select
             value={selectedCult || ''}
             onChange={e => setSelectedCult(Number(e.target.value) || null)}
-            className="w-full sm:w-auto sm:min-w-80 bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+            className="w-full md:w-auto md:min-w-96 bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
           >
             <option value="">Selecione um culto...</option>
             {availableCults.map(c => (
@@ -801,11 +765,27 @@ export default function ScalesPage({ user }: Props) {
                 O sistema respeitará as regras de não-repetição (máx. 3x/mês) e evitará duplicidade de setor.
               </p>
               <div className="space-y-2">
+                <p className="text-xs text-amber-400 uppercase tracking-wide">Criar vagas em branco</p>
                 {[
-                  { value: 'month',    label: 'Mês Inteiro',      desc: 'Gera escalas para todos os cultos do mês' },
-                  { value: 'specific', label: 'Culto Específico', desc: 'Selecione um culto da lista' },
-                  { value: 'standard', label: 'Cultos Padrão',    desc: 'Culto selecionado na tela' },
-                  { value: 'thematic', label: 'Cultos Temáticos', desc: 'Todos os cultos fora do padrão (Seg/Sex/Sáb/Feriados)' },
+                  { value: 'empty-month',    label: 'Mês Inteiro (vagas vazias)',      desc: 'Cria uma vaga por setor em cada culto do mês — preencha manualmente' },
+                  { value: 'empty-specific', label: 'Culto Específico (vagas vazias)', desc: 'Cria vagas em branco para um culto específico' },
+                ].map(opt => (
+                  <label key={opt.value}
+                    className={`flex items-start gap-3 cursor-pointer p-3 rounded-lg border transition-all ${autoType === opt.value ? 'border-amber-500 bg-amber-500/10' : 'border-stone-700 hover:border-amber-600'}`}>
+                    <input type="radio" value={opt.value} checked={autoType === opt.value}
+                      onChange={() => setAutoType(opt.value as any)} className="accent-amber-500 mt-0.5" />
+                    <div>
+                      <p className="text-stone-200 text-sm">{opt.label}</p>
+                      <p className="text-stone-500 text-xs">{opt.desc}</p>
+                    </div>
+                  </label>
+                ))}
+                <p className="text-xs text-stone-500 uppercase tracking-wide pt-1">Preenchimento automático</p>
+                {[
+                  { value: 'month',    label: 'Mês Inteiro',      desc: 'Distribui voluntários automaticamente em todos os cultos do mês' },
+                  { value: 'specific', label: 'Culto Específico', desc: 'Distribui voluntários em um culto específico' },
+                  { value: 'standard', label: 'Cultos Padrão',    desc: 'Preenche o culto selecionado na tela' },
+                  { value: 'thematic', label: 'Cultos Temáticos', desc: 'Preenche o culto selecionado na tela' },
                 ].map(opt => (
                   <label key={opt.value}
                     className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-stone-700 hover:border-amber-600 transition-all">
@@ -819,8 +799,8 @@ export default function ScalesPage({ user }: Props) {
                 ))}
               </div>
 
-              {/* Seletor de mês — só para Mês Inteiro */}
-              {autoType === 'month' && (
+              {/* Seletor de mês — para Mês Inteiro e vagas vazias por mês */}
+              {(autoType === 'month' || autoType === 'empty-month') && (
                 <div className="space-y-1">
                   <label className="text-stone-400 text-xs">Mês de referência</label>
                   <input
@@ -833,7 +813,7 @@ export default function ScalesPage({ user }: Props) {
               )}
 
               {/* Seletor de culto específico */}
-              {autoType === 'specific' && (
+              {(autoType === 'specific' || autoType === 'empty-specific') && (
                 <div className="space-y-1">
                   <label className="text-stone-400 text-xs">Selecione o culto</label>
                   <select
@@ -851,14 +831,14 @@ export default function ScalesPage({ user }: Props) {
                 </div>
               )}
 
-              {autoType === 'standard' && !selectedCult && (
+              {(autoType === 'standard' || autoType === 'thematic') && !selectedCult && (
                 <p className="text-amber-400 text-xs">⚠️ Selecione um culto na tela principal antes de gerar.</p>
               )}
               {error && <p className="text-red-400 text-xs">{error}</p>}
               <div className="flex gap-3">
                 <Button variant="outline" onClick={closeAutoModal}>Cancelar</Button>
                 <Button onClick={generateAuto} loading={saving}
-                  disabled={(autoType === 'specific' && !autoSpecificCult) || (autoType === 'standard' && !selectedCult)}>
+                  disabled={((autoType === 'specific' || autoType === 'empty-specific') && !autoSpecificCult) || ((autoType === 'standard' || autoType === 'thematic') && !selectedCult)}>
                   Gerar
                 </Button>
               </div>
