@@ -163,9 +163,9 @@ export default function CultsPage({ user }: Props) {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <h1 className="text-xl font-bold text-stone-100">Cultos / Eventos</h1>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2">
           <Button variant="secondary" size="sm" onClick={openGenerateModal}>
             <Calendar size={16} /> Gerar Mês
           </Button>
@@ -192,7 +192,7 @@ export default function CultsPage({ user }: Props) {
 
       {/* Lista */}
       <Card className="overflow-hidden">
-        <div className="rsp-scroll-x">
+        <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-stone-700 bg-stone-800/50">
@@ -297,13 +297,20 @@ export default function CultsPage({ user }: Props) {
                 <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Tipos de Culto</label>
                 <div className="space-y-2">
                   {(cultTypes || []).map(ct => (
-                    <label key={ct.id} className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-stone-800 transition-colors">
+                    <label key={ct.id} className="flex items-start gap-3 cursor-pointer p-2 rounded-lg hover:bg-stone-800 transition-colors">
                       <input type="checkbox"
                         checked={selectedTypes.includes(ct.id)}
                         onChange={e => setSelectedTypes(prev => e.target.checked ? [...prev, ct.id] : prev.filter(id => id !== ct.id))}
-                        className="w-4 h-4 accent-amber-500" />
-                      <span className="text-stone-200 text-sm">{ct.name}</span>
-                      {ct.default_time && <span className="text-stone-500 text-xs ml-auto">{ct.default_time}</span>}
+                        className="w-4 h-4 accent-amber-500 mt-0.5" />
+                      <div className="flex-1">
+                        <span className="text-stone-200 text-sm">{ct.name}</span>
+                        {(ct.default_day === null || ct.default_day === undefined) && (
+                          <p className="text-orange-400 text-xs mt-0.5">⚠️ Sem dia fixo — não será gerado automaticamente</p>
+                        )}
+                      </div>
+                      {ct.default_time && (ct.default_day !== null && ct.default_day !== undefined) && (
+                        <span className="text-stone-500 text-xs">{ct.default_time}</span>
+                      )}
                     </label>
                   ))}
                 </div>

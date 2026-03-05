@@ -517,7 +517,9 @@ app.post('/api/cults/generate-month', auth, requireRole('SuperAdmin', 'Admin'), 
     const dateStr = `${year}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
     for (const ct of cultTypes) {
-      if (ct.default_day === dayOfWeek || ct.default_day === null) {
+      // Só gera se o dia da semana bater com o padrão do tipo de culto
+      // default_day null ou undefined = tipo sem dia fixo, não gera automaticamente
+      if (ct.default_day !== null && ct.default_day !== undefined && ct.default_day === dayOfWeek) {
         toInsert.push({ type_id: ct.id, date: dateStr, time: ct.default_time || '19:00', status: 'Agendado' });
       }
     }
@@ -718,6 +720,51 @@ app.put('/api/scales/:id/confirm', auth, async (req, res) => {
 app.delete('/api/scales/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   await db.from('scales').delete().eq('id', req.params.id);
   res.json({ message: 'Removido' });
+});
+
+// ─── Generate Empty Scale Slots (one per sector per cult, no member) ────────
+app.post('/api/scales/generate-empty', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
+  const { month, cult_id } = req.body;
+  if (!month && !cult_id) return res.status(400).json({ message: 'Informe month ou cult_id' });
+
+  // Fetch target cults
+  let cultsQuery = db.from('cults').select('*').neq('status', 'Cancelado');
+  if (month) cultsQuery = cultsQuery.like('date', `${month}%`);
+  else       cultsQuery = cultsQuery.eq('id', cult_id);
+
+  const { data: cults } = await cultsQuery;
+  if (!cults?.length) return res.json({ message: 'Nenhum culto encontrado no período', created: 0, cults_count: 0 });
+
+  const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
+  if (!sectors?.length) return res.status(400).json({ message: 'Nenhum setor ativo cadastrado' });
+
+  let totalCreated = 0;
+
+  for (const cult of cults) {
+    // Find which sectors already have a slot for this cult
+    const { data: existing } = await db.from('scales').select('sector_id').eq('cult_id', cult.id);
+    const usedSectorIds = new Set((existing || []).map(s => s.sector_id));
+    const pendingSectors = sectors.filter(s => !usedSectorIds.has(s.id));
+    if (!pendingSectors.length) continue;
+
+    // Insert empty slot (member_id = null) for each missing sector
+    const toInsert = pendingSectors.map(s => ({
+      cult_id: cult.id,
+      sector_id: s.id,
+      department_id: s.department_id || null,
+      member_id: null,
+      status: 'Pendente',
+    }));
+
+    const { error } = await db.from('scales').insert(toInsert);
+    if (!error) totalCreated += toInsert.length;
+  }
+
+  res.json({
+    message: `${totalCreated} vaga(s) criada(s) em ${cults.length} culto(s)`,
+    created: totalCreated,
+    cults_count: cults.length,
+  });
 });
 
 // ─── Auto Generate — OTIMIZADO ────────────────────────────────────────────────
