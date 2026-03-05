@@ -160,7 +160,7 @@ export default function MembersPage({ user }: Props) {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
         <h1 className="text-xl font-bold text-stone-100">Voluntários</h1>
         {(isAdmin(user.role) || isLeader(user.role)) && (
           <Button onClick={openNew} size="sm"><Plus size={16} />Novo Voluntário</Button>
@@ -182,8 +182,8 @@ export default function MembersPage({ user }: Props) {
       </div>
 
       {/* Controls */}
-      <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-48">
+      <div className="flex flex-wrap gap-2">
+        <div className="relative flex-1 min-w-[160px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" size={16} />
           <input
             type="text" placeholder="Buscar voluntário..." value={search} onChange={e => setSearch(e.target.value)}
@@ -210,7 +210,7 @@ export default function MembersPage({ user }: Props) {
           {loading ? (
             <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-amber-500" size={24} /></div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="rsp-scroll-x">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-stone-700 bg-stone-800/50">
@@ -290,7 +290,7 @@ export default function MembersPage({ user }: Props) {
           {loading ? (
             <div className="flex items-center justify-center py-12"><Loader2 className="animate-spin text-amber-500" size={24} /></div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="rsp-scroll-x">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-stone-700 bg-stone-800/50">

@@ -473,7 +473,7 @@ export default function ScalesPage({ user }: Props) {
       {/* ─── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <h1 className="text-xl font-bold text-stone-100">Escalas</h1>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-1.5 flex-wrap items-center">
           {canManage && (
             <>
               <Button variant="secondary" size="sm" onClick={openAutoModal}>
@@ -513,11 +513,11 @@ export default function ScalesPage({ user }: Props) {
       {/* ─── Cult selector ──────────────────────────────────────────────────── */}
       <Card className="p-4">
         <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Selecionar Culto / Evento</label>
-        <div className="flex flex-wrap items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3">
           <select
             value={selectedCult || ''}
             onChange={e => setSelectedCult(Number(e.target.value) || null)}
-            className="w-full md:w-auto md:min-w-96 bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+            className="w-full sm:w-auto sm:min-w-80 bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
           >
             <option value="">Selecione um culto...</option>
             {availableCults.map(c => (

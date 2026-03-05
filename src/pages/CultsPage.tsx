@@ -163,9 +163,9 @@ export default function CultsPage({ user }: Props) {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
         <h1 className="text-xl font-bold text-stone-100">Cultos / Eventos</h1>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button variant="secondary" size="sm" onClick={openGenerateModal}>
             <Calendar size={16} /> Gerar Mês
           </Button>
@@ -192,7 +192,7 @@ export default function CultsPage({ user }: Props) {
 
       {/* Lista */}
       <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="rsp-scroll-x">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-stone-700 bg-stone-800/50">

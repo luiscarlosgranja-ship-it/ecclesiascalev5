@@ -3,7 +3,8 @@ import {
   Users, Calendar, Repeat, Settings, LogOut, Bell,
   BookOpen, Layers, Shield, Wifi, WifiOff,
   Database, Menu, X, Building2, Grid3X3, Church, RefreshCcw, KeyRound, UserCog,
-  Sun, Moon, HeartHandshake, Phone, Mail, Image, ChevronDown
+  Sun, Moon, HeartHandshake, Phone, Mail, Image, ChevronDown,
+  Home as HomeIcon, LayoutDashboard
 } from 'lucide-react';
 import type { AuthUser } from '../types';
 import { useNotifications } from '../hooks/useApi';
@@ -208,6 +209,46 @@ function GroupDropdown({ group, page, setPage, accent, light, border }: {
           })}
         </div>
       )}
+
+      {/* ─── Bottom nav (mobile only) ─────────────────────────────────────────── */}
+      <nav className="md:hidden" style={{
+        position: 'fixed', bottom: 0, left: 0, right: 0, height: 58,
+        background: 'var(--bg-surface)', borderTop: '1px solid var(--border-soft)',
+        display: 'flex', zIndex: 90, boxShadow: '0 -2px 12px rgba(0,0,0,.07)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}>
+        {/* Dashboard */}
+        <button onClick={() => { setPage('dashboard'); setMobileOpen(false); }} style={{
+          flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 2, background: 'none', border: 'none', cursor: 'pointer', position: 'relative',
+          color: page === 'dashboard' ? 'var(--accent)' : 'var(--text-muted)',
+        }}>
+          {page === 'dashboard' && <span style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: 22, height: 2.5, borderRadius: 2, background: 'var(--accent)' }} />}
+          <LayoutDashboard size={19} />
+          <span style={{ fontSize: 9, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: page === 'dashboard' ? 700 : 400, letterSpacing: 0.1 }}>Início</span>
+        </button>
+        {/* First 3 items from first visible group */}
+        {(filteredGroups[0]?.items || []).slice(0, 3).map(item => (
+          <button key={item.id} onClick={() => { setPage(item.id); setMobileOpen(false); }} style={{
+            flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            gap: 2, background: 'none', border: 'none', cursor: 'pointer', position: 'relative',
+            color: page === item.id ? 'var(--accent)' : 'var(--text-muted)',
+          }}>
+            {page === item.id && <span style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: 22, height: 2.5, borderRadius: 2, background: 'var(--accent)' }} />}
+            <span style={{ display: 'flex' }}>{item.icon}</span>
+            <span style={{ fontSize: 9, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: page === item.id ? 700 : 400, whiteSpace: 'nowrap', letterSpacing: 0.1 }}>{item.label}</span>
+          </button>
+        ))}
+        {/* Menu button */}
+        <button onClick={() => setMobileOpen(o => !o)} style={{
+          flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 2, background: 'none', border: 'none', cursor: 'pointer',
+          color: mobileOpen ? 'var(--accent)' : 'var(--text-muted)',
+        }}>
+          <Menu size={19} />
+          <span style={{ fontSize: 9, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 400, letterSpacing: 0.1 }}>Menu</span>
+        </button>
+      </nav>
     </div>
   );
 }
@@ -215,6 +256,11 @@ function GroupDropdown({ group, page, setPage, accent, light, border }: {
 export default function Layout({ user, page, setPage, onLogout, children }: LayoutProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
+
+  // Close drawer when page changes
+  useEffect(() => { setMobileOpen(false); }, [page]);
+  // Lock body scroll while drawer open
+  useEffect(() => { document.body.style.overflow = mobileOpen ? 'hidden' : ''; return () => { document.body.style.overflow = ''; }; }, [mobileOpen]);
 
   useEffect(() => {
     const on = () => setOnline(true);
@@ -293,7 +339,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
   const currentBorder = currentGroup ? (GROUP_BORDER[currentGroup.label] || '#fcd34d') : '#fcd34d';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-base)', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: 'var(--bg-base)', overflow: 'hidden' }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Lora:wght@600;700&display=swap');
         *, *::before, *::after { box-sizing: border-box; }
@@ -340,9 +386,41 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
 
         @keyframes spDrop   { from { opacity:0; transform:translateY(-6px) scaleY(.96); } to { opacity:1; transform:translateY(0) scaleY(1); } }
         @keyframes spMobile { from { opacity:0; transform:translateX(-12px); } to { opacity:1; transform:translateX(0); } }
-        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
         ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+
+        /* ── Responsive helpers ──────────────────────────── */
+        /* Tables → cards on mobile */
+        @media (max-width: 639px) {
+          .rsp-table { display: none !important; }
+          .rsp-cards { display: flex !important; flex-direction: column; gap: 8px; }
+        }
+        @media (min-width: 640px) {
+          .rsp-cards { display: none !important; }
+        }
+        /* Bottom nav compensation */
+        @media (max-width: 767px) {
+          .main-pad { padding-bottom: 72px !important; }
+        }
+        /* Modal bottom-sheet on mobile */
+        @media (max-width: 639px) {
+          .modal-sheet {
+            position: fixed !important; bottom: 0 !important; left: 0 !important;
+            width: 100% !important; max-width: 100% !important;
+            border-radius: 20px 20px 0 0 !important;
+            max-height: 92dvh !important; overflow-y: auto !important;
+            margin: 0 !important;
+          }
+          .modal-overlay-sheet { align-items: flex-end !important; }
+        }
+        /* Prevent horizontal overflow everywhere */
+        .rsp-scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        /* Touch-friendly tap targets */
+        @media (pointer: coarse) {
+          button { min-height: 38px; }
+        }
+        @keyframes fadeInUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
 
         /* ── Componentes Tailwind adaptados ao tema via CSS vars ── */
         .theme-card       { background: var(--bg-surface) !important; border-color: var(--border-soft) !important; }
@@ -441,7 +519,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
               {unread > 0 && <span style={{ position: 'absolute', top: 2, right: 2, background: '#b45309', color: '#fff', fontSize: 9, fontWeight: 800, borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{unread > 9 ? '9+' : unread}</span>}
             </button>
             {notifOpen && (
-              <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 8px)', width: 300, background: 'var(--bg-surface)', border: '1px solid var(--border-soft)', borderRadius: 12, boxShadow: 'var(--shadow-lg)', zIndex: 999, overflow: 'hidden', animation: 'spDrop .15s ease' }}>
+              <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 8px)', width: 'min(300px, calc(100vw - 20px))', background: 'var(--bg-surface)', border: '1px solid var(--border-soft)', borderRadius: 12, boxShadow: 'var(--shadow-lg)', zIndex: 999, overflow: 'hidden', animation: 'spDrop .15s ease' }}>
                 <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-subtle)' }}>
                   <p style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif", margin: 0 }}>Notificações</p>
                 </div>
@@ -511,10 +589,20 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
       {mobileOpen && (
         <div className="md:hidden" style={{ position: 'fixed', inset: 0, zIndex: 200 }}>
           <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.35)' }} onClick={() => setMobileOpen(false)} />
-          <div style={{ position: 'absolute', top: 0, left: 0, width: 272, height: '100%', background: 'var(--bg-surface)', borderRight: '1px solid var(--border-soft)', display: 'flex', flexDirection: 'column', animation: 'spMobile .2s ease', boxShadow: 'var(--shadow-lg)' }}>
+          <div style={{ position: 'absolute', top: 0, left: 0, width: 'min(275px, 88vw)', height: '100%', background: 'var(--bg-surface)', borderRight: '1px solid var(--border-soft)', display: 'flex', flexDirection: 'column', animation: 'spMobile .2s ease', boxShadow: 'var(--shadow-lg)' }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <button onClick={() => { setPage('dashboard'); setMobileOpen(false); }} style={{ fontFamily: "'Lora', serif", color: 'var(--text-primary)', fontWeight: 700, fontSize: 14, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>{churchName || 'EcclesiaScale'}</button>
               <button onClick={() => setMobileOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a8a29e' }}><X size={18} /></button>
+            </div>
+            {/* User info inside drawer */}
+            <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)', flexShrink: 0 }}>
+              <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'linear-gradient(135deg,#92400e,#b45309)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <span style={{ color: '#fef3c7', fontSize: 11, fontWeight: 800 }}>{(user.name || user.email)[0].toUpperCase()}</span>
+              </div>
+              <div style={{ overflow: 'hidden' }}>
+                <p style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 700, margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.name || user.email}</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: 10, margin: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{user.role}</p>
+              </div>
             </div>
             <nav style={{ flex: 1, padding: 8, overflowY: 'auto' }}>
               {filteredGroups.map(group => {
@@ -550,12 +638,12 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
       )}
 
       {/* ─── Main ────────────────────────────────────────────────────────────── */}
-      <main style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', background: 'var(--bg-base)' }}>
+      <main className="main-pad" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '14px 16px', background: 'var(--bg-base)' }}>
         {children}
       </main>
 
-      {/* ─── Footer ──────────────────────────────────────────────────────────── */}
-      <footer style={{ background: 'var(--bg-surface)', borderTop: '1px solid var(--border-subtle)', padding: '5px 20px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+      {/* ─── Footer ─────────────────────── */}
+      <footer className="hidden md:flex" style={{ background: 'var(--bg-surface)', borderTop: '1px solid var(--border-subtle)', padding: '5px 20px', alignItems: 'center', gap: 12, flexShrink: 0 }}>
         <span style={{ color: 'var(--text-faint)', fontSize: 10, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>EcclesiaScale v5.0</span>
         <span style={{ color: 'var(--border-soft)' }}>•</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -573,6 +661,46 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
           </div>
         )}
       </footer>
+
+      {/* ─── Bottom nav (mobile only) ─────────────────────────────────────────── */}
+      <nav className="md:hidden" style={{
+        position: 'fixed', bottom: 0, left: 0, right: 0, height: 58,
+        background: 'var(--bg-surface)', borderTop: '1px solid var(--border-soft)',
+        display: 'flex', zIndex: 90, boxShadow: '0 -2px 12px rgba(0,0,0,.07)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}>
+        {/* Dashboard */}
+        <button onClick={() => { setPage('dashboard'); setMobileOpen(false); }} style={{
+          flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 2, background: 'none', border: 'none', cursor: 'pointer', position: 'relative',
+          color: page === 'dashboard' ? 'var(--accent)' : 'var(--text-muted)',
+        }}>
+          {page === 'dashboard' && <span style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: 22, height: 2.5, borderRadius: 2, background: 'var(--accent)' }} />}
+          <LayoutDashboard size={19} />
+          <span style={{ fontSize: 9, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: page === 'dashboard' ? 700 : 400, letterSpacing: 0.1 }}>Início</span>
+        </button>
+        {/* First 3 items from first visible group */}
+        {(filteredGroups[0]?.items || []).slice(0, 3).map(item => (
+          <button key={item.id} onClick={() => { setPage(item.id); setMobileOpen(false); }} style={{
+            flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            gap: 2, background: 'none', border: 'none', cursor: 'pointer', position: 'relative',
+            color: page === item.id ? 'var(--accent)' : 'var(--text-muted)',
+          }}>
+            {page === item.id && <span style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: 22, height: 2.5, borderRadius: 2, background: 'var(--accent)' }} />}
+            <span style={{ display: 'flex' }}>{item.icon}</span>
+            <span style={{ fontSize: 9, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: page === item.id ? 700 : 400, whiteSpace: 'nowrap', letterSpacing: 0.1 }}>{item.label}</span>
+          </button>
+        ))}
+        {/* Menu button */}
+        <button onClick={() => setMobileOpen(o => !o)} style={{
+          flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 2, background: 'none', border: 'none', cursor: 'pointer',
+          color: mobileOpen ? 'var(--accent)' : 'var(--text-muted)',
+        }}>
+          <Menu size={19} />
+          <span style={{ fontSize: 9, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 400, letterSpacing: 0.1 }}>Menu</span>
+        </button>
+      </nav>
     </div>
   );
 }

@@ -16,7 +16,7 @@ export function Button({ variant = 'primary', size = 'md', loading, children, cl
     ghost: 'hover:bg-stone-800 text-stone-300',
     outline: 'border border-stone-600 hover:bg-stone-800 text-stone-200',
   };
-  const sizes = { sm: 'px-3 py-1.5 text-xs', md: 'px-4 py-2 text-sm', lg: 'px-6 py-3 text-base' };
+  const sizes = { sm: 'px-3 py-2 text-xs', md: 'px-4 py-2 text-sm', lg: 'px-6 py-3 text-base' };
   return (
     <button className={clsx(base, variants[variant], sizes[size], className)} disabled={disabled || loading} {...props}>
       {loading && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -27,7 +27,7 @@ export function Button({ variant = 'primary', size = 'md', loading, children, cl
 
 // ─── Card ─────────────────────────────────────────────────────────────────────
 export function Card({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={clsx('bg-stone-900 border border-stone-700 rounded-xl', className)}>{children}</div>;
+  return <div className={clsx('bg-stone-900 border border-stone-700 rounded-xl theme-card', className)}>{children}</div>;
 }
 
 // ─── Badge ────────────────────────────────────────────────────────────────────
@@ -49,9 +49,9 @@ export function Modal({ open, onClose, title, children, size = 'md' }: ModalProp
   if (!open) return null;
   const sizes = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl' };
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="modal-overlay-sheet fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-      <div className={clsx('relative bg-stone-900 border border-stone-700 rounded-2xl shadow-2xl w-full max-h-[90vh] overflow-y-auto', sizes[size])} onClick={e => e.stopPropagation()}>
+      <div className={clsx('modal-sheet relative bg-stone-900 border border-stone-700 rounded-2xl shadow-2xl w-full max-h-[90dvh] overflow-y-auto theme-modal', sizes[size])} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between p-5 border-b border-stone-700">
           <h2 className="text-lg font-semibold text-stone-100">{title}</h2>
           <button onClick={onClose} className="text-stone-400 hover:text-stone-200 transition-colors">✕</button>
@@ -68,7 +68,7 @@ export function Input({ label, error, className, ...props }: InputProps) {
   return (
     <div className="flex flex-col gap-1">
       {label && <label className="text-xs font-medium text-stone-400 uppercase tracking-wide">{label}</label>}
-      <input className={clsx('bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm placeholder-stone-500 focus:outline-none focus:border-amber-500 transition-colors', className)} {...props} />
+      <input className={clsx('bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm placeholder-stone-500 focus:outline-none focus:border-amber-500 transition-colors theme-input w-full', className)} {...props} />
       {error && <span className="text-xs text-red-400">{error}</span>}
     </div>
   );
@@ -80,7 +80,7 @@ export function Select({ label, options, placeholder, className, ...props }: Sel
   return (
     <div className="flex flex-col gap-1">
       {label && <label className="text-xs font-medium text-stone-400 uppercase tracking-wide">{label}</label>}
-      <select className={clsx('bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500 transition-colors', className)} {...props}>
+      <select className={clsx('bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500 transition-colors theme-select w-full', className)} {...props}>
         {placeholder && <option value="">{placeholder}</option>}
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>

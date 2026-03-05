@@ -84,7 +84,7 @@ export default function DashboardPage({ user, setPage }: DashboardPageProps) {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-bold text-stone-100">
             Olá, {user.name || user.email.split('@')[0]}!
@@ -108,7 +108,7 @@ export default function DashboardPage({ user, setPage }: DashboardPageProps) {
       {customizing && (
         <Card className="p-4">
           <p className="text-stone-300 text-sm font-medium mb-3">Escolha os painéis visíveis:</p>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 items-center">
             {widgets.map(w => (
               <button
                 key={w.id}
@@ -154,14 +154,14 @@ function StatsWidget({ stats, loading }: { stats: DashboardStats | null; loading
   ];
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
       {items.map(item => (
         <Card key={item.label} className="p-4">
           <div className="flex items-center justify-between mb-2">
             {item.icon}
             {loading && <Spinner className="w-4 h-4" />}
           </div>
-          <p className="text-2xl font-bold text-stone-100">{loading ? '—' : item.value}</p>
+          <p className="text-xl sm:text-2xl font-bold text-stone-100">{loading ? '—' : item.value}</p>
           <p className="text-stone-500 text-xs mt-0.5">{item.label}</p>
         </Card>
       ))}
@@ -182,7 +182,7 @@ function QuickActionsWidget({ user, setPage }: { user: AuthUser; setPage?: (p: s
   return (
     <Card className="p-4">
       <h3 className="text-stone-300 font-medium text-sm mb-3">Ações Rápidas</h3>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 items-center">
         {actions.map(a => (
           <button
             key={a.label}

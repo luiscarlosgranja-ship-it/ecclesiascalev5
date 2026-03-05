@@ -36,9 +36,9 @@ export default function MyPanelPage({ user, setPage }: Props) {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <h1 className="text-xl font-bold text-stone-100">Meu Painel</h1>
-        <div className="flex gap-2">
+      <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
+        <h1 className="text-xl font-bold theme-text-primary">Meu Painel</h1>
+        <div className="flex gap-2 flex-wrap">
           {(isAdmin(user.role) || isLeader(user.role)) && setPage && (
             <Button variant="secondary" size="sm" onClick={() => setPage('scales')}>
               Ver Escalas dos Departamentos
@@ -66,13 +66,14 @@ export default function MyPanelPage({ user, setPage }: Props) {
 
       {tab === 'scales' && (
         <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
+          {/* Desktop */}
+          <div className="rsp-table rsp-scroll-x">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-stone-700 bg-stone-800/50">
+                <tr className="border-b border-stone-700 bg-stone-800/50 theme-table-head">
                   <th className="text-left p-3 text-stone-400 font-medium text-xs">Culto</th>
                   <th className="text-left p-3 text-stone-400 font-medium text-xs">Data</th>
-                  <th className="text-left p-3 text-stone-400 font-medium text-xs">Horário</th>
+                  <th className="text-left p-3 text-stone-400 font-medium text-xs hidden md:table-cell">Horário</th>
                   <th className="text-left p-3 text-stone-400 font-medium text-xs">Setor</th>
                   <th className="text-left p-3 text-stone-400 font-medium text-xs">Status</th>
                   <th className="text-right p-3 text-stone-400 font-medium text-xs">Ações</th>
@@ -80,26 +81,16 @@ export default function MyPanelPage({ user, setPage }: Props) {
               </thead>
               <tbody>
                 {(scales || []).map(s => (
-                  <tr key={s.id} className="border-b border-stone-800 hover:bg-stone-800/30 transition-colors">
-                    <td className="p-3 text-stone-200">{s.cult_name}</td>
+                  <tr key={s.id} className="border-b border-stone-800 hover:bg-stone-800/30 transition-colors theme-table-row">
+                    <td className="p-3 text-stone-200 font-medium">{s.cult_name}</td>
                     <td className="p-3 text-stone-400 text-xs">{s.cult_date}</td>
-                    <td className="p-3 text-stone-400 text-xs">{s.cult_time}</td>
+                    <td className="p-3 text-stone-400 text-xs hidden md:table-cell">{s.cult_time}</td>
                     <td className="p-3 text-stone-400 text-xs">{s.sector_name}</td>
-                    <td className="p-3">
-                      <Badge label={s.status} color={s.status === 'Confirmado' ? 'green' : s.status === 'Pendente' ? 'yellow' : s.status === 'Troca' ? 'blue' : 'red'} />
-                    </td>
+                    <td className="p-3"><Badge label={s.status} color={s.status === 'Confirmado' ? 'green' : s.status === 'Pendente' ? 'yellow' : s.status === 'Troca' ? 'blue' : 'red'} /></td>
                     <td className="p-3">
                       <div className="flex justify-end gap-1">
-                        {s.status === 'Pendente' && (
-                          <button onClick={() => confirm(s.id)} title="Confirmar presença" className="text-emerald-400 hover:text-emerald-300 p-1 transition-colors">
-                            <CheckCircle size={15} />
-                          </button>
-                        )}
-                        {s.status !== 'Troca' && (
-                          <button onClick={() => requestSwap(s.id)} title="Solicitar troca" className="text-blue-400 hover:text-blue-300 p-1 transition-colors">
-                            <Repeat size={15} />
-                          </button>
-                        )}
+                        {s.status === 'Pendente' && <button onClick={() => confirm(s.id)} title="Confirmar" className="text-emerald-400 hover:text-emerald-300 p-1.5 transition-colors"><CheckCircle size={15}/></button>}
+                        {s.status !== 'Troca' && <button onClick={() => requestSwap(s.id)} title="Solicitar troca" className="text-blue-400 hover:text-blue-300 p-1.5 transition-colors"><Repeat size={15}/></button>}
                       </div>
                     </td>
                   </tr>
@@ -107,6 +98,26 @@ export default function MyPanelPage({ user, setPage }: Props) {
               </tbody>
             </table>
             {(!scales || scales.length === 0) && <p className="text-center text-stone-500 text-sm py-10">Você não está escalado</p>}
+          </div>
+          {/* Mobile cards */}
+          <div className="rsp-cards p-3">
+            {(!scales || scales.length === 0) && <p className="text-center text-stone-500 text-sm py-8">Você não está escalado</p>}
+            {(scales || []).map(s => (
+              <div key={s.id} className="rounded-xl border border-stone-700 bg-stone-800/40 p-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-stone-200 font-semibold text-sm truncate">{s.cult_name}</p>
+                    <p className="text-stone-500 text-xs">{s.cult_date}{s.cult_time ? ` · ${s.cult_time}` : ''}</p>
+                  </div>
+                  <Badge label={s.status} color={s.status === 'Confirmado' ? 'green' : s.status === 'Pendente' ? 'yellow' : s.status === 'Troca' ? 'blue' : 'red'} />
+                </div>
+                {s.sector_name && <span className="inline-block text-xs bg-stone-800 text-stone-400 rounded px-2 py-0.5">{s.sector_name}</span>}
+                <div className="flex gap-2 pt-0.5">
+                  {s.status === 'Pendente' && <button onClick={() => confirm(s.id)} className="text-xs text-emerald-400 bg-emerald-900/20 border border-emerald-700/40 rounded-lg px-3 py-1.5 flex items-center gap-1"><CheckCircle size={12}/> Confirmar</button>}
+                  {s.status !== 'Troca' && <button onClick={() => requestSwap(s.id)} className="text-xs text-blue-400 bg-blue-900/20 border border-blue-700/40 rounded-lg px-3 py-1.5 flex items-center gap-1"><Repeat size={12}/> Trocar</button>}
+                </div>
+              </div>
+            ))}
           </div>
         </Card>
       )}
@@ -117,7 +128,7 @@ export default function MyPanelPage({ user, setPage }: Props) {
 
       {tab === 'swaps' && (
         <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="rsp-scroll-x">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-stone-700 bg-stone-800/50">

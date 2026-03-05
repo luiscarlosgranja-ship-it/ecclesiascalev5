@@ -179,7 +179,7 @@ export default function PastoralPage({ user }: Props) {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
         <h1 className="text-xl font-bold text-stone-100">Gabinete Pastoral</h1>
         {(isSuperAdmin(user) || isAdmin(user) || user.role === 'Secretaria') && (
           <Button onClick={openNew} size="sm">

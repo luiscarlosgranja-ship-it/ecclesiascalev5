@@ -136,7 +136,7 @@ function SectorsView({ sectors, departments, onRefetch, user }: {
 
               {/* Sectors table */}
               {!isCollapsed && (
-                <div className="overflow-x-auto">
+                <div className="rsp-scroll-x">
                   {deptSectors.length === 0 ? (
                     <div className="py-6 text-center">
                       <p className="text-stone-600 text-xs">Nenhum setor cadastrado neste departamento</p>
@@ -399,7 +399,7 @@ export default function RegistriesPage({ user, initialTab }: Props) {
         />
       ) : (
       <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="rsp-scroll-x">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-stone-700 bg-stone-800/50">

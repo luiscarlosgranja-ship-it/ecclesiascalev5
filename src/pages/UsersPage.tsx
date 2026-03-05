@@ -128,7 +128,7 @@ export default function UsersPage({ user }: Props) {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
         <h1 className="text-xl font-bold text-stone-100 flex items-center gap-2">
           <Users size={20} className="text-amber-400" /> Gerenciamento de Usuários
         </h1>
@@ -145,7 +145,7 @@ export default function UsersPage({ user }: Props) {
       )}
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 sm:grid-cols-3 gap-3">
         <Card className="p-3">
           <p className="text-xs text-stone-500 uppercase tracking-wide mb-1">Total</p>
           <p className="text-2xl font-bold text-stone-200">{counts.total}</p>
@@ -166,7 +166,7 @@ export default function UsersPage({ user }: Props) {
       {/* Filters */}
       <Card className="p-3">
         <div className="flex flex-wrap gap-3 items-center">
-          <div className="relative flex-1 min-w-48">
+          <div className="relative flex-1 min-w-[150px]">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" />
             <input value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Buscar por nome ou e-mail..."
@@ -198,10 +198,11 @@ export default function UsersPage({ user }: Props) {
             <p className="text-stone-500 text-sm">Nenhum usuário encontrado</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          {/* Desktop table */}
+          <div className="rsp-table rsp-scroll-x">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-stone-700 bg-stone-800/50">
+                <tr className="border-b border-stone-700 bg-stone-800/50 theme-table-head">
                   <th className="text-left p-3 text-stone-400 font-medium text-xs">Usuário</th>
                   <th className="text-left p-3 text-stone-400 font-medium text-xs">Role</th>
                   <th className="text-left p-3 text-stone-400 font-medium text-xs hidden md:table-cell">Último acesso</th>
@@ -212,58 +213,24 @@ export default function UsersPage({ user }: Props) {
               </thead>
               <tbody>
                 {filtered.map(u => (
-                  <tr key={u.id} className={`border-b border-stone-800 hover:bg-stone-800/30 transition-colors ${!u.is_active ? 'opacity-50' : ''}`}>
+                  <tr key={u.id} className={`border-b border-stone-800 hover:bg-stone-800/30 transition-colors theme-table-row ${!u.is_active ? 'opacity-50' : ''}`}>
                     <td className="p-3">
                       <div>
-                        <p className="text-stone-200 font-medium">
-                          {u.member_name || <span className="text-stone-500 italic">Sem membro</span>}
-                        </p>
-                        <p className="text-stone-500 text-xs flex items-center gap-1 mt-0.5">
-                          <Mail size={10} /> {u.email}
-                        </p>
-                        {u.must_change_password && (
-                          <span className="text-xs text-orange-400 flex items-center gap-1 mt-0.5">
-                            <KeyRound size={10} /> Troca de senha pendente
-                          </span>
-                        )}
-                        {u.id === user.id && (
-                          <span className="text-xs text-amber-400">(você)</span>
-                        )}
+                        <p className="text-stone-200 font-medium">{u.member_name || <span className="text-stone-500 italic">Sem membro</span>}</p>
+                        <p className="text-stone-500 text-xs flex items-center gap-1 mt-0.5"><Mail size={10}/> {u.email}</p>
+                        {u.must_change_password && <span className="text-xs text-orange-400 flex items-center gap-1 mt-0.5"><KeyRound size={10}/> Troca de senha pendente</span>}
+                        {u.id === user.id && <span className="text-xs text-amber-400">(você)</span>}
                       </div>
                     </td>
-                    <td className="p-3">
-                      <Badge color={ROLE_COLOR[u.role] || 'gray'}>{u.role}</Badge>
-                    </td>
-                    <td className="p-3 text-stone-500 text-xs hidden md:table-cell">
-                      <span className="flex items-center gap-1">
-                        <Clock size={11} /> {formatDate(u.last_login)}
-                      </span>
-                    </td>
-                    <td className="p-3 text-stone-500 text-xs hidden lg:table-cell">
-                      {formatDate(u.created_at)}
-                    </td>
-                    <td className="p-3">
-                      {u.is_active
-                        ? <span className="flex items-center gap-1 text-xs text-emerald-400"><CheckCircle size={12} /> Ativo</span>
-                        : <span className="flex items-center gap-1 text-xs text-red-400"><XCircle size={12} /> Inativo</span>
-                      }
-                    </td>
+                    <td className="p-3"><Badge color={ROLE_COLOR[u.role] || 'gray'}>{u.role}</Badge></td>
+                    <td className="p-3 text-stone-500 text-xs hidden md:table-cell"><span className="flex items-center gap-1"><Clock size={11}/> {formatDate(u.last_login)}</span></td>
+                    <td className="p-3 text-stone-500 text-xs hidden lg:table-cell">{formatDate(u.created_at)}</td>
+                    <td className="p-3">{u.is_active ? <span className="flex items-center gap-1 text-xs text-emerald-400"><CheckCircle size={12}/> Ativo</span> : <span className="flex items-center gap-1 text-xs text-red-400"><XCircle size={12}/> Inativo</span>}</td>
                     <td className="p-3">
                       <div className="flex items-center justify-end gap-1">
-                        <button onClick={() => openEdit(u)} title="Editar role / status"
-                          className="text-stone-500 hover:text-amber-400 p-1.5 rounded-lg hover:bg-stone-700 transition-colors">
-                          <Edit2 size={14} />
-                        </button>
-                        <button onClick={() => openReset(u)} title="Redefinir senha"
-                          className="text-stone-500 hover:text-blue-400 p-1.5 rounded-lg hover:bg-stone-700 transition-colors">
-                          <Shield size={14} />
-                        </button>
-                        {u.id !== user.id && (
-                          <button onClick={() => openDelete(u)} title="Remover conta"
-                            className="text-stone-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-stone-700 transition-colors">
-                            <Trash2 size={14} />
-                          </button>
-                        )}
+                        <button onClick={() => openEdit(u)} title="Editar" className="text-stone-500 hover:text-amber-400 p-1.5 rounded-lg hover:bg-stone-700 transition-colors"><Edit2 size={14}/></button>
+                        <button onClick={() => openReset(u)} title="Redefinir senha" className="text-stone-500 hover:text-blue-400 p-1.5 rounded-lg hover:bg-stone-700 transition-colors"><Shield size={14}/></button>
+                        {u.id !== user.id && <button onClick={() => openDelete(u)} title="Remover" className="text-stone-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-stone-700 transition-colors"><Trash2 size={14}/></button>}
                       </div>
                     </td>
                   </tr>
@@ -271,6 +238,31 @@ export default function UsersPage({ user }: Props) {
               </tbody>
             </table>
             <p className="text-xs text-stone-600 text-right px-4 py-2">{filtered.length} de {counts.total} usuários</p>
+          </div>
+          {/* Mobile cards */}
+          <div className="rsp-cards p-3">
+            {filtered.map(u => (
+              <div key={u.id} className={`rounded-xl border border-stone-700 bg-stone-800/40 p-3 space-y-2 ${!u.is_active ? 'opacity-60' : ''}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-stone-200 font-semibold text-sm truncate">{u.member_name || <span className="italic text-stone-500">Sem membro</span>}</p>
+                    <p className="text-stone-500 text-xs truncate">{u.email}</p>
+                    {u.id === user.id && <span className="text-xs text-amber-400">(você)</span>}
+                  </div>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <Badge color={ROLE_COLOR[u.role] || 'gray'}>{u.role}</Badge>
+                    {u.is_active ? <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle size={10}/> Ativo</span> : <span className="text-xs text-red-400 flex items-center gap-1"><XCircle size={10}/> Inativo</span>}
+                  </div>
+                </div>
+                {u.must_change_password && <p className="text-xs text-orange-400 flex items-center gap-1"><KeyRound size={10}/> Troca de senha pendente</p>}
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => openEdit(u)} className="text-xs text-amber-400 bg-amber-900/20 border border-amber-700/40 rounded-lg px-2.5 py-1.5 flex items-center gap-1"><Edit2 size={11}/> Editar</button>
+                  <button onClick={() => openReset(u)} className="text-xs text-blue-400 bg-blue-900/20 border border-blue-700/40 rounded-lg px-2.5 py-1.5 flex items-center gap-1"><Shield size={11}/> Senha</button>
+                  {u.id !== user.id && <button onClick={() => openDelete(u)} className="text-xs text-red-400 bg-red-900/20 border border-red-700/40 rounded-lg px-2.5 py-1.5 flex items-center gap-1"><Trash2 size={11}/> Remover</button>}
+                </div>
+              </div>
+            ))}
+            <p className="text-xs text-stone-600 text-right py-1">{filtered.length} de {counts.total} usuários</p>
           </div>
         )}
       </Card>

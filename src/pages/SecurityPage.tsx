@@ -134,7 +134,7 @@ export default function SecurityPage({ user, initialTab, hideTabs }: Props) {
             <div className="p-4 border-b border-stone-700">
               <h3 className="text-stone-200 font-medium text-sm">Chaves Geradas</h3>
             </div>
-            <div className="overflow-x-auto">
+            <div className="rsp-scroll-x">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-stone-700 bg-stone-800/50">
