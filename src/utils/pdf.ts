@@ -225,15 +225,26 @@ async function exportSingleCultBlocksPDF(
         doc.setFillColor(...(idx % 2 === 0 ? C_ROW_ODD : C_ROW_EVEN));
         doc.rect(bx, contentY, blockW, rowH, 'F');
 
+        // Nome do voluntário
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(5);
         doc.setTextColor(50, 45, 40);
-        doc.text(scale.member_name || '—', bx + blockPadding, contentY + 2.5, { maxWidth: blockW - blockPadding * 2 - 8 });
+        doc.text(scale.member_name || '—', bx + blockPadding, contentY + 2.5, { maxWidth: blockW * 0.45 });
 
+        // Setor ao lado do nome
+        if (scale.sector_name) {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(4.2);
+          doc.setTextColor(110, 95, 80);
+          const midX = bx + blockPadding + blockW * 0.45 + 1;
+          doc.text(scale.sector_name, midX, contentY + 2.5, { maxWidth: blockW * 0.28 });
+        }
+
+        // Status (direita)
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...statusColor(scale.status));
-        doc.setFontSize(5);
-        doc.text(scale.status || 'Pendente', bx + blockW - blockPadding - 8, contentY + 2.5, { maxWidth: 8 });
+        doc.setFontSize(4.5);
+        doc.text(scale.status || 'Pendente', bx + blockW - blockPadding - 8, contentY + 2.5, { maxWidth: 10 });
 
         contentY += rowH;
       });
@@ -266,30 +277,52 @@ async function exportMonthGridPDF(
 ) {
   const [logo, churchName] = await Promise.all([fetchLogo(), fetchChurchName()]);
   const doc = new jsPDF({ orientation: 'landscape', format: 'a4', unit: 'mm' });
-  const PW = doc.internal.pageSize.getWidth();
-  const PH = doc.internal.pageSize.getHeight();
-  const MX = 8;
-  const MY_TOP = 4;
+  const PW = doc.internal.pageSize.getWidth();   // 297mm
+  const PH = doc.internal.pageSize.getHeight();  // 210mm
+  const MX = 7;
+  const MY_TOP = 3;
   const COLS = 4;
-  const GAP = 3;
+  const GAP = 2;
 
   const sorted = [...allCults].sort((a, b) => a.date.localeCompare(b.date));
-  const totalVol = Array.from(deptBlocksByCult.values()).reduce((sum, blocks) => sum + blocks.reduce((s, b) => s + b.scales.length, 0), 0);
+  const totalVol = Array.from(deptBlocksByCult.values()).reduce(
+    (sum, blocks) => sum + blocks.reduce((s, b) => s + b.scales.length, 0), 0
+  );
   const subtitle = `${sorted.length} culto(s)  ·  ${totalVol} voluntário(s) escalado(s)  ·  ${new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}`;
+
+  // ── Cabeçalho ocupa ~30mm, rodapé ~8mm → disponível ≈ 172mm para conteúdo
+  const USABLE_H = PH - 38;  // área útil por página (mm)
+  const colW = (PW - MX * 2 - GAP * (COLS - 1)) / COLS;
+
+  // Alturas fixas dos sub-elementos
+  const CULT_HDR_H    = 8;    // cabeçalho do culto (data + tipo)
+  const DEPT_HDR_H    = 3.5;  // cabeçalho do mini-bloco de departamento
+  const ROW_H         = 3.5;  // linha de voluntário (nome + setor)
+  const DEPT_PAD_B    = 1.5;  // padding inferior do mini-bloco
+  const BLOCK_PAD_B   = 2;    // padding inferior do bloco do culto
+
+  /** Calcula a altura real necessária para um bloco de culto */
+  function calcBlockH(cultId: number): number {
+    const blocks = deptBlocksByCult.get(cultId) || [];
+    if (blocks.length === 0) return CULT_HDR_H + 10 + BLOCK_PAD_B;
+    const deptsH = blocks.reduce((sum, b) => {
+      return sum + DEPT_HDR_H + b.scales.length * ROW_H + DEPT_PAD_B;
+    }, 0);
+    return CULT_HDR_H + deptsH + BLOCK_PAD_B;
+  }
+
+  /** Dada uma linha de COLS cultos, retorna a altura máxima da linha,
+   *  mas nunca ultrapassando USABLE_H (nesse caso trunca com scroll visual). */
+  function rowHeight(fromIdx: number): number {
+    let h = 0;
+    for (let j = fromIdx; j < Math.min(fromIdx + COLS, sorted.length); j++) {
+      h = Math.max(h, calcBlockH(sorted[j].id));
+    }
+    return Math.min(h, USABLE_H);
+  }
 
   let headerY = drawMainHeader(doc, logo, title, subtitle, PW, churchName);
   let curY = headerY + MY_TOP;
-
-  const colW = (PW - MX * 2 - GAP * (COLS - 1)) / COLS;
-  const blockHeaderH = 8;
-  const deptMiniH = 22;
-  const blockPadB = 2;
-
-  function blockHeight(cultId: number): number {
-    const blocks = deptBlocksByCult.get(cultId) || [];
-    const deptHeight = Math.max(deptMiniH * blocks.length, 40);
-    return blockHeaderH + deptHeight + blockPadB;
-  }
 
   let col = 0;
   let rowMaxH = 0;
@@ -297,12 +330,10 @@ async function exportMonthGridPDF(
   for (let i = 0; i < sorted.length; i++) {
     const cult = sorted[i];
 
+    // Início de nova linha: pré-calcula altura máxima da linha
     if (col === 0) {
-      rowMaxH = 0;
-      for (let j = i; j < Math.min(i + COLS, sorted.length); j++) {
-        rowMaxH = Math.max(rowMaxH, blockHeight(sorted[j].id));
-      }
-      if (curY + rowMaxH > PH - 12) {
+      rowMaxH = rowHeight(i);
+      if (curY + rowMaxH > PH - 10) {
         doc.addPage();
         headerY = drawMainHeader(doc, logo, title, subtitle, PW, churchName);
         curY = headerY + MY_TOP;
@@ -312,97 +343,114 @@ async function exportMonthGridPDF(
     const bx = MX + col * (colW + GAP);
     const by = curY;
 
+    // Contorno do bloco
     doc.setDrawColor(...C_BORDER);
-    doc.setLineWidth(0.25);
+    doc.setLineWidth(0.2);
     doc.rect(bx, by, colW, rowMaxH, 'S');
 
-    // Cabeçalho do bloco do culto
+    // Cabeçalho do culto
     doc.setFillColor(...C_BLOCK_HDR);
-    doc.rect(bx, by, colW, blockHeaderH, 'F');
+    doc.rect(bx, by, colW, CULT_HDR_H, 'F');
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
+    doc.setFontSize(7);
     doc.setTextColor(...C_BLOCK_FG);
-    doc.text(fmtDate(cult.date), bx + 2, by + 3);
+    doc.text(fmtDate(cult.date), bx + 2, by + 3.5);
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6);
+    doc.setFontSize(5.5);
     doc.setTextColor(180, 175, 165);
-    doc.text(fmtTime(cult.time), bx + colW - 2, by + 3, { align: 'right' });
+    doc.text(fmtTime(cult.time), bx + colW - 2, by + 3.5, { align: 'right' });
 
     const typeName = cult.type_name || cult.name || '';
     if (typeName) {
       doc.setFont('helvetica', 'italic');
-      doc.setFontSize(5.5);
+      doc.setFontSize(5);
       doc.setTextColor(200, 185, 155);
-      doc.text(typeName, bx + 2, by + 6.5, { maxWidth: colW - 4 });
+      doc.text(typeName, bx + 2, by + 7, { maxWidth: colW - 4 });
     }
 
-    // Mini-blocos de departamentos (dados reais da API)
     const deptGroups = deptBlocksByCult.get(cult.id) || [];
+    let contentY = by + CULT_HDR_H + 1;
 
     if (deptGroups.length === 0) {
       doc.setFont('helvetica', 'italic');
-      doc.setFontSize(5);
+      doc.setFontSize(4.5);
       doc.setTextColor(160, 150, 140);
-      doc.text('Sem escalas', bx + 2, by + blockHeaderH + 5, { maxWidth: colW - 4 });
+      doc.text('Sem escalas', bx + 2, contentY + 4);
     } else {
-      const miniBlockH = Math.floor((rowMaxH - blockHeaderH - 2) / Math.max(1, deptGroups.length));
+      for (const dept of deptGroups) {
+        // Verifica se ainda há espaço vertical no bloco
+        const deptNeededH = DEPT_HDR_H + dept.scales.length * ROW_H + DEPT_PAD_B;
+        if (contentY + deptNeededH > by + rowMaxH - 1) break;  // trunca se não couber
 
-      deptGroups.forEach((dept, deptIdx) => {
         const mbx = bx + 1;
-        const mby = by + blockHeaderH + 1 + deptIdx * miniBlockH;
         const mbw = colW - 2;
-        const mbh = miniBlockH - 0.5;
 
-        doc.setFillColor(245, 243, 240);
-        doc.setDrawColor(220, 215, 210);
-        doc.setLineWidth(0.15);
-        doc.rect(mbx, mby, mbw, mbh, 'FD');
+        // ── Cabeçalho do departamento ──────────────────────────────────────
+        doc.setFillColor(72, 62, 55);
+        doc.setDrawColor(90, 80, 70);
+        doc.setLineWidth(0.1);
+        doc.rect(mbx, contentY, mbw, DEPT_HDR_H, 'FD');
 
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(4);
-        doc.setTextColor(80, 70, 60);
-        doc.text(dept.department_name, mbx + 1, mby + 2, { maxWidth: mbw - 2 });
+        doc.setFontSize(4.2);
+        doc.setTextColor(220, 210, 195);
+        const deptLabel = dept.department_name.toUpperCase();
+        doc.text(deptLabel, mbx + 1, contentY + 2.6, { maxWidth: mbw - 2 });
+        contentY += DEPT_HDR_H;
 
+        // ── Voluntários ────────────────────────────────────────────────────
         if (dept.scales.length === 0) {
+          doc.setFillColor(250, 248, 246);
+          doc.rect(mbx, contentY, mbw, ROW_H, 'F');
           doc.setFont('helvetica', 'italic');
-          doc.setFontSize(3);
-          doc.setTextColor(160, 150, 140);
-          doc.text('vazio', mbx + 1, mby + 4);
+          doc.setFontSize(3.5);
+          doc.setTextColor(170, 160, 150);
+          doc.text('vazio', mbx + 1, contentY + 2.3);
+          contentY += ROW_H;
         } else {
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(3.2);
+          dept.scales.forEach((scale, idx) => {
+            if (contentY + ROW_H > by + rowMaxH - 1) return; // não deixa vazar
 
-          let miniY = mby + 4;
-          const lineHeight = 1.8;
-          const maxLines = Math.max(1, Math.floor((mbh - 3) / lineHeight));
+            doc.setFillColor(...(idx % 2 === 0 ? C_ROW_ODD : C_ROW_EVEN));
+            doc.rect(mbx, contentY, mbw, ROW_H, 'F');
 
-          for (let k = 0; k < Math.min(maxLines, dept.scales.length); k++) {
-            const scale = dept.scales[k];
-            const statusSymbol = scale.status === 'Confirmado' ? '✓' :
-                                 scale.status === 'Pendente' ? '○' :
-                                 scale.status === 'Troca' ? '⇄' : '✗';
-
+            // Status symbol colorido
+            const statusSymbol = scale.status === 'Confirmado' ? '●' :
+                                 scale.status === 'Pendente'   ? '○' :
+                                 scale.status === 'Troca'      ? '↔' : '✕';
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(4);
             doc.setTextColor(...statusColor(scale.status));
-            doc.setFont('helvetica', 'bold');
-            doc.text(statusSymbol, mbx + 0.8, miniY);
+            doc.text(statusSymbol, mbx + 0.8, contentY + 2.5);
 
+            // Nome do voluntário (esquerda)
+            const nameMaxW = mbw * 0.52;
             doc.setFont('helvetica', 'normal');
-            doc.setTextColor(40, 35, 30);
-            doc.text((scale.member_name || '?').substring(0, 14), mbx + 2, miniY, { maxWidth: mbw - 3.5 });
+            doc.setFontSize(4);
+            doc.setTextColor(30, 25, 20);
+            doc.text((scale.member_name || '—').substring(0, 18), mbx + 3, contentY + 2.5, { maxWidth: nameMaxW });
 
-            miniY += lineHeight;
-          }
+            // Setor (direita) — novidade solicitada
+            const sectorText = (scale.sector_name || '').substring(0, 14);
+            if (sectorText) {
+              doc.setFont('helvetica', 'normal');
+              doc.setFontSize(3.5);
+              doc.setTextColor(110, 95, 80);
+              doc.text(sectorText, mbx + mbw - 1, contentY + 2.5, { align: 'right', maxWidth: mbw * 0.42 });
+            }
 
-          if (dept.scales.length > maxLines) {
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(2.8);
-            doc.setTextColor(150, 140, 130);
-            doc.text(`+${dept.scales.length - maxLines}`, mbx + 0.8, miniY);
-          }
+            contentY += ROW_H;
+          });
         }
-      });
+
+        // Linha separadora entre departamentos
+        doc.setDrawColor(220, 215, 210);
+        doc.setLineWidth(0.08);
+        doc.line(mbx, contentY, mbx + mbw, contentY);
+        contentY += DEPT_PAD_B;
+      }
     }
 
     col++;
@@ -412,23 +460,23 @@ async function exportMonthGridPDF(
     }
   }
 
-  // Legenda
-  const legendY = PH - 12;
+  // ── Legenda de status ─────────────────────────────────────────────────────
+  const legendY = PH - 10;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(5.5);
+  doc.setFontSize(5);
   doc.setTextColor(120, 110, 100);
   doc.text('Status:', MX, legendY);
-  let lx = MX + 12;
+  let lx = MX + 10;
   for (const st of [
-    { l: 'Confirmado', c: C_ST_OK },
+    { l: 'Confirmado', c: C_ST_OK  },
     { l: 'Pendente',   c: C_ST_PEND },
     { l: 'Troca',      c: C_ST_SWAP },
-    { l: 'Recusado',   c: C_ST_REF },
+    { l: 'Recusado',   c: C_ST_REF  },
   ]) {
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...st.c);
     doc.text(`● ${st.l}`, lx, legendY);
-    lx += 26;
+    lx += 24;
   }
 
   const total = (doc as any).internal.getNumberOfPages();

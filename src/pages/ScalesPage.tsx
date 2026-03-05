@@ -155,6 +155,20 @@ export default function ScalesPage({ user }: Props) {
   }
 
   // ─── Auto generate com resultado detalhado ───────────────────────────────────
+  // --- Feriados nacionais fixos (MM-DD) ---
+  const FERIADOS_BR = new Set([
+    '01-01','04-21','05-01','09-07','10-12','11-02','11-15','11-20','12-25',
+  ]);
+
+  function isThematicCult(cult: Cult): boolean {
+    if (!cult.date) return false;
+    const parts = cult.date.split('-').map(Number);
+    const dow = new Date(parts[0], parts[1] - 1, parts[2]).getDay();
+    const mmdd = String(parts[1]).padStart(2,'0') + '-' + String(parts[2]).padStart(2,'0');
+    // Segunda(1), Sexta(5), Sabado(6) ou feriado nacional
+    return dow === 1 || dow === 5 || dow === 6 || FERIADOS_BR.has(mmdd);
+  }
+
   function openAutoModal() {
     setAutoModal(true);
     setAutoResult(null);
@@ -181,7 +195,7 @@ export default function ScalesPage({ user }: Props) {
 
   async function generateAuto() {
     if (autoType === 'specific' && !autoSpecificCult) { setError('Selecione um culto'); return; }
-    if ((autoType === 'standard' || autoType === 'thematic') && !selectedCult) { setError('Selecione um culto na tela principal'); return; }
+    if (autoType === 'standard' && !selectedCult) { setError('Selecione um culto na tela principal'); return; }
     setSaving(true); setError(''); setAutoResult(null);
     try {
       let payload: Record<string, any>;
@@ -189,6 +203,14 @@ export default function ScalesPage({ user }: Props) {
         payload = { type: 'month', month: autoMonth };
       } else if (autoType === 'specific') {
         payload = { type: 'specific', cult_id: autoSpecificCult };
+      } else if (autoType === 'thematic') {
+        const thematicIds = availableCults.filter(c => isThematicCult(c)).map(c => c.id);
+        if (thematicIds.length === 0) {
+          setError('Nenhum culto tematico encontrado (Seg/Sex/Sab/Feriados) entre os cultos agendados.');
+          setSaving(false);
+          return;
+        }
+        payload = { type: 'thematic', cult_ids: thematicIds };
       } else {
         payload = { type: autoType, cult_id: selectedCult };
       }
@@ -783,7 +805,7 @@ export default function ScalesPage({ user }: Props) {
                   { value: 'month',    label: 'Mês Inteiro',      desc: 'Gera escalas para todos os cultos do mês' },
                   { value: 'specific', label: 'Culto Específico', desc: 'Selecione um culto da lista' },
                   { value: 'standard', label: 'Cultos Padrão',    desc: 'Culto selecionado na tela' },
-                  { value: 'thematic', label: 'Cultos Temáticos', desc: 'Culto selecionado na tela' },
+                  { value: 'thematic', label: 'Cultos Temáticos', desc: 'Todos os cultos fora do padrão (Seg/Sex/Sáb/Feriados)' },
                 ].map(opt => (
                   <label key={opt.value}
                     className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-stone-700 hover:border-amber-600 transition-all">
@@ -829,14 +851,14 @@ export default function ScalesPage({ user }: Props) {
                 </div>
               )}
 
-              {(autoType === 'standard' || autoType === 'thematic') && !selectedCult && (
+              {autoType === 'standard' && !selectedCult && (
                 <p className="text-amber-400 text-xs">⚠️ Selecione um culto na tela principal antes de gerar.</p>
               )}
               {error && <p className="text-red-400 text-xs">{error}</p>}
               <div className="flex gap-3">
                 <Button variant="outline" onClick={closeAutoModal}>Cancelar</Button>
                 <Button onClick={generateAuto} loading={saving}
-                  disabled={(autoType === 'specific' && !autoSpecificCult) || ((autoType === 'standard' || autoType === 'thematic') && !selectedCult)}>
+                  disabled={(autoType === 'specific' && !autoSpecificCult) || (autoType === 'standard' && !selectedCult)}>
                   Gerar
                 </Button>
               </div>
