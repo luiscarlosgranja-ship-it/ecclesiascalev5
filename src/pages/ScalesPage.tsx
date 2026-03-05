@@ -1,860 +1,1012 @@
-import { useState, useEffect, useRef } from 'react';
-import {
-  Wand2, Plus, Zap, UserPlus, Trash2, Printer, CalendarDays,
-  ChevronDown, CheckCircle2, AlertCircle, Users, X, Calendar,
-} from 'lucide-react';
-import { Card, Button, Modal, Badge } from '../components/ui';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Plus, Printer, Zap, Trash2, CheckCircle, Repeat, Calendar, Users, ChevronDown, ChevronUp, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Card, Button, Modal, Badge, Select, Spinner, Input } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
-import { supabase } from '../utils/supabaseClient';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
-import type { AuthUser } from '../types';
+import { supabase } from "../utils/supabaseClient";
+import type { AuthUser, Scale, Cult, Member, Sector, CultType } from '../types';
+import { isAdmin, isLeader, isSuperAdmin } from '../utils/permissions';
+import { exportScalePDF } from '../utils/pdf';
 
 interface Props { user: AuthUser; }
 
-interface Cult {
-  id: number;
-  name?: string;
-  type_name?: string;
-  date: string;
-  time: string;
-  status: string;
-}
-
-interface Department {
-  id: number;
-  name: string;
-  sector_name?: string;
-  is_active?: number;
-}
-
-interface Sector {
-  id: number;
-  name: string;
-  is_active?: number;
-}
-
-interface Scale {
-  id: number;
-  cult_id: number;
-  volunteer_id?: number;
-  volunteer_name?: string;
-  sector_id?: number;
-  sector_name?: string;
-  department_id?: number;
-  department_name?: string;
-  role?: string;
-  status?: string;
-}
-
-interface ScaleEntry {
-  department_id: number;
+interface DeptBlock {
+  department_id: number | null;
   department_name: string;
-  sector_name?: string;
-  volunteers: Scale[];
+  scales: {
+    id: number;
+    status: string;
+    member_name: string;
+    member_id: number;
+    sector_name: string;
+    department_id: number | null;
+    department_name: string;
+  }[];
 }
 
-// ─── Gerar Escala Automática modal types ─────────────────────────────────────
-type GenerateMode = 'mes-inteiro' | 'culto-especifico' | 'culto-padrao' | 'culto-tematico';
+interface AutoResult {
+  created: number;
+  cultsCount?: number;
+  label: string; // descrição amigável do tipo gerado
+}
 
 export default function ScalesPage({ user }: Props) {
-  const [selectedCultId, setSelectedCultId] = useState<number | null>(null);
-  const [viewMode, setViewMode] = useState<'department' | 'full'>('department');
+  const [selectedCult, setSelectedCult] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<'departments' | 'list'>('departments');
+  const [selectedDepartmentForScale, setSelectedDepartmentForScale] = useState<number | null>(null);
 
-  // Modals
-  const [generateModal, setGenerateModal] = useState(false);
-  const [printCultModal, setPrintCultModal] = useState(false);
-  const [printMonthModal, setPrintMonthModal] = useState(false);
-  const [addVolModal, setAddVolModal] = useState(false);
-  const [removeScaleModal, setRemoveScaleModal] = useState(false);
+  const [deptBlocks, setDeptBlocks] = useState<DeptBlock[]>([]);
+  const [deptLoading, setDeptLoading] = useState(false);
+  const [collapsedBlocks, setCollapsedBlocks] = useState<Set<string>>(new Set());
 
-  // Generate modal state
-  const [generateMode, setGenerateMode] = useState<GenerateMode>('mes-inteiro');
-  const [generateRefMonth, setGenerateRefMonth] = useState(format(new Date(), 'yyyy-MM'));
-  const [generating, setGenerating] = useState(false);
-  const [generateResult, setGenerateResult] = useState<{ cultsCreated: number } | null>(null);
-  const [generateError, setGenerateError] = useState('');
+  const [autoModal, setAutoModal] = useState(false);
+  const [autoMonth, setAutoMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [autoSpecificCult, setAutoSpecificCult] = useState<number | null>(null);
+  const [fillModal, setFillModal] = useState(false);
+  const [fillLoading, setFillLoading] = useState(false);
+  const [fillMsg, setFillMsg] = useState('');
+  const [autoType, setAutoType] = useState<'month' | 'standard' | 'thematic' | 'specific'>('month');
+  const [addModal, setAddModal] = useState(false);
+  const [newCultModal, setNewCultModal] = useState(false);
+  const [newScale, setNewScale] = useState({ member_id: '', sector_id: '' });
+  const [newCult, setNewCult] = useState({ type_id: '', name: '', date: '', time: '' });
+  const [saving, setSaving] = useState(false);
+  const [savingCult, setSavingCult] = useState(false);
+  const [error, setError] = useState('');
+  const [cultError, setCultError] = useState('');
 
-  // Print modal state
-  const [selectedPrintDepts, setSelectedPrintDepts] = useState<Set<number>>(new Set());
+  const [swapModal, setSwapModal] = useState(false);
+  const [swapScaleId, setSwapScaleId] = useState<number | null>(null);
+  const [swapEmail, setSwapEmail] = useState('');
+  const [swapMsg, setSwapMsg] = useState('');
+  const [swapSaving, setSwapSaving] = useState(false);
 
-  // Scales data
-  const [scales, setScales] = useState<ScaleEntry[]>([]);
-  const [loadingScales, setLoadingScales] = useState(false);
+  const [deleteScaleModal, setDeleteScaleModal] = useState(false);
+  const [deletingScale, setDeletingScale] = useState(false);
 
-  const { data: cults, refetch: refetchCults } = useApi<Cult[]>('/cults');
-  const { data: departments } = useApi<Department[]>('/departments?is_active=1');
+  // Resultado detalhado da geração automática
+  const [autoResult, setAutoResult] = useState<AutoResult | null>(null);
+
+  // Modal de seleção de departamentos para impressão
+  const [printConfigModal, setPrintConfigModal] = useState(false);
+  const [availableDepartments, setAvailableDepartments] = useState<Array<{ id: number; name: string }>>([]);
+  const [selectedDepartmentsForPrint, setSelectedDepartmentsForPrint] = useState<number[]>([]);
+  const [printingMode, setPrintingMode] = useState<'cult' | 'month'>('cult');
+  // Dados de impressão do mês (blocos por culto)
+  const [printDeptBlocksByCult, setPrintDeptBlocksByCult] = useState<Map<number, DeptBlock[]>>(new Map());
+  const [printMonthCults, setPrintMonthCults] = useState<Cult[]>([]);
+
+  const { data: cults, refetch: refetchCults } = useApi<Cult[]>('/cults?status=Agendado');
+  const { data: scales, refetch: refetchScales } = useApi<Scale[]>(
+    selectedCult ? `/scales?cult_id=${selectedCult}` : null, [selectedCult]
+  );
+  const { data: members } = useApi<Member[]>('/members?is_active=1');
   const { data: sectors } = useApi<Sector[]>('/sectors?is_active=1');
+  const { data: cultTypes } = useApi<CultType[]>('/cult_types');
 
-  const activeCults = (cults || []).filter(c => c.status !== 'Cancelado' && c.status !== 'Realizado');
+  const availableCults = cults || [];
 
-  // Auto-select first cult
-  useEffect(() => {
-    if (!selectedCultId && activeCults.length > 0) {
-      setSelectedCultId(activeCults[0].id);
+  const fetchDeptBlocks = useCallback(async () => {
+    if (!selectedCult) { setDeptBlocks([]); return; }
+    setDeptLoading(true);
+    try {
+      const data = await api.get<DeptBlock[]>(`/scales/by-department/${selectedCult}`);
+      setDeptBlocks(data);
+    } catch {
+      setDeptBlocks([]);
+    } finally {
+      setDeptLoading(false);
     }
-  }, [activeCults, selectedCultId]);
+  }, [selectedCult]);
 
-  // Load scales for selected cult
-  useEffect(() => {
-    if (!selectedCultId) return;
-    loadScales(selectedCultId);
-  }, [selectedCultId]);
+  useEffect(() => { fetchDeptBlocks(); }, [fetchDeptBlocks]);
 
-  // Realtime
+  const realtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refetchScalesRef = useRef(refetchScales);
+  const fetchDeptBlocksRef = useRef(fetchDeptBlocks);
+  const refetchCultsRef = useRef(refetchCults);
+  const suppressRealtimeRef = useRef(false);
+
+  useEffect(() => { refetchScalesRef.current = refetchScales; }, [refetchScales]);
+  useEffect(() => { fetchDeptBlocksRef.current = fetchDeptBlocks; }, [fetchDeptBlocks]);
+  useEffect(() => { refetchCultsRef.current = refetchCults; }, [refetchCults]);
+
   useEffect(() => {
+    if (!supabase) return;
     const channel = supabase
       .channel('scales-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'scales' }, () => {
-        if (selectedCultId) loadScales(selectedCultId);
+        if (suppressRealtimeRef.current) return;
+        if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
+        realtimeDebounceRef.current = setTimeout(() => {
+          refetchScalesRef.current();
+          fetchDeptBlocksRef.current();
+        }, 800);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cults' }, () => {
+        if (suppressRealtimeRef.current) return;
+        refetchCultsRef.current();
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [selectedCultId]);
+    return () => {
+      if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
-  async function loadScales(cultId: number) {
-    setLoadingScales(true);
+  function toggleBlock(key: string) {
+    setCollapsedBlocks(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+
+  async function fillCult() {
+    if (!selectedCult) return;
+    setFillLoading(true); setFillMsg('');
     try {
-      const data = await api.get<Scale[]>(`/scales?cult_id=${cultId}`);
-      // Group by department
-      const grouped: Record<number, ScaleEntry> = {};
-      (data || []).forEach(s => {
-        const dId = s.department_id || 0;
-        if (!grouped[dId]) {
-          grouped[dId] = {
-            department_id: dId,
-            department_name: s.department_name || 'Sem Departamento',
-            sector_name: s.sector_name,
-            volunteers: [],
-          };
-        }
-        grouped[dId].volunteers.push(s);
-      });
-      setScales(Object.values(grouped));
+      const res = await api.post<{ message: string; created: number }>('/scales/fill-cult', { cult_id: selectedCult });
+      setFillMsg(res.message);
+      refetchScales(); fetchDeptBlocks();
     } catch (e) {
-      console.error('Erro ao carregar escalas', e);
-      setScales([]);
-    } finally {
-      setLoadingScales(false);
+      setFillMsg('❌ ' + (e instanceof Error ? e.message : 'Erro ao preencher'));
+    } finally { setFillLoading(false); }
+  }
+
+  // ─── Auto generate com resultado detalhado ───────────────────────────────────
+  function openAutoModal() {
+    setAutoModal(true);
+    setAutoResult(null);
+    setError('');
+    const defaultMonth = selectedCultData
+      ? selectedCultData.date.slice(0, 7)
+      : new Date().toISOString().slice(0, 7);
+    setAutoMonth(defaultMonth);
+    setAutoSpecificCult(selectedCult);
+  }
+
+  function closeAutoModal() {
+    setAutoModal(false);
+    setAutoResult(null);
+    setError('');
+  }
+
+  const AUTO_LABELS: Record<string, string> = {
+    month: 'Mês Inteiro',
+    standard: 'Cultos Padrão',
+    thematic: 'Cultos Temáticos',
+    specific: 'Culto Específico',
+  };
+
+  async function generateAuto() {
+    if (autoType === 'specific' && !autoSpecificCult) { setError('Selecione um culto'); return; }
+    if ((autoType === 'standard' || autoType === 'thematic') && !selectedCult) { setError('Selecione um culto na tela principal'); return; }
+    setSaving(true); setError(''); setAutoResult(null);
+    try {
+      let payload: Record<string, any>;
+      if (autoType === 'month') {
+        payload = { type: 'month', month: autoMonth };
+      } else if (autoType === 'specific') {
+        payload = { type: 'specific', cult_id: autoSpecificCult };
+      } else {
+        payload = { type: autoType, cult_id: selectedCult };
+      }
+
+      const res = await api.post<{ message?: string; created?: number; cults_count?: number; scales_count?: number }>(
+        '/scales/auto-generate', payload
+      );
+
+      const created = res?.scales_count ?? res?.created ?? 0;
+      const cultsCount = res?.cults_count ?? (autoType !== 'month' ? 1 : undefined);
+
+      setAutoResult({
+        created,
+        cultsCount,
+        label: AUTO_LABELS[autoType],
+      });
+
+      refetchScales();
+      fetchDeptBlocks();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao gerar escala');
+    } finally { setSaving(false); }
+  }
+
+  async function confirmScale(id: number) {
+    await api.put(`/scales/${id}/confirm`, {});
+    refetchScales(); fetchDeptBlocks();
+  }
+
+  async function removeScale(id: number) {
+    if (!confirm('Remover este voluntário da escala?')) return;
+    try {
+      await api.delete(`/scales/${id}`);
+      refetchScales();
+      fetchDeptBlocks();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao remover voluntário');
     }
+  }
+
+  async function deleteEntireScale() {
+    if (!selectedCult) return;
+    setDeletingScale(true);
+    try {
+      const freshScales = await api.get<{ id: number }[]>(`/scales?cult_id=${selectedCult}`);
+      if (freshScales && freshScales.length > 0) {
+        await Promise.all(freshScales.map(s => api.delete(`/scales/${s.id}`)));
+      }
+      setDeleteScaleModal(false);
+      setDeptBlocks([]);
+      refetchScales();
+      fetchDeptBlocks();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao remover escala');
+    } finally {
+      setDeletingScale(false);
+    }
+  }
+
+  async function addToScale() {
+    if (!selectedCult || !newScale.member_id || !newScale.sector_id) {
+      setError('Voluntário e Setor são obrigatórios'); return;
+    }
+    setSaving(true); setError('');
+    try {
+      await api.post('/scales', {
+        cult_id: selectedCult,
+        member_id: Number(newScale.member_id),
+        sector_id: Number(newScale.sector_id),
+      });
+      setAddModal(false);
+      setNewScale({ member_id: '', sector_id: '' });
+      refetchScales(); fetchDeptBlocks();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao adicionar');
+    } finally { setSaving(false); }
+  }
+
+  async function createNewCultScale() {
+    if (!newCult.date || !newCult.time) { setCultError('Data e Horário são obrigatórios'); return; }
+    setSavingCult(true); setCultError('');
+    try {
+      const cult = await api.post<{ id: number }>('/cults', {
+        type_id: newCult.type_id ? Number(newCult.type_id) : null,
+        name: newCult.name || null,
+        date: newCult.date,
+        time: newCult.time,
+        status: 'Agendado',
+      });
+      setSelectedCult(cult.id);
+      setNewCultModal(false);
+      setNewCult({ type_id: '', name: '', date: '', time: '' });
+      refetchCults();
+    } catch (e) {
+      setCultError(e instanceof Error ? e.message : 'Erro ao criar escala');
+    } finally { setSavingCult(false); }
+  }
+
+  function openSwapModal(scaleId: number) {
+    setSwapScaleId(scaleId); setSwapEmail(''); setSwapMsg(''); setSwapModal(true);
+  }
+
+  async function confirmSwap() {
+    if (!swapScaleId) return;
+    setSwapSaving(true); setSwapMsg('');
+    try {
+      await api.post('/swaps', { scale_id: swapScaleId, suggested_email: swapEmail.trim() || undefined });
+      setSwapMsg('✅ Solicitação enviada com sucesso!');
+      setTimeout(() => { setSwapModal(false); setSwapScaleId(null); }, 1500);
+    } catch (e) {
+      setSwapMsg('❌ ' + (e instanceof Error ? e.message : 'Erro ao solicitar troca'));
+    } finally { setSwapSaving(false); }
+  }
+
+  const selectedCultData = availableCults.find(c => c.id === selectedCult);
+
+  async function handlePrint() {
+    if (!selectedCultData) return;
+    // Usa deptBlocks já carregados para extrair departamentos reais da escala
+    const uniqueDepts: Array<{ id: number; name: string }> = deptBlocks
+      .filter(b => b.department_id !== null && b.scales.length > 0)
+      .map(b => ({ id: b.department_id as number, name: b.department_name }))
+      .filter((d, i, arr) => arr.findIndex(x => x.id === d.id) === i);
+
+    if (uniqueDepts.length === 0) {
+      try {
+        const depts = await api.get<Array<{ id: number; name: string }>>('/departments');
+        setAvailableDepartments(depts || []);
+        setSelectedDepartmentsForPrint((depts || []).map(d => d.id));
+      } catch {
+        setAvailableDepartments([]);
+        setSelectedDepartmentsForPrint([]);
+      }
+    } else {
+      setAvailableDepartments(uniqueDepts);
+      setSelectedDepartmentsForPrint(uniqueDepts.map(d => d.id));
+    }
+    setPrintingMode('cult');
+    setPrintConfigModal(true);
+  }
+
+  async function handlePrintMonth() {
+    const month = new Date().toISOString().slice(0, 7);
+    const monthCults = availableCults.filter(c => c.date.startsWith(month));
+    if (monthCults.length === 0) return;
+
+    // Busca blocos por departamento para cada culto do mês
+    const blocksMap = new Map<number, typeof deptBlocks>();
+    const allDeptIds = new Set<number>();
+    const allDeptNames = new Map<number, string>();
+
+    await Promise.all(
+      monthCults.map(async c => {
+        try {
+          const blocks = await api.get<typeof deptBlocks>(`/scales/by-department/${c.id}`);
+          blocksMap.set(c.id, blocks || []);
+          (blocks || []).forEach(b => {
+            if (b.department_id !== null && b.scales.length > 0) {
+              allDeptIds.add(b.department_id as number);
+              allDeptNames.set(b.department_id as number, b.department_name);
+            }
+          });
+        } catch {
+          blocksMap.set(c.id, []);
+        }
+      })
+    );
+
+    const uniqueDepts: Array<{ id: number; name: string }> = Array.from(allDeptIds).map(id => ({
+      id,
+      name: allDeptNames.get(id) || 'Sem Departamento',
+    }));
+
+    // Salva o mapa de blocos para uso em executePrint
+    setPrintDeptBlocksByCult(blocksMap);
+    setPrintMonthCults(monthCults);
+
+    if (uniqueDepts.length === 0) {
+      try {
+        const depts = await api.get<Array<{ id: number; name: string }>>('/departments');
+        setAvailableDepartments(depts || []);
+        setSelectedDepartmentsForPrint((depts || []).map(d => d.id));
+      } catch {
+        setAvailableDepartments([]);
+        setSelectedDepartmentsForPrint([]);
+      }
+    } else {
+      setAvailableDepartments(uniqueDepts);
+      setSelectedDepartmentsForPrint(uniqueDepts.map(d => d.id));
+    }
+
+    setPrintingMode('month');
+    setPrintConfigModal(true);
+  }
+
+  async function executePrint() {
+    if (printingMode === 'cult') {
+      if (!selectedCultData) return;
+      await exportScalePDF(
+        scales || [],
+        selectedCultData,
+        `Escala — ${selectedCultData.type_name || selectedCultData.name || 'Culto'}`,
+        undefined,
+        undefined,
+        undefined,
+        selectedDepartmentsForPrint,
+        // Passa os blocos reais para impressão por departamento
+        deptBlocks,
+      );
+    } else {
+      const month = new Date().toISOString().slice(0, 7);
+      const cultsToUse = printMonthCults.length > 0 ? printMonthCults : availableCults.filter(c => c.date.startsWith(month));
+      if (cultsToUse.length === 0) return;
+
+      await exportScalePDF(
+        [],
+        null,
+        `Escalas — ${month}`,
+        [],
+        cultsToUse,
+        undefined,
+        selectedDepartmentsForPrint,
+        undefined,
+        // Passa o mapa de blocos por culto para impressão mensal
+        printDeptBlocksByCult,
+      );
+    }
+    setPrintConfigModal(false);
   }
 
   function getCultLabel(c: Cult) {
     return `${c.name || c.type_name || 'Culto'} — ${c.date} ${c.time}`;
   }
 
-  function getSelectedCult() {
-    return (cults || []).find(c => c.id === selectedCultId);
-  }
+  const BLOCK_COLORS = [
+    'border-amber-600/40 bg-amber-900/10',
+    'border-blue-600/40 bg-blue-900/10',
+    'border-emerald-600/40 bg-emerald-900/10',
+    'border-purple-600/40 bg-purple-900/10',
+    'border-rose-600/40 bg-rose-900/10',
+    'border-cyan-600/40 bg-cyan-900/10',
+    'border-orange-600/40 bg-orange-900/10',
+    'border-teal-600/40 bg-teal-900/10',
+  ];
+  const HEADER_COLORS = [
+    'bg-amber-900/30 text-amber-300',
+    'bg-blue-900/30 text-blue-300',
+    'bg-emerald-900/30 text-emerald-300',
+    'bg-purple-900/30 text-purple-300',
+    'bg-rose-900/30 text-rose-300',
+    'bg-cyan-900/30 text-cyan-300',
+    'bg-orange-900/30 text-orange-300',
+    'bg-teal-900/30 text-teal-300',
+  ];
 
-  // ─── Generate Automatic Scale ────────────────────────────────────────────────
-  function openGenerateModal() {
-    setGenerateModal(true);
-    setGenerateMode('mes-inteiro');
-    setGenerateRefMonth(format(new Date(), 'yyyy-MM'));
-    setGenerateResult(null);
-    setGenerateError('');
-  }
-
-  async function handleGenerate() {
-    setGenerating(true);
-    setGenerateError('');
-    try {
-      if (generateMode === 'mes-inteiro') {
-        // Generate empty scales for all departments for all cults in the month
-        const monthCults = (cults || []).filter(c => {
-          return c.date && c.date.startsWith(generateRefMonth) && c.status !== 'Cancelado';
-        });
-
-        if (monthCults.length === 0) {
-          setGenerateError('Nenhum culto encontrado para o mês selecionado.');
-          return;
-        }
-
-        const allDepts = departments || [];
-        let createdCount = 0;
-
-        for (const cult of monthCults) {
-          for (const dept of allDepts) {
-            try {
-              // Create an empty scale slot for this dept in this cult
-              await api.post('/scales/generate-empty', {
-                cult_id: cult.id,
-                department_id: dept.id,
-              });
-              createdCount++;
-            } catch {
-              // ignore if already exists
-            }
-          }
-        }
-
-        setGenerateResult({ cultsCreated: monthCults.length });
-        if (selectedCultId) loadScales(selectedCultId);
-
-      } else if (generateMode === 'culto-especifico' && selectedCultId) {
-        const res = await api.post<{ message?: string; created?: number }>(
-          `/scales/generate`,
-          { cult_id: selectedCultId }
-        );
-        const count = res?.created ?? 0;
-        setGenerateResult({ cultsCreated: count });
-        loadScales(selectedCultId);
-
-      } else if (generateMode === 'culto-padrao') {
-        const res = await api.post<{ message?: string; created?: number }>(
-          `/scales/generate-default`,
-          { cult_id: selectedCultId }
-        );
-        const count = res?.created ?? 0;
-        setGenerateResult({ cultsCreated: count });
-        if (selectedCultId) loadScales(selectedCultId);
-
-      } else if (generateMode === 'culto-tematico') {
-        const res = await api.post<{ message?: string; created?: number }>(
-          `/scales/generate-thematic`,
-          { cult_id: selectedCultId }
-        );
-        const count = res?.created ?? 0;
-        setGenerateResult({ cultsCreated: count });
-        if (selectedCultId) loadScales(selectedCultId);
-      }
-    } catch (e) {
-      setGenerateError(e instanceof Error ? e.message : 'Erro ao gerar escala');
-    } finally {
-      setGenerating(false);
-    }
-  }
-
-  // ─── Print helpers ────────────────────────────────────────────────────────────
-  function openPrintCultModal() {
-    setSelectedPrintDepts(new Set());
-    setPrintCultModal(true);
-  }
-
-  function openPrintMonthModal() {
-    setSelectedPrintDepts(new Set());
-    setPrintMonthModal(true);
-  }
-
-  function togglePrintDept(id: number) {
-    setSelectedPrintDepts(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  }
-
-  function selectAllDepts() {
-    setSelectedPrintDepts(new Set((departments || []).map(d => d.id)));
-  }
-
-  function clearDepts() {
-    setSelectedPrintDepts(new Set());
-  }
-
-  function printCultNow() {
-    const cult = getSelectedCult();
-    if (!cult) return;
-    const filteredDepts = selectedPrintDepts.size > 0
-      ? scales.filter(s => selectedPrintDepts.has(s.department_id))
-      : scales;
-    doPrint(filteredDepts, `Escala do Culto — ${getCultLabel(cult)}`);
-    setPrintCultModal(false);
-  }
-
-  async function printMonthNow() {
-    const refMonth = format(new Date(), 'yyyy-MM');
-    const monthCults = (cults || []).filter(c => c.date?.startsWith(refMonth) && c.status !== 'Cancelado');
-
-    // Build print data
-    const sections: { cult: Cult; depts: ScaleEntry[] }[] = [];
-    for (const cult of monthCults) {
-      try {
-        const data = await api.get<Scale[]>(`/scales?cult_id=${cult.id}`);
-        const grouped: Record<number, ScaleEntry> = {};
-        (data || []).forEach(s => {
-          const dId = s.department_id || 0;
-          if (!grouped[dId]) {
-            grouped[dId] = {
-              department_id: dId,
-              department_name: s.department_name || 'Sem Departamento',
-              sector_name: s.sector_name,
-              volunteers: [],
-            };
-          }
-          grouped[dId].volunteers.push(s);
-        });
-        const depts = Object.values(grouped).filter(d =>
-          selectedPrintDepts.size === 0 || selectedPrintDepts.has(d.department_id)
-        );
-        sections.push({ cult, depts });
-      } catch { }
-    }
-
-    doMonthPrint(sections, `Escala do Mês — ${format(new Date(), 'MMMM yyyy', { locale: ptBR })}`);
-    setPrintMonthModal(false);
-  }
-
-  function doPrint(depts: ScaleEntry[], title: string) {
-    const html = buildPrintHtml(title, depts.map(dept => `
-      <div class="dept-block">
-        <h3>${dept.department_name}${dept.sector_name ? ` <small>(${dept.sector_name})</small>` : ''}</h3>
-        ${dept.volunteers.length === 0
-          ? '<p class="empty-row">Nenhum voluntário escalado</p>'
-          : `<table><thead><tr><th>#</th><th>Voluntário</th><th>Função</th><th>Status</th></tr></thead><tbody>
-              ${dept.volunteers.map((v, i) => `<tr><td>${i + 1}</td><td>${v.volunteer_name || '—'}</td><td>${v.role || '—'}</td><td>${v.status || 'Pendente'}</td></tr>`).join('')}
-            </tbody></table>`
-        }
-      </div>
-    `).join(''));
-    openPrintWindow(html);
-  }
-
-  function doMonthPrint(sections: { cult: Cult; depts: ScaleEntry[] }[], title: string) {
-    const content = sections.map(({ cult, depts }) => `
-      <div class="cult-section">
-        <h2>${cult.name || cult.type_name || 'Culto'} — ${cult.date} às ${cult.time}</h2>
-        ${depts.map(dept => `
-          <div class="dept-block">
-            <h3>${dept.department_name}${dept.sector_name ? ` <small>(${dept.sector_name})</small>` : ''}</h3>
-            ${dept.volunteers.length === 0
-              ? '<p class="empty-row">Nenhum voluntário escalado</p>'
-              : `<table><thead><tr><th>#</th><th>Voluntário</th><th>Função</th><th>Status</th></tr></thead><tbody>
-                  ${dept.volunteers.map((v, i) => `<tr><td>${i + 1}</td><td>${v.volunteer_name || '—'}</td><td>${v.role || '—'}</td><td>${v.status || 'Pendente'}</td></tr>`).join('')}
-                </tbody></table>`
-            }
-          </div>
-        `).join('')}
-      </div>
-    `).join('');
-    openPrintWindow(buildPrintHtml(title, content));
-  }
-
-  function buildPrintHtml(title: string, content: string) {
-    return `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<title>${title}</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', sans-serif; font-size: 12px; color: #1a1a1a; background: white; }
-  .header { border-bottom: 2px solid #b45309; padding-bottom: 12px; margin-bottom: 20px; }
-  .header h1 { font-size: 18px; color: #b45309; font-weight: 700; }
-  .header p { color: #666; font-size: 11px; margin-top: 4px; }
-  .cult-section { margin-bottom: 32px; page-break-inside: avoid; }
-  .cult-section h2 { font-size: 14px; background: #fef3c7; border-left: 4px solid #f59e0b; padding: 6px 10px; margin-bottom: 12px; border-radius: 0 4px 4px 0; }
-  .dept-block { margin-bottom: 16px; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; }
-  .dept-block h3 { background: #f3f4f6; padding: 8px 12px; font-size: 12px; font-weight: 600; color: #374151; border-bottom: 1px solid #e5e7eb; }
-  .dept-block h3 small { font-weight: 400; color: #9ca3af; }
-  table { width: 100%; border-collapse: collapse; }
-  th { background: #1c1917; color: white; text-align: left; padding: 6px 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-  td { padding: 6px 10px; border-bottom: 1px solid #f3f4f6; font-size: 11px; }
-  tr:last-child td { border-bottom: none; }
-  tr:nth-child(even) td { background: #fafafa; }
-  .empty-row { padding: 10px 12px; color: #9ca3af; font-style: italic; font-size: 11px; }
-  @media print {
-    body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-    .cult-section { page-break-after: auto; }
-  }
-</style>
-</head>
-<body>
-<div class="header">
-  <h1>${title}</h1>
-  <p>Gerado em ${format(new Date(), "dd 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: ptBR })}</p>
-</div>
-${content}
-</body>
-</html>`;
-  }
-
-  function openPrintWindow(html: string) {
-    const win = window.open('', '_blank', 'width=900,height=700');
-    if (!win) { alert('Permita pop-ups para imprimir.'); return; }
-    win.document.write(html);
-    win.document.close();
-    win.focus();
-    setTimeout(() => { win.print(); }, 500);
-  }
-
-  // ─── Remove all scales for selected cult ─────────────────────────────────────
-  async function handleRemoveScale() {
-    if (!selectedCultId) return;
-    try {
-      await api.delete(`/scales?cult_id=${selectedCultId}`);
-      setRemoveScaleModal(false);
-      loadScales(selectedCultId);
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Erro ao remover escalas');
-    }
-  }
-
-  const selectedCult = getSelectedCult();
-  const totalVolunteers = scales.reduce((acc, d) => acc + d.volunteers.length, 0);
-  const confirmedVolunteers = scales.reduce((acc, d) => acc + d.volunteers.filter(v => v.status === 'Confirmado').length, 0);
+  const canManage = isAdmin(user.role) || isLeader(user.role);
 
   return (
-    <div className="space-y-4">
-
-      {/* ─── Header ────────────────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+    <div className="space-y-5">
+      {/* ─── Header ─────────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <h1 className="text-xl font-bold text-stone-100">Escalas</h1>
-
-        {/* Action toolbar — improved layout */}
-        <div className="flex flex-wrap gap-2">
-          {/* Row 1: Generate & Create */}
-          <div className="flex gap-2">
-            <Button size="sm" variant="secondary" onClick={openGenerateModal}
-              className="flex items-center gap-1.5 border border-stone-600">
-              <Wand2 size={14} /> Gerar Automático
+        <div className="flex gap-2 flex-wrap">
+          {canManage && (
+            <>
+              <Button variant="secondary" size="sm" onClick={openAutoModal}>
+                <Zap size={16} /> Gerar Automático
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => { setNewCultModal(true); setCultError(''); }}>
+                <Calendar size={16} /> Nova Escala
+              </Button>
+              {selectedCult && (
+                <>
+                  <Button size="sm" variant="secondary" onClick={() => { setFillModal(true); setFillMsg(''); }}>
+                    <Zap size={16} /> Preencher Automático
+                  </Button>
+                  <Button size="sm" onClick={() => { setAddModal(true); setError(''); }}>
+                    <Plus size={16} /> Adicionar Voluntário
+                  </Button>
+                  {isAdmin(user.role) && (
+                    <Button size="sm" variant="danger" onClick={() => setDeleteScaleModal(true)}>
+                      <Trash2 size={16} /> Remover Escala
+                    </Button>
+                  )}
+                </>
+              )}
+            </>
+          )}
+          {selectedCult && scales && (
+            <Button variant="outline" size="sm" onClick={handlePrint}>
+              <Printer size={16} /> Imprimir Culto
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => setAddVolModal(true)}
-              className="flex items-center gap-1.5 border border-stone-600">
-              <Plus size={14} /> Nova Escala
-            </Button>
-            <Button size="sm" variant="secondary"
-              className="flex items-center gap-1.5 border border-stone-600">
-              <Zap size={14} /> Preencher Automático
-            </Button>
-          </div>
-          {/* Row 2: Volunteer & Remove */}
-          <div className="flex gap-2">
-            <Button size="sm" onClick={() => setAddVolModal(true)}
-              className="flex items-center gap-1.5">
-              <UserPlus size={14} /> Adicionar Voluntário
-            </Button>
-            <Button size="sm" variant="danger" onClick={() => setRemoveScaleModal(true)}
-              className="flex items-center gap-1.5">
-              <Trash2 size={14} /> Remover Escala
-            </Button>
-          </div>
-          {/* Row 3: Print */}
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={openPrintCultModal}
-              className="flex items-center gap-1.5">
-              <Printer size={14} /> Imprimir Culto
-            </Button>
-            <Button size="sm" variant="outline" onClick={openPrintMonthModal}
-              className="flex items-center gap-1.5">
-              <CalendarDays size={14} /> Imprimir Mês
-            </Button>
-          </div>
+          )}
+          <Button variant="outline" size="sm" onClick={handlePrintMonth}>
+            <Printer size={16} /> Imprimir Mês
+          </Button>
         </div>
       </div>
 
-      {/* ─── Cult selector + view toggle ────────────────────────────────────────── */}
+      {/* ─── Cult selector ──────────────────────────────────────────────────── */}
       <Card className="p-4">
-        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-          <div className="flex-1 min-w-0">
-            <label className="text-xs text-stone-500 uppercase tracking-widest mb-1.5 block">
-              Selecionar Culto / Evento
-            </label>
-            <select
-              value={selectedCultId || ''}
-              onChange={e => setSelectedCultId(Number(e.target.value))}
-              className="w-full bg-stone-800 border border-stone-700 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500 transition-colors"
-            >
-              <option value="">— Selecione um culto —</option>
-              {activeCults.map(c => (
-                <option key={c.id} value={c.id}>{getCultLabel(c)}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* View toggle */}
-          <div className="flex rounded-lg overflow-hidden border border-stone-700 self-end sm:self-auto mt-1 sm:mt-6">
-            <button
-              onClick={() => setViewMode('department')}
-              className={`px-3 py-2 text-xs font-medium transition-colors flex items-center gap-1.5 ${viewMode === 'department' ? 'bg-amber-600 text-white' : 'bg-stone-800 text-stone-400 hover:text-stone-200'}`}
-            >
-              <Users size={13} /> Por Departamento
-            </button>
-            <button
-              onClick={() => setViewMode('full')}
-              className={`px-3 py-2 text-xs font-medium transition-colors ${viewMode === 'full' ? 'bg-amber-600 text-white' : 'bg-stone-800 text-stone-400 hover:text-stone-200'}`}
-            >
-              Lista Completa
-            </button>
-          </div>
+        <label className="text-xs text-stone-400 uppercase tracking-wide mb-2 block">Selecionar Culto / Evento</label>
+        <div className="flex flex-wrap items-center gap-4">
+          <select
+            value={selectedCult || ''}
+            onChange={e => setSelectedCult(Number(e.target.value) || null)}
+            className="w-full md:w-auto md:min-w-96 bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+          >
+            <option value="">Selecione um culto...</option>
+            {availableCults.map(c => (
+              <option key={c.id} value={c.id}>{getCultLabel(c)}</option>
+            ))}
+          </select>
+          {selectedCult && isAdmin(user.role) && (
+            <div className="flex rounded-lg overflow-hidden border border-stone-700">
+              <button
+                onClick={() => setViewMode('departments')}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5 ${viewMode === 'departments' ? 'bg-amber-600 text-white' : 'bg-stone-800 text-stone-400 hover:text-stone-200'}`}
+              >
+                <Users size={13} /> Por Departamento
+              </button>
+              <button
+                onClick={() => setViewMode('list')}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'list' ? 'bg-amber-600 text-white' : 'bg-stone-800 text-stone-400 hover:text-stone-200'}`}
+              >
+                Lista Completa
+              </button>
+            </div>
+          )}
         </div>
-
-        {/* Cult info bar */}
-        {selectedCult && (
-          <div className="flex flex-wrap gap-4 mt-3 pt-3 border-t border-stone-800 text-xs text-stone-400">
-            <span className="flex items-center gap-1.5">
-              <Calendar size={12} className="text-amber-500" /> {selectedCult.date}
-            </span>
-            <span>🕐 {selectedCult.time}</span>
-            <span>📋 {selectedCult.name || selectedCult.type_name}</span>
-            <span className="flex items-center gap-1.5">
-              <Users size={12} className="text-amber-500" /> {totalVolunteers} voluntário(s) escalado(s)
-            </span>
-            {confirmedVolunteers > 0 && (
-              <span className="text-emerald-400">{confirmedVolunteers} confirmado(s)</span>
-            )}
+        {selectedCultData && (
+          <div className="mt-3 flex flex-wrap gap-4 text-xs text-stone-400">
+            <span>📅 {selectedCultData.date}</span>
+            <span>🕐 {selectedCultData.time}</span>
+            <span>📋 {selectedCultData.name || selectedCultData.type_name}</span>
+            <span>👥 {scales?.length ?? 0} voluntário(s) escalado(s)</span>
           </div>
         )}
       </Card>
 
-      {/* ─── Scale content ───────────────────────────────────────────────────────── */}
-      {!selectedCultId ? (
-        <Card className="p-12 text-center">
-          <Users size={40} className="text-stone-700 mx-auto mb-3" />
-          <p className="text-stone-500">Selecione um culto para ver as escalas</p>
-        </Card>
-      ) : loadingScales ? (
-        <Card className="p-12 text-center">
-          <div className="animate-spin w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full mx-auto mb-3" />
-          <p className="text-stone-500 text-sm">Carregando escalas...</p>
-        </Card>
-      ) : viewMode === 'department' ? (
-        /* Department view — block grid */
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {scales.length === 0 ? (
-            <div className="col-span-full">
-              <Card className="p-12 text-center">
-                <Users size={40} className="text-stone-700 mx-auto mb-3" />
-                <p className="text-stone-400 font-medium">Nenhuma escala gerada para este culto</p>
-                <p className="text-stone-500 text-sm mt-1">Clique em "Gerar Automático" para criar as escalas</p>
-              </Card>
+      {/* ─── Department Blocks View ──────────────────────────────────────────── */}
+      {selectedCult && viewMode === 'departments' && (
+        <>
+          {deptLoading ? (
+            <div className="flex items-center justify-center py-16"><Spinner /></div>
+          ) : deptBlocks.length === 0 ? (
+            <Card className="py-12 text-center">
+              <p className="text-stone-500 text-sm">Nenhuma escala cadastrada para este culto</p>
+              <p className="text-stone-600 text-xs mt-1">
+                {canManage ? 'Clique em "Adicionar Voluntário" para começar' : 'Aguardando os líderes montarem as escalas'}
+              </p>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+              {deptBlocks
+                .filter(b => b.scales.length > 0)
+                .map((block, idx) => {
+                  const blockKey = String(block.department_id ?? 'none');
+                  const isCollapsed = collapsedBlocks.has(blockKey);
+                  const colorClass = BLOCK_COLORS[idx % BLOCK_COLORS.length];
+                  const headerClass = HEADER_COLORS[idx % HEADER_COLORS.length];
+                  const confirmedCount = block.scales.filter(s => s.status === 'Confirmado').length;
+                  return (
+                    <div key={blockKey} className={`rounded-xl border ${colorClass} overflow-hidden`}>
+                      <button
+                        onClick={() => toggleBlock(blockKey)}
+                        className={`w-full flex items-center justify-between px-4 py-3 ${headerClass} transition-opacity hover:opacity-80`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Users size={15} />
+                          <span className="font-semibold text-sm">{block.department_name}</span>
+                          <span className="text-xs opacity-70 ml-1">
+                            {block.scales.length} vol. • {confirmedCount} confirmado(s)
+                          </span>
+                        </div>
+                        {isCollapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+                      </button>
+                      {!isCollapsed && (
+                        <div className="divide-y divide-stone-800/60">
+                          {block.scales.map((s, i) => (
+                            <div key={s.id} className="flex items-center justify-between px-4 py-2.5 hover:bg-stone-800/20 transition-colors">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <span className="text-stone-600 text-xs w-4 flex-shrink-0">{i + 1}</span>
+                                <div className="min-w-0">
+                                  <p className="text-stone-200 text-sm font-medium truncate">{s.member_name}</p>
+                                  <p className="text-stone-500 text-xs truncate">{s.sector_name}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                                <Badge
+                                  label={s.status}
+                                  color={s.status === 'Confirmado' ? 'green' : s.status === 'Pendente' ? 'yellow' : s.status === 'Troca' ? 'blue' : 'red'}
+                                />
+                                {isAdmin(user.role) && (
+                                  <>
+                                    {s.status === 'Pendente' && (
+                                      <button onClick={() => confirmScale(s.id)} title="Confirmar"
+                                        className="text-emerald-400 hover:text-emerald-300 p-1 transition-colors">
+                                        <CheckCircle size={14} />
+                                      </button>
+                                    )}
+                                    <button onClick={() => removeScale(s.id)} title="Remover"
+                                      className="text-red-400 hover:text-red-300 p-1 transition-colors">
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
             </div>
-          ) : scales.map(dept => (
-            <DeptBlock key={dept.department_id} dept={dept} onRefresh={() => selectedCultId && loadScales(selectedCultId)} />
-          ))}
-        </div>
-      ) : (
-        /* Full list view */
+          )}
+        </>
+      )}
+
+      {/* ─── List View ──────────────────────────────────────────────────────── */}
+      {selectedCult && (viewMode === 'list' || !isAdmin(user.role)) && (
         <Card className="overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-stone-700 bg-stone-800/50">
-                <th className="text-left p-3 text-stone-400 font-medium text-xs">#</th>
-                <th className="text-left p-3 text-stone-400 font-medium text-xs">Voluntário</th>
-                <th className="text-left p-3 text-stone-400 font-medium text-xs">Departamento</th>
-                <th className="text-left p-3 text-stone-400 font-medium text-xs">Setor</th>
-                <th className="text-left p-3 text-stone-400 font-medium text-xs">Função</th>
-                <th className="text-left p-3 text-stone-400 font-medium text-xs">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {scales.flatMap(dept => dept.volunteers).map((v, i) => (
-                <tr key={v.id} className="border-b border-stone-800 hover:bg-stone-800/30 transition-colors">
-                  <td className="p-3 text-stone-500 text-xs">{i + 1}</td>
-                  <td className="p-3 text-stone-200 font-medium">{v.volunteer_name || '—'}</td>
-                  <td className="p-3 text-stone-400 text-xs">{v.department_name || '—'}</td>
-                  <td className="p-3 text-stone-400 text-xs">{v.sector_name || '—'}</td>
-                  <td className="p-3 text-stone-400 text-xs">{v.role || '—'}</td>
-                  <td className="p-3">
-                    <Badge label={v.status || 'Pendente'}
-                      color={v.status === 'Confirmado' ? 'green' : v.status === 'Recusado' ? 'red' : 'yellow'} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {scales.flatMap(d => d.volunteers).length === 0 && (
-            <p className="text-center text-stone-500 text-sm py-10">Nenhum voluntário escalado</p>
+          {!scales ? (
+            <div className="flex items-center justify-center py-10"><Spinner /></div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-stone-700 bg-stone-800/50">
+                    <th className="text-left p-3 text-stone-400 font-medium text-xs">#</th>
+                    <th className="text-left p-3 text-stone-400 font-medium text-xs">Voluntário</th>
+                    <th className="text-left p-3 text-stone-400 font-medium text-xs">Setor / Local</th>
+                    <th className="text-left p-3 text-stone-400 font-medium text-xs">Departamento</th>
+                    <th className="text-left p-3 text-stone-400 font-medium text-xs">Status</th>
+                    <th className="text-right p-3 text-stone-400 font-medium text-xs">Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scales.map((s, i) => (
+                    <tr key={s.id} className="border-b border-stone-800 hover:bg-stone-800/30 transition-colors">
+                      <td className="p-3 text-stone-500 text-xs">{i + 1}</td>
+                      <td className="p-3 text-stone-200">{s.member_name}</td>
+                      <td className="p-3 text-stone-400 text-xs">{s.sector_name || '—'}</td>
+                      <td className="p-3 text-stone-400 text-xs">{(s as any).department_name || '—'}</td>
+                      <td className="p-3">
+                        <Badge
+                          label={s.status}
+                          color={s.status === 'Confirmado' ? 'green' : s.status === 'Pendente' ? 'yellow' : s.status === 'Troca' ? 'blue' : 'red'}
+                        />
+                      </td>
+                      <td className="p-3">
+                        <div className="flex justify-end gap-1">
+                          {s.status === 'Pendente' && (
+                            <button onClick={() => confirmScale(s.id)} title="Confirmar"
+                              className="text-emerald-400 hover:text-emerald-300 p-1 transition-colors">
+                              <CheckCircle size={15} />
+                            </button>
+                          )}
+                          <button onClick={() => openSwapModal(s.id)} title="Solicitar Troca"
+                            className="text-blue-400 hover:text-blue-300 p-1 transition-colors">
+                            <Repeat size={15} />
+                          </button>
+                          {canManage && (
+                            <button onClick={() => removeScale(s.id)} title="Remover"
+                              className="text-red-400 hover:text-red-300 p-1 transition-colors">
+                              <Trash2 size={15} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {scales.length === 0 && (
+                <div className="py-10 text-center">
+                  <p className="text-stone-500 text-sm">Nenhum voluntário nesta escala</p>
+                </div>
+              )}
+            </div>
           )}
         </Card>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* MODAL: Gerar Escala Automática                                         */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <Modal open={generateModal} onClose={() => setGenerateModal(false)} title="Gerar Escala Automática" size="md">
-        <div className="space-y-5">
-          {/* Info */}
-          <p className="text-stone-400 text-sm leading-relaxed">
-            O sistema respeitará as regras de não-repetição (máx. 3×/mês) e evitará duplicidade de setor.
+      {/* ─── Modal: Solicitar Troca ──────────────────────────────────────────── */}
+      <Modal open={swapModal} onClose={() => setSwapModal(false)} title="Solicitar Troca" size="sm">
+        <div className="space-y-4">
+          <p className="text-stone-400 text-sm">
+            Informe o e-mail do voluntário sugerido para a troca, ou deixe em branco para qualquer disponível.
           </p>
+          <Input label="E-mail do voluntário sugerido (opcional)" type="email"
+            value={swapEmail} onChange={e => setSwapEmail(e.target.value)} placeholder="voluntario@email.com" />
+          {swapMsg && (
+            <p className={`text-sm ${swapMsg.startsWith('✅') ? 'text-emerald-400' : 'text-red-400'}`}>{swapMsg}</p>
+          )}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setSwapModal(false)}>Cancelar</Button>
+            <Button onClick={confirmSwap} loading={swapSaving}>Confirmar Troca</Button>
+          </div>
+        </div>
+      </Modal>
 
-          {generateResult ? (
-            /* Success state */
+      {/* ─── Modal: Nova Escala ──────────────────────────────────────────────── */}
+      <Modal open={newCultModal} onClose={() => setNewCultModal(false)} title="Nova Escala" size="md">
+        <div className="space-y-4">
+          <p className="text-stone-400 text-xs">Preencha os dados do culto/evento para criar uma nova escala.</p>
+          <div>
+            <label className="text-xs text-stone-400 uppercase tracking-wide mb-1 block">Tipo de Culto</label>
+            <select
+              value={newCult.type_id}
+              onChange={e => {
+                const ct = (cultTypes || []).find(c => c.id === Number(e.target.value));
+                setNewCult(n => ({ ...n, type_id: e.target.value, time: ct?.default_time || n.time }));
+              }}
+              className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+            >
+              <option value="">Selecionar tipo...</option>
+              {(cultTypes || []).map(ct => (
+                <option key={ct.id} value={ct.id}>{ct.name}</option>
+              ))}
+            </select>
+          </div>
+          <Input label="Nome personalizado (opcional)" value={newCult.name}
+            onChange={e => setNewCult(n => ({ ...n, name: e.target.value }))} placeholder="Ex: Culto de Aniversário" />
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Data *" type="date" value={newCult.date}
+              onChange={e => setNewCult(n => ({ ...n, date: e.target.value }))} />
+            <Input label="Horário *" type="time" value={newCult.time}
+              onChange={e => setNewCult(n => ({ ...n, time: e.target.value }))} />
+          </div>
+          {cultError && <p className="text-red-400 text-xs">{cultError}</p>}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setNewCultModal(false)}>Cancelar</Button>
+            <Button onClick={createNewCultScale} loading={savingCult}>Criar Escala</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ─── Modal: Gerar Escala Automática ─────────────────────────────────── */}
+      <Modal open={autoModal} onClose={closeAutoModal} title="Gerar Escala Automática" size="sm">
+        <div className="space-y-4">
+
+          {/* ── Resultado de sucesso ─────────────────────────────────────────── */}
+          {autoResult ? (
             <div className="space-y-4">
               <div className="bg-emerald-900/20 border border-emerald-700/40 rounded-xl p-4 space-y-3">
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 size={18} className="text-emerald-400" />
+                  <CheckCircle2 size={18} className="text-emerald-400 flex-shrink-0" />
                   <p className="text-emerald-300 font-semibold text-sm">Escala gerada com sucesso!</p>
                 </div>
-                <div className="bg-emerald-900/30 rounded-lg p-4 text-center">
-                  <p className="text-emerald-200 text-3xl font-bold">{generateResult.cultsCreated}</p>
-                  <p className="text-emerald-400 text-sm mt-1">
-                    {generateResult.cultsCreated === 1 ? 'culto processado' : 'cultos processados'}
-                  </p>
+
+                {/* Tipo gerado */}
+                <div className="bg-stone-800/60 rounded-lg px-3 py-2 text-xs">
+                  <span className="text-stone-400">Tipo: </span>
+                  <span className="text-stone-200 font-medium">{autoResult.label}</span>
                 </div>
-                <p className="text-emerald-400/80 text-xs">
-                  As escalas foram criadas em branco para cada departamento. Adicione os voluntários manualmente.
+
+                {/* Contadores */}
+                <div className={`grid gap-3 ${autoResult.created > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  <div className="bg-amber-900/30 rounded-lg p-3 text-center">
+                    <p className="text-amber-200 text-2xl font-bold">{autoResult.cultsCount ?? 1}</p>
+                    <p className="text-amber-400 text-xs mt-0.5">
+                      {(autoResult.cultsCount ?? 1) === 1 ? 'culto processado' : 'cultos processados'}
+                    </p>
+                  </div>
+                  {autoResult.created > 0 && (
+                    <div className="bg-emerald-900/30 rounded-lg p-3 text-center">
+                      <p className="text-emerald-200 text-2xl font-bold">{autoResult.created}</p>
+                      <p className="text-emerald-400 text-xs mt-0.5">
+                        {autoResult.created === 1 ? 'voluntário alocado' : 'voluntários alocados'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <p className="text-stone-400 text-xs leading-relaxed">
+                  Selecione um culto e use <strong className="text-amber-400">Preencher Automático</strong> para alocar voluntários, ou adicione-os manualmente.
                 </p>
               </div>
-              <Button onClick={() => setGenerateModal(false)} className="w-full">Fechar</Button>
+
+              <Button onClick={closeAutoModal} className="w-full">Fechar</Button>
             </div>
+
           ) : (
+            /* ── Formulário de geração ──────────────────────────────────────── */
             <>
-              {/* Mode selector */}
+              <p className="text-stone-400 text-sm">
+                O sistema respeitará as regras de não-repetição (máx. 3x/mês) e evitará duplicidade de setor.
+              </p>
               <div className="space-y-2">
-                {([
-                  { key: 'mes-inteiro', label: 'Mês Inteiro', desc: 'Gera escalas para todos os cultos do mês' },
-                  { key: 'culto-especifico', label: 'Culto Específico', desc: 'Selecione um culto da lista' },
-                  { key: 'culto-padrao', label: 'Cultos Padrão', desc: 'Culto selecionado na tela' },
-                  { key: 'culto-tematico', label: 'Cultos Temáticos', desc: 'Culto selecionado na tela' },
-                ] as { key: GenerateMode; label: string; desc: string }[]).map(opt => (
-                  <label key={opt.key}
-                    className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
-                      generateMode === opt.key
-                        ? 'border-amber-500 bg-amber-500/10'
-                        : 'border-stone-700 hover:border-stone-600 bg-stone-800/30'
-                    }`}>
-                    <input
-                      type="radio"
-                      name="generateMode"
-                      value={opt.key}
-                      checked={generateMode === opt.key}
-                      onChange={() => setGenerateMode(opt.key)}
-                      className="mt-0.5 accent-amber-500"
-                    />
+                {[
+                  { value: 'month',    label: 'Mês Inteiro',      desc: 'Gera escalas para todos os cultos do mês' },
+                  { value: 'specific', label: 'Culto Específico', desc: 'Selecione um culto da lista' },
+                  { value: 'standard', label: 'Cultos Padrão',    desc: 'Culto selecionado na tela' },
+                  { value: 'thematic', label: 'Cultos Temáticos', desc: 'Culto selecionado na tela' },
+                ].map(opt => (
+                  <label key={opt.value}
+                    className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-stone-700 hover:border-amber-600 transition-all">
+                    <input type="radio" value={opt.value} checked={autoType === opt.value}
+                      onChange={() => setAutoType(opt.value as any)} className="accent-amber-500 mt-0.5" />
                     <div>
-                      <p className={`text-sm font-medium ${generateMode === opt.key ? 'text-amber-300' : 'text-stone-200'}`}>
-                        {opt.label}
-                      </p>
-                      <p className="text-xs text-stone-500 mt-0.5">{opt.desc}</p>
+                      <p className="text-stone-200 text-sm">{opt.label}</p>
+                      <p className="text-stone-500 text-xs">{opt.desc}</p>
                     </div>
                   </label>
                 ))}
               </div>
 
-              {/* Month picker — only for "Mês Inteiro" */}
-              {generateMode === 'mes-inteiro' && (
-                <div>
-                  <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 block">Mês de referência</label>
+              {/* Seletor de mês — só para Mês Inteiro */}
+              {autoType === 'month' && (
+                <div className="space-y-1">
+                  <label className="text-stone-400 text-xs">Mês de referência</label>
                   <input
                     type="month"
-                    value={generateRefMonth}
-                    onChange={e => setGenerateRefMonth(e.target.value)}
-                    className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+                    value={autoMonth}
+                    onChange={e => setAutoMonth(e.target.value)}
+                    className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
                   />
-                  <p className="text-xs text-stone-500 mt-2">
-                    Serão geradas escalas em branco para todos os departamentos ativos em cada culto do mês. Voluntários podem ser adicionados manualmente depois.
-                  </p>
                 </div>
               )}
 
-              {/* Cult picker — for "Culto Específico" */}
-              {generateMode === 'culto-especifico' && (
-                <div>
-                  <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 block">Culto</label>
+              {/* Seletor de culto específico */}
+              {autoType === 'specific' && (
+                <div className="space-y-1">
+                  <label className="text-stone-400 text-xs">Selecione o culto</label>
                   <select
-                    value={selectedCultId || ''}
-                    onChange={e => setSelectedCultId(Number(e.target.value))}
+                    value={autoSpecificCult ?? ''}
+                    onChange={e => setAutoSpecificCult(e.target.value ? Number(e.target.value) : null)}
                     className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
                   >
-                    <option value="">— Selecione —</option>
-                    {activeCults.map(c => (
-                      <option key={c.id} value={c.id}>{getCultLabel(c)}</option>
+                    <option value="">Selecionar culto...</option>
+                    {availableCults.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name || c.type_name || 'Culto'} — {c.date} {c.time}
+                      </option>
                     ))}
                   </select>
                 </div>
               )}
 
-              {generateError && (
-                <div className="flex items-center gap-2 bg-red-900/20 border border-red-700/40 rounded-lg p-3">
-                  <AlertCircle size={15} className="text-red-400 flex-shrink-0" />
-                  <p className="text-red-300 text-xs">{generateError}</p>
-                </div>
+              {(autoType === 'standard' || autoType === 'thematic') && !selectedCult && (
+                <p className="text-amber-400 text-xs">⚠️ Selecione um culto na tela principal antes de gerar.</p>
               )}
-
+              {error && <p className="text-red-400 text-xs">{error}</p>}
               <div className="flex gap-3">
-                <Button variant="outline" onClick={() => setGenerateModal(false)}>Cancelar</Button>
-                <Button onClick={handleGenerate} loading={generating}>Gerar</Button>
+                <Button variant="outline" onClick={closeAutoModal}>Cancelar</Button>
+                <Button onClick={generateAuto} loading={saving}
+                  disabled={(autoType === 'specific' && !autoSpecificCult) || ((autoType === 'standard' || autoType === 'thematic') && !selectedCult)}>
+                  Gerar
+                </Button>
               </div>
             </>
           )}
         </div>
       </Modal>
 
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* MODAL: Imprimir Culto                                                  */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <Modal open={printCultModal} onClose={() => setPrintCultModal(false)} title="Configurar Impressão do Culto" size="md">
+      {/* ─── Modal: Preencher Automático ─────────────────────────────────────── */}
+      <Modal open={fillModal} onClose={() => { setFillModal(false); setFillMsg(''); }} title="Preencher Voluntários Automaticamente" size="sm">
+        <div className="space-y-4">
+          {selectedCultData && (
+            <div className="bg-stone-800 border border-stone-600 rounded-lg p-3 text-xs space-y-1">
+              <p><span className="text-stone-200 font-semibold">Culto:</span> <span className="text-stone-300">{selectedCultData.name || selectedCultData.type_name}</span></p>
+              <p><span className="text-stone-200 font-semibold">Data:</span> <span className="text-stone-300">{selectedCultData.date}</span></p>
+            </div>
+          )}
+          <div className="bg-stone-800 border border-stone-600 rounded-lg p-3 space-y-2">
+            <p className="text-stone-200 text-xs font-semibold">O sistema respeitará as seguintes regras:</p>
+            <ul className="text-stone-300 text-xs space-y-1 list-disc list-inside leading-relaxed">
+              <li>Não escalar o mesmo voluntário duas vezes no culto</li>
+              <li>Máximo 3 escalas por voluntário no mês</li>
+              <li>Setores já preenchidos serão mantidos</li>
+            </ul>
+          </div>
+          {fillMsg && (
+            <p className={`text-sm font-medium ${fillMsg.startsWith('❌') ? 'text-red-400' : 'text-emerald-400'}`}>{fillMsg}</p>
+          )}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => { setFillModal(false); setFillMsg(''); }}>Cancelar</Button>
+            <Button onClick={fillCult} loading={fillLoading} disabled={!!fillMsg && !fillMsg.startsWith('❌')}>
+              <Zap size={15} /> Preencher
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ─── Modal: Remover Escala Inteira ──────────────────────────────────── */}
+      <Modal open={deleteScaleModal} onClose={() => setDeleteScaleModal(false)} title="Remover Escala" size="sm">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 bg-red-900/20 border border-red-700/40 rounded-lg p-4">
+            <AlertTriangle size={18} className="text-red-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-red-300 text-sm font-semibold">Ação irreversível</p>
+              <p className="text-red-400/80 text-xs mt-1">
+                Todos os voluntários serão removidos desta escala. O culto permanece agendado. Esta ação não pode ser desfeita.
+              </p>
+            </div>
+          </div>
+          {selectedCultData && (
+            <div className="bg-stone-800/50 rounded-lg p-3 text-xs text-stone-400 space-y-1">
+              <p><span className="text-stone-300">Culto:</span> {selectedCultData.name || selectedCultData.type_name}</p>
+              <p><span className="text-stone-300">Data:</span> {selectedCultData.date} às {selectedCultData.time}</p>
+              <p><span className="text-stone-300">Voluntários:</span> {scales?.length ?? 0} escalado(s)</p>
+            </div>
+          )}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setDeleteScaleModal(false)}>Cancelar</Button>
+            <Button variant="danger" onClick={deleteEntireScale} loading={deletingScale}>
+              <Trash2 size={15} /> Confirmar Remoção
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ─── Modal: Adicionar Voluntário ─────────────────────────────────────── */}
+      <Modal open={addModal} onClose={() => { setAddModal(false); setSelectedDepartmentForScale(null); }} title="Adicionar Voluntário à Escala" size="sm">
+        <div className="space-y-4">
+          {selectedCultData && (
+            <div className="bg-stone-800/50 rounded-lg p-3 text-xs text-stone-400 space-y-1">
+              <p><span className="text-stone-300">Culto:</span> {selectedCultData.name || selectedCultData.type_name}</p>
+              <p><span className="text-stone-300">Data:</span> {selectedCultData.date}</p>
+              <p><span className="text-stone-300">Horário:</span> {selectedCultData.time}</p>
+            </div>
+          )}
+          <Select label="Voluntário *" value={newScale.member_id}
+            onChange={e => setNewScale(n => ({ ...n, member_id: e.target.value }))}
+            placeholder="Selecionar voluntário..."
+            options={(members || []).map(m => ({ value: m.id, label: m.name }))} />
+          
+          {/* Novo: Seletor de Departamento */}
+          <Select label="Departamento *" value={selectedDepartmentForScale?.toString() || ''}
+            onChange={e => setSelectedDepartmentForScale(e.target.value ? Number(e.target.value) : null)}
+            placeholder="Selecionar departamento..."
+            options={(sectors || [])
+              .filter((s, i, arr) => arr.findIndex(x => x.department_id === s.department_id) === i)
+              .sort((a, b) => (a.department_id || 0) - (b.department_id || 0))
+              .map(s => ({ 
+                value: s.department_id?.toString() || '', 
+                label: s.department_name || 'Sem Departamento'
+              }))
+            } />
+          
+          {/* Filtrado: Seletor de Setor */}
+          <Select label="Setor / Local *" value={newScale.sector_id}
+            onChange={e => setNewScale(n => ({ ...n, sector_id: e.target.value }))}
+            placeholder="Selecionar setor..."
+            options={(sectors || [])
+              .filter(s => !selectedDepartmentForScale || s.department_id === selectedDepartmentForScale)
+              .map(s => ({ value: s.id, label: s.name }))
+            } />
+          
+          {error && <p className="text-red-400 text-xs">{error}</p>}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => { setAddModal(false); setSelectedDepartmentForScale(null); }}>Cancelar</Button>
+            <Button onClick={addToScale} loading={saving}>Adicionar</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ─── Modal: Configurar Impressão ──────────────────────────────────────── */}
+      <Modal open={printConfigModal} onClose={() => setPrintConfigModal(false)} 
+        title={printingMode === 'cult' ? 'Configurar Impressão do Culto' : 'Configurar Impressão do Mês'} 
+        size="md">
         <div className="space-y-4">
           <p className="text-stone-400 text-sm">
             Selecione quais departamentos deseja incluir na impressão:
           </p>
 
-          <DeptCheckList
-            departments={departments || []}
-            selected={selectedPrintDepts}
-            onToggle={togglePrintDept}
-            onSelectAll={selectAllDepts}
-            onClear={clearDepts}
-          />
-
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setPrintCultModal(false)}>Cancelar</Button>
-            <Button onClick={printCultNow} className="flex items-center gap-2">
-              <Printer size={15} /> Imprimir Agora
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* MODAL: Imprimir Mês                                                    */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <Modal open={printMonthModal} onClose={() => setPrintMonthModal(false)} title="Configurar Impressão do Mês" size="md">
-        <div className="space-y-4">
-          <p className="text-stone-400 text-sm">
-            Selecione quais departamentos deseja incluir na impressão do mês:
-          </p>
-
-          <DeptCheckList
-            departments={departments || []}
-            selected={selectedPrintDepts}
-            onToggle={togglePrintDept}
-            onSelectAll={selectAllDepts}
-            onClear={clearDepts}
-          />
-
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setPrintMonthModal(false)}>Cancelar</Button>
-            <Button onClick={printMonthNow} className="flex items-center gap-2">
-              <Printer size={15} /> Imprimir Agora
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* MODAL: Remover Escala                                                  */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <Modal open={removeScaleModal} onClose={() => setRemoveScaleModal(false)} title="Remover Escala" size="sm">
-        <div className="space-y-4">
-          <div className="bg-red-900/20 border border-red-700/50 rounded-lg p-4">
-            <p className="text-stone-200 text-sm">
-              Deseja remover <strong className="text-red-300">todas as escalas</strong> do culto selecionado?
-            </p>
-            {selectedCult && (
-              <p className="text-stone-500 text-xs mt-2">
-                {getCultLabel(selectedCult)}
-              </p>
+          <div className="bg-stone-800 rounded-lg p-3 space-y-2 max-h-96 overflow-y-auto">
+            {availableDepartments.length === 0 ? (
+              <p className="text-stone-500 text-sm italic">Nenhum departamento disponível</p>
+            ) : (
+              availableDepartments.map(dept => (
+                <label key={dept.id} 
+                  className="flex items-center gap-3 cursor-pointer p-2 rounded hover:bg-stone-700 transition-colors">
+                  <input 
+                    type="checkbox" 
+                    checked={selectedDepartmentsForPrint.includes(dept.id)}
+                    onChange={e => {
+                      if (e.target.checked) {
+                        setSelectedDepartmentsForPrint(prev => [...prev, dept.id]);
+                      } else {
+                        setSelectedDepartmentsForPrint(prev => prev.filter(id => id !== dept.id));
+                      }
+                    }}
+                    className="w-4 h-4 accent-amber-500" 
+                  />
+                  <span className="text-stone-200 text-sm">{dept.name}</span>
+                </label>
+              ))
             )}
           </div>
+
+          <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg p-3">
+            <p className="text-amber-200 text-xs">
+              ✓ {selectedDepartmentsForPrint.length} de {availableDepartments.length} departamento(s) selecionado(s)
+            </p>
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={() => setSelectedDepartmentsForPrint(availableDepartments.map(d => d.id))}
+              className="text-amber-400 text-xs hover:text-amber-300 transition-colors">
+              Selecionar todos
+            </button>
+            <span className="text-stone-600 text-xs">•</span>
+            <button onClick={() => setSelectedDepartmentsForPrint([])}
+              className="text-stone-500 text-xs hover:text-stone-400 transition-colors">
+              Limpar
+            </button>
+          </div>
+
           <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setRemoveScaleModal(false)}>Cancelar</Button>
-            <Button variant="danger" onClick={handleRemoveScale}>
-              <Trash2 size={14} /> Remover
+            <Button variant="outline" onClick={() => setPrintConfigModal(false)}>Cancelar</Button>
+            <Button onClick={executePrint} disabled={selectedDepartmentsForPrint.length === 0}>
+              <Printer size={16} /> Imprimir Agora
             </Button>
           </div>
         </div>
       </Modal>
-
-    </div>
-  );
-}
-
-// ─── DeptBlock sub-component ─────────────────────────────────────────────────
-function DeptBlock({ dept, onRefresh }: { dept: ScaleEntry; onRefresh: () => void }) {
-  const [collapsed, setCollapsed] = useState(false);
-  return (
-    <Card className="overflow-hidden">
-      <div
-        className="flex items-center justify-between p-3 cursor-pointer hover:bg-stone-800/50 transition-colors border-b border-stone-800"
-        onClick={() => setCollapsed(c => !c)}
-      >
-        <div className="flex items-center gap-2">
-          <Users size={15} className="text-amber-400" />
-          <span className="text-stone-200 font-medium text-sm">{dept.department_name}</span>
-          <span className="text-xs text-stone-500">{dept.volunteers.length} vol.</span>
-          <span className="text-xs text-stone-600">•</span>
-          <span className="text-xs text-stone-500">{dept.volunteers.filter(v => v.status === 'Confirmado').length} confirmado(s)</span>
-        </div>
-        <ChevronDown size={15} className={`text-stone-500 transition-transform ${collapsed ? 'rotate-180' : ''}`} />
-      </div>
-      {!collapsed && (
-        <div>
-          {dept.volunteers.length === 0 ? (
-            <p className="text-stone-600 text-xs text-center py-4 italic">Nenhum voluntário escalado</p>
-          ) : (
-            dept.volunteers.map((v, i) => (
-              <div key={v.id} className="flex items-center justify-between px-3 py-2.5 border-b border-stone-800/50 last:border-0 hover:bg-stone-800/20 transition-colors">
-                <div className="flex items-center gap-2.5">
-                  <span className="text-xs text-stone-600 w-4">{i + 1}</span>
-                  <div>
-                    <p className="text-stone-200 text-sm">{v.volunteer_name || '—'}</p>
-                    {v.role && <p className="text-stone-500 text-xs">{v.role}</p>}
-                  </div>
-                </div>
-                <Badge label={v.status || 'Pendente'}
-                  color={v.status === 'Confirmado' ? 'green' : v.status === 'Recusado' ? 'red' : 'yellow'} />
-              </div>
-            ))
-          )}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-// ─── DeptCheckList sub-component ──────────────────────────────────────────────
-function DeptCheckList({
-  departments,
-  selected,
-  onToggle,
-  onSelectAll,
-  onClear,
-}: {
-  departments: Department[];
-  selected: Set<number>;
-  onToggle: (id: number) => void;
-  onSelectAll: () => void;
-  onClear: () => void;
-}) {
-  return (
-    <div className="space-y-3">
-      <div className="max-h-60 overflow-y-auto space-y-1 rounded-lg border border-stone-700 p-2 bg-stone-800/30">
-        {departments.length === 0 ? (
-          <p className="text-stone-500 text-sm text-center py-4 italic">Nenhum departamento disponível</p>
-        ) : (
-          departments.map(dept => (
-            <label key={dept.id} className="flex items-center gap-3 p-2.5 rounded-lg cursor-pointer hover:bg-stone-700/50 transition-colors">
-              <input
-                type="checkbox"
-                checked={selected.has(dept.id)}
-                onChange={() => onToggle(dept.id)}
-                className="w-4 h-4 accent-amber-500"
-              />
-              <div className="flex-1">
-                <p className="text-stone-200 text-sm">{dept.name}</p>
-                {dept.sector_name && <p className="text-stone-500 text-xs">{dept.sector_name}</p>}
-              </div>
-            </label>
-          ))
-        )}
-      </div>
-
-      {/* Counter + actions */}
-      <div className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm ${
-        selected.size > 0
-          ? 'bg-amber-900/30 border border-amber-700/50 text-amber-300'
-          : 'bg-stone-800 border border-stone-700 text-stone-400'
-      }`}>
-        <CheckCircle2 size={14} className={selected.size > 0 ? 'text-amber-400' : 'text-stone-600'} />
-        <span className="flex-1 text-xs font-medium">
-          ✓ {selected.size} de {departments.length} departamento(s) selecionado(s)
-        </span>
-      </div>
-
-      <div className="flex gap-3">
-        <button onClick={onSelectAll} className="text-amber-400 text-xs hover:text-amber-300 transition-colors">
-          Selecionar todos
-        </button>
-        <span className="text-stone-600 text-xs">•</span>
-        <button onClick={onClear} className="text-stone-500 text-xs hover:text-stone-400 transition-colors">
-          Limpar
-        </button>
-      </div>
     </div>
   );
 }
