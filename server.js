@@ -474,6 +474,129 @@ app.delete('/api/scales/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder')
   res.json({ message: 'Removido' });
 });
 
+// ─── Escalas por departamento (para exibição em blocos) ───────────────────────
+app.get('/api/scales/by-department/:cultId', auth, async (req, res) => {
+  const cultId = Number(req.params.cultId);
+
+  // Buscar todos os departamentos ativos
+  const { data: departments } = await db
+    .from('departments')
+    .select('id, name')
+    .order('name');
+
+  // Buscar todos os setores ativos com seus departamentos
+  const { data: allSectors } = await db
+    .from('sectors')
+    .select('id, name, department_id')
+    .eq('is_active', true)
+    .order('name');
+
+  // Buscar escalas do culto com dados completos
+  const { data: scales, error } = await db
+    .from('scales')
+    .select('id, status, member_id, sector_id, department_id, members(name), sectors(name, department_id, departments(name))')
+    .eq('cult_id', cultId);
+
+  if (error) return res.status(500).json({ message: error.message });
+
+  // Mapear escalas existentes por setor
+  const scalesBySector = {};
+  for (const s of scales || []) {
+    scalesBySector[s.sector_id] = {
+      id: s.id,
+      status: s.status,
+      member_id: s.member_id,
+      member_name: s.members?.name || '—',
+      sector_id: s.sector_id,
+      sector_name: s.sectors?.name || '—',
+      department_id: s.sectors?.department_id || s.department_id,
+      department_name: s.sectors?.departments?.name || '—',
+    };
+  }
+
+  // Agrupar por departamento — mostra TODOS os departamentos com TODOS os seus setores
+  const blocks = [];
+  for (const dept of departments || []) {
+    const deptSectors = (allSectors || []).filter(sec => sec.department_id === dept.id);
+    if (deptSectors.length === 0) continue;
+
+    const blockScales = deptSectors.map(sec => {
+      if (scalesBySector[sec.id]) {
+        return scalesBySector[sec.id];
+      }
+      // Setor vazio — aparece como slot disponível para preenchimento
+      return {
+        id: null,
+        status: 'Vazio',
+        member_id: null,
+        member_name: null,
+        sector_id: sec.id,
+        sector_name: sec.name,
+        department_id: dept.id,
+        department_name: dept.name,
+      };
+    });
+
+    blocks.push({
+      department_id: dept.id,
+      department_name: dept.name,
+      scales: blockScales,
+    });
+  }
+
+  res.json(blocks);
+});
+
+// ─── Preencher culto automaticamente ─────────────────────────────────────────
+app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
+  const { cult_id } = req.body;
+  if (!cult_id) return res.status(400).json({ message: 'cult_id obrigatório' });
+
+  const { data: cult } = await db.from('cults').select('date').eq('id', cult_id).single();
+  if (!cult) return res.status(404).json({ message: 'Culto não encontrado' });
+
+  const monthStr = cult.date.slice(0, 7);
+
+  // Setores ainda sem voluntário neste culto
+  const { data: allSectors } = await db.from('sectors').select('id, department_id').eq('is_active', true);
+  const { data: existingScales } = await db.from('scales').select('sector_id, member_id').eq('cult_id', cult_id);
+  const filledSectors = new Set((existingScales || []).map(s => s.sector_id));
+  const emptySectors = (allSectors || []).filter(s => !filledSectors.has(s.id));
+
+  if (emptySectors.length === 0) {
+    return res.json({ message: 'Todos os setores já estão preenchidos', created: 0 });
+  }
+
+  // Membros ativos com contagem mensal
+  const { data: members } = await db.from('members').select('id, department_id').eq('is_active', true);
+
+  let created = 0;
+  for (const sector of emptySectors) {
+    // Membros do mesmo departamento, não escalados neste culto, abaixo do limite mensal
+    const scaledInCult = new Set((existingScales || []).map(s => s.member_id));
+    const candidates = (members || []).filter(m =>
+      m.department_id === sector.department_id && !scaledInCult.has(m.id)
+    );
+
+    for (const member of candidates) {
+      const { count } = await db.from('scales')
+        .select('*, cults!inner(date)', { count: 'exact', head: true })
+        .eq('member_id', member.id)
+        .like('cults.date', `${monthStr}%`);
+      if (count >= 3) continue;
+
+      const { error } = await db.from('scales').insert({ cult_id, member_id: member.id, sector_id: sector.id });
+      if (!error) {
+        existingScales.push({ sector_id: sector.id, member_id: member.id });
+        created++;
+        break;
+      }
+    }
+  }
+
+  res.json({ message: `${created} voluntário(s) adicionado(s) automaticamente`, created });
+});
+
 app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { type, cult_id, month } = req.body;
   const today = new Date().toISOString().slice(0, 10);
