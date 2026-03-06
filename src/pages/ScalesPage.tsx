@@ -45,7 +45,7 @@ export default function ScalesPage({ user }: Props) {
   const [fillModal, setFillModal] = useState(false);
   const [fillLoading, setFillLoading] = useState(false);
   const [fillMsg, setFillMsg] = useState('');
-  const [autoType, setAutoType] = useState<'month' | 'standard' | 'thematic' | 'specific'>('month');
+  const [autoType, setAutoType] = useState<'month' | 'standard' | 'thematic' | 'specific' | 'empty-month' | 'empty-specific'>('month');
   const [addModal, setAddModal] = useState(false);
   const [newCultModal, setNewCultModal] = useState(false);
   const [newScale, setNewScale] = useState({ member_id: '', sector_id: '' });
@@ -1012,3 +1012,4 @@ export default function ScalesPage({ user }: Props) {
     </div>
   );
 }
+
