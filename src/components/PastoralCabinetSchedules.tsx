@@ -126,15 +126,15 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
     setBookingSaving(true); setBookingError('');
     try {
       if (bookingTarget.is_available) {
-        // Horário livre: cria agendamento e marca slot como ocupado
-        await api.post('/pastoral-cabinet/bookings', {
+        // Horário livre: usa rota da secretaria (sem volunteer_id)
+        await api.post('/pastoral-cabinet/bookings/secretary', {
           schedule_id: bookingTarget.id,
           booked_name: bookingForm.name,
           booked_phone: bookingForm.phone,
           subject: bookingForm.subject,
         });
       } else {
-        // Horário já ocupado: atualiza dados do agendamento existente
+        // Horário ocupado: atualiza booking existente
         if ((bookingTarget as any).booking_id) {
           await api.put(`/pastoral-cabinet/bookings/${(bookingTarget as any).booking_id}`, {
             booked_name: bookingForm.name,

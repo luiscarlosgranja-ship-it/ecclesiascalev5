@@ -44,10 +44,10 @@ router.post('/schedules', async (req, res) => {
   }
 });
 
-// GET: Listar todos os horários
+// GET: Listar todos os horários (com dados do agendamento se ocupado)
 router.get('/schedules', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data: schedules, error } = await supabase
       .from('pastoral_cabinet_schedules')
       .select('*')
       .order('date', { ascending: true })
@@ -58,7 +58,27 @@ router.get('/schedules', async (req, res) => {
       return res.status(500).json({ error: error.message });
     }
 
-    res.json(data);
+    // Buscar bookings para enriquecer os horários ocupados
+    const { data: bookings } = await supabase
+      .from('pastoral_cabinet_bookings')
+      .select('id, schedule_id, booked_name, booked_phone, subject, volunteer_id')
+      .in('schedule_id', schedules.map(s => s.id));
+
+    const bookingMap = {};
+    (bookings || []).forEach(b => { bookingMap[b.schedule_id] = b; });
+
+    const enriched = schedules.map(s => {
+      const b = bookingMap[s.id];
+      return {
+        ...s,
+        booking_id:      b?.id || null,
+        booked_by_name:  b?.booked_name || null,
+        booked_by_phone: b?.booked_phone || null,
+        booking_subject: b?.subject || null,
+      };
+    });
+
+    res.json(enriched);
   } catch (err) {
     console.error('Erro:', err);
     res.status(500).json({ error: err.message });
@@ -196,7 +216,65 @@ router.get('/available-slots/:date', async (req, res) => {
 // ROTAS: Agendamentos (Voluntário)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// POST: Agendar gabinete
+
+// POST: Agendar pela secretaria (sem volunteer_id obrigatório)
+router.post('/bookings/secretary', async (req, res) => {
+  try {
+    const { schedule_id, booked_name, booked_phone, subject } = req.body;
+
+    if (!schedule_id || !booked_name) {
+      return res.status(400).json({ error: 'Horário e nome são obrigatórios' });
+    }
+
+    // Verificar se o horário ainda está disponível
+    const { data: schedule, error: scheduleError } = await supabase
+      .from('pastoral_cabinet_schedules')
+      .select('id, date, time, duration_minutes, is_available')
+      .eq('id', schedule_id)
+      .single();
+
+    if (scheduleError || !schedule) {
+      return res.status(404).json({ error: 'Horário não encontrado' });
+    }
+
+    if (!schedule.is_available) {
+      return res.status(400).json({ error: 'Este horário não está mais disponível' });
+    }
+
+    // Criar agendamento sem volunteer_id
+    const { data: booking, error: bookingError } = await supabase
+      .from('pastoral_cabinet_bookings')
+      .insert([{
+        schedule_id,
+        date: schedule.date,
+        time: schedule.time,
+        duration_minutes: schedule.duration_minutes,
+        booked_name,
+        booked_phone: booked_phone || null,
+        subject: subject || null,
+        status: 'Agendado',
+      }])
+      .select();
+
+    if (bookingError) {
+      console.error('Erro ao criar agendamento secretaria:', bookingError);
+      return res.status(500).json({ error: bookingError.message });
+    }
+
+    // Marcar horário como ocupado
+    await supabase
+      .from('pastoral_cabinet_schedules')
+      .update({ is_available: false })
+      .eq('id', schedule_id);
+
+    res.status(201).json(booking[0]);
+  } catch (err) {
+    console.error('Erro:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST: Agendar gabinete (voluntário)
 router.post('/bookings', async (req, res) => {
   try {
     const { volunteer_id, schedule_id, date, time, duration_minutes, status, notes } = req.body;
@@ -298,15 +376,22 @@ router.get('/bookings/volunteer/:volunteerId', async (req, res) => {
   }
 });
 
-// PUT: Atualizar status do agendamento
+// PUT: Atualizar agendamento (status, notas, nome, telefone, assunto)
 router.put('/bookings/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, notes } = req.body;
+    const { status, notes, booked_name, booked_phone, subject } = req.body;
+
+    const updateData = { updated_at: new Date().toISOString() };
+    if (status !== undefined)      updateData.status = status;
+    if (notes !== undefined)       updateData.notes = notes;
+    if (booked_name !== undefined) updateData.booked_name = booked_name;
+    if (booked_phone !== undefined) updateData.booked_phone = booked_phone;
+    if (subject !== undefined)     updateData.subject = subject;
 
     const { data, error } = await supabase
       .from('pastoral_cabinet_bookings')
-      .update({ status, notes, updated_at: new Date().toISOString() })
+      .update(updateData)
       .eq('id', id)
       .select();
 
