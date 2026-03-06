@@ -25,7 +25,7 @@ function SectorsView({ sectors, departments, onRefetch, user }: {
   onRefetch: () => void;
   user: AuthUser;
 }) {
-  const canManage = ['SuperAdmin', 'Admin', 'Líder'].includes(user.role);
+  const canManage = ['SuperAdmin', 'Admin', 'Líder', 'Secretaria'].includes(user.role);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [modalOpen, setModalOpen] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);

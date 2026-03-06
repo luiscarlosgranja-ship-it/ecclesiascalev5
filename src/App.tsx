@@ -26,7 +26,20 @@ export type Page =
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [page, setPage] = useState<Page>('dashboard');
+  // Bug #5: inicializa a página respeitando o role salvo, evitando flash em 'dashboard'
+  const [page, setPage] = useState<Page>(() => {
+    try {
+      const stored = localStorage.getItem('ecclesia_user');
+      if (stored) {
+        const u = JSON.parse(stored);
+        if (u.role === 'Secretaria') {
+          const last = localStorage.getItem('ecclesia_last_page') as Page | null;
+          return last || 'pastoral';
+        }
+      }
+    } catch { /* ignora */ }
+    return 'dashboard';
+  });
 
   useEffect(() => {
     const stored = localStorage.getItem('ecclesia_user');
@@ -34,20 +47,30 @@ export default function App() {
       try {
         const u = JSON.parse(stored);
         setUser(u);
-        if (u.role === 'Secretaria') setPage('pastoral');
       }
       catch { localStorage.removeItem('ecclesia_user'); }
     }
   }, []);
 
+  function navigate(p: Page) {
+    localStorage.setItem('ecclesia_last_page', p);
+    setPage(p);
+  }
+
   function handleLogin(u: AuthUser) {
     localStorage.setItem('ecclesia_user', JSON.stringify(u));
     setUser(u);
-    if (u.role === 'Secretaria') setPage('pastoral');
+    if (u.role === 'Secretaria') {
+      const last = localStorage.getItem('ecclesia_last_page') as Page | null;
+      setPage(last || 'pastoral');
+    } else {
+      setPage('dashboard');
+    }
   }
 
   function handleLogout() {
     localStorage.removeItem('ecclesia_user');
+    localStorage.removeItem('ecclesia_last_page');
     setUser(null);
     setPage('dashboard');
   }
@@ -63,9 +86,9 @@ export default function App() {
 
 
   return (
-    <Layout user={user} page={page} setPage={p => setPage(p as Page)} onLogout={handleLogout}>
-      {page === 'dashboard'  && <DashboardPage  user={user} setPage={p => setPage(p as Page)} />}
-      {page === 'my-panel'   && <MyPanelPage    user={user} setPage={p => setPage(p as Page)} />}
+    <Layout user={user} page={page} setPage={p => navigate(p as Page)} onLogout={handleLogout}>
+      {page === 'dashboard'  && <DashboardPage  user={user} setPage={p => navigate(p as Page)} />}
+      {page === 'my-panel'   && <MyPanelPage    user={user} setPage={p => navigate(p as Page)} />}
       {page === 'members'    && <MembersPage    user={user} />}
       {page === 'scales'     && <ScalesPage     user={user} />}
       {page === 'cults'      && <CultsPage      user={user} />}

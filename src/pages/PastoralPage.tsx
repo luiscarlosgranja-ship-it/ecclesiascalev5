@@ -187,7 +187,7 @@ export default function PastoralPage({ user }: Props) {
     return `${day}/${m}/${y}`;
   }
 
-  const canManage = isSuperAdmin(user) || isAdmin(user) || user.role === 'Secretaria';
+  const canManage = isSuperAdmin(user.role) || isAdmin(user.role) || user.role === 'Secretaria';
 
   return (
     <div className="space-y-5">
@@ -215,6 +215,12 @@ export default function PastoralPage({ user }: Props) {
                 {history.length}
               </span>
             )}
+          </button>
+        )}
+        {!isActivated && (
+          <button onClick={() => setTab('activation')}
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === 'activation' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
+            <KeyRound size={14} /> Ativar Sistema
           </button>
         )}
       </div>

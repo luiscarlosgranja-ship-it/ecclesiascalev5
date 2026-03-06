@@ -1,7 +1,7 @@
 import type { Role } from '../types';
 
 export const PERMISSIONS = {
-  dashboard: ['SuperAdmin', 'Admin', 'Líder', 'Membro'] as Role[],
+  dashboard: ['SuperAdmin', 'Admin', 'Líder', 'Membro', 'Secretaria'] as Role[],
   manageScales: ['SuperAdmin', 'Admin', 'Líder'] as Role[],
   cultsEvents: ['SuperAdmin', 'Admin'] as Role[],
   volunteersCadaster: ['SuperAdmin', 'Admin', 'Líder'] as Role[],
