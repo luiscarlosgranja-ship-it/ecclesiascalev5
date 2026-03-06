@@ -274,64 +274,68 @@ router.post('/bookings/secretary', async (req, res) => {
   }
 });
 
-// POST: Agendar gabinete (voluntário)
+// POST: Agendar gabinete (voluntário OU secretaria)
 router.post('/bookings', async (req, res) => {
   try {
-    const { volunteer_id, schedule_id, date, time, duration_minutes, status, notes } = req.body;
+    const { volunteer_id, schedule_id, date, time, duration_minutes, status, notes,
+            booked_name, booked_phone, subject } = req.body;
 
-    // Validação
-    if (!volunteer_id || !schedule_id || !date || !time) {
-      return res.status(400).json({
-        error: 'Voluntário, horário, data e hora são obrigatórios'
-      });
+    // Validação mínima: precisa de schedule_id
+    // Se vier da secretaria: precisa de booked_name
+    // Se vier do voluntário: precisa de volunteer_id + date + time
+    if (!schedule_id) {
+      return res.status(400).json({ error: 'Horário é obrigatório' });
+    }
+    if (!volunteer_id && !booked_name) {
+      return res.status(400).json({ error: 'Nome do solicitante é obrigatório' });
     }
 
-    // Verificar se o horário ainda está disponível
+    // Buscar dados do horário
     const { data: schedule, error: scheduleError } = await supabase
       .from('pastoral_cabinet_schedules')
-      .select('is_available')
+      .select('id, date, time, duration_minutes, is_available')
       .eq('id', schedule_id)
       .single();
 
-    if (scheduleError || !schedule || !schedule.is_available) {
-      return res.status(400).json({
-        error: 'Este horário não está mais disponível'
-      });
+    if (scheduleError || !schedule) {
+      return res.status(404).json({ error: 'Horário não encontrado' });
     }
 
-    // Verificar se o voluntário já tem agendamento neste horário
-    const { data: existing, error: existError } = await supabase
-      .from('pastoral_cabinet_bookings')
-      .select('id')
-      .eq('volunteer_id', volunteer_id)
-      .eq('schedule_id', schedule_id)
-      .limit(1);
-
-    if (existError) {
-      console.error('Erro ao verificar:', existError);
-      return res.status(500).json({ error: existError.message });
+    if (!schedule.is_available) {
+      return res.status(400).json({ error: 'Este horário não está mais disponível' });
     }
 
-    if (existing && existing.length > 0) {
-      return res.status(400).json({
-        error: 'Você já tem um agendamento neste horário'
-      });
+    // Se for voluntário: verificar duplicata
+    if (volunteer_id) {
+      const { data: existing } = await supabase
+        .from('pastoral_cabinet_bookings')
+        .select('id')
+        .eq('volunteer_id', volunteer_id)
+        .eq('schedule_id', schedule_id)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        return res.status(400).json({ error: 'Você já tem um agendamento neste horário' });
+      }
     }
 
     // Criar agendamento
+    const insertData = {
+      schedule_id,
+      date: date || schedule.date,
+      time: time || schedule.time,
+      duration_minutes: duration_minutes || schedule.duration_minutes,
+      status: status || 'Agendado',
+      notes: notes || null,
+    };
+    if (volunteer_id) insertData.volunteer_id = volunteer_id;
+    if (booked_name)  insertData.booked_name = booked_name;
+    if (booked_phone) insertData.booked_phone = booked_phone;
+    if (subject)      insertData.subject = subject;
+
     const { data: booking, error: bookingError } = await supabase
       .from('pastoral_cabinet_bookings')
-      .insert([
-        {
-          volunteer_id,
-          schedule_id,
-          date,
-          time,
-          duration_minutes,
-          status: status || 'Agendado',
-          notes
-        }
-      ])
+      .insert([insertData])
       .select();
 
     if (bookingError) {
@@ -339,7 +343,7 @@ router.post('/bookings', async (req, res) => {
       return res.status(500).json({ error: bookingError.message });
     }
 
-    // Marcar horário como não disponível
+    // Marcar horário como ocupado
     await supabase
       .from('pastoral_cabinet_schedules')
       .update({ is_available: false })
