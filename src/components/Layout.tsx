@@ -319,23 +319,23 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
           --scrollbar-thumb: #ccc8be;
         }
         .dark {
-          --bg-base:       #0d0d14;
-          --bg-surface:    #14141f;
-          --bg-elevated:   #1c1c2a;
-          --bg-input:      #1e1e2e;
-          --border-soft:   #2a2a3e;
-          --border-subtle: #222232;
-          --text-primary:  #f0f0f8;
-          --text-secondary:#b0b0c8;
-          --text-muted:    #6a6a88;
-          --text-faint:    #3a3a52;
-          --shadow-sm:     0 1px 3px rgba(0,0,0,.3);
-          --shadow-md:     0 4px 16px rgba(0,0,0,.4);
-          --shadow-lg:     0 12px 40px rgba(0,0,0,.6);
-          --accent:        #f59e0b;
+          --bg-base:       #0f1623;
+          --bg-surface:    #1a2332;
+          --bg-elevated:   #1e2a3d;
+          --bg-input:      #1c2538;
+          --border-soft:   #2a3a52;
+          --border-subtle: #223044;
+          --text-primary:  #f0ede6;
+          --text-secondary:#b0a898;
+          --text-muted:    #6a7a8a;
+          --text-faint:    #3a4a5a;
+          --shadow-sm:     0 1px 3px rgba(0,0,0,.35);
+          --shadow-md:     0 4px 16px rgba(0,0,0,.45);
+          --shadow-lg:     0 12px 40px rgba(0,0,0,.65);
+          --accent:        #c9a227;
           --accent-soft:   #1e1800;
-          --scrollbar-track: #14141f;
-          --scrollbar-thumb: #2a2a3e;
+          --scrollbar-track: #1a2332;
+          --scrollbar-thumb: #2a3a52;
         }
 
         @keyframes spDrop   { from { opacity:0; transform:translateY(-6px) scaleY(.96); } to { opacity:1; transform:translateY(0) scaleY(1); } }
