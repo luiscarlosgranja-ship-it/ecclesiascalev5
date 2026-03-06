@@ -91,13 +91,9 @@ export default function CultsPage({ user }: Props) {
       if (withScales.length > 0) {
         const names = withScales.map(c => {
           const cult = (cults || []).find(x => x.id === c.id);
-          return `• ${cult ? getCultName(cult) : `Culto #${c.id}`} (${c.count} voluntário(s))`;
-        }).join('
-');
-        alert(`Os cultos abaixo possuem escalas e não podem ser excluídos.
-Remova as escalas primeiro na tela Escalas:
-
-${names}`);
+          return `• ${cult ? getCultName(cult) : 'Culto #' + c.id} (${c.count} voluntário(s))`;
+        }).join('\n');
+        alert('Os cultos abaixo possuem escalas e não podem ser excluídos.\nRemova as escalas primeiro na tela Escalas:\n\n' + names);
         setDeletingCults(false);
         return;
       }
