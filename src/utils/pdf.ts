@@ -397,7 +397,7 @@ async function exportSingleCultBlocksPDF(
     drawFooter(doc, p, total, PW, PH);
   }
 
-  doc.save(`escala_${(cult?.date || 'culto').replace(/-/g,'')}.pdf`);
+  doc.save('escala_' + (cult?.date || 'culto').replace(/-/g, '') + '.pdf');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -825,7 +825,7 @@ export async function exportCultoPDFBlocos(
     drawFooter(doc, p, total, PW, doc.internal.pageSize.getHeight());
   }
 
-  doc.save(`escala_${(cult?.date || 'culto').replace(/-/g,'')}.pdf`);
+  doc.save('escala_' + (cult?.date || 'culto').replace(/-/g, '') + '.pdf');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
