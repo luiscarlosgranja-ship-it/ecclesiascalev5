@@ -424,7 +424,8 @@ async function exportMonthGridPDF(
     const deptMap = new Map<string, number>();
     
     for (const scale of cultScales) {
-      const deptName = scale.department_name || 'Sem Departamento';
+      const sectorLower = (scale.sector_name || '').toLowerCase().trim();
+      const deptName = SETOR_DEPARTMENT_MAP[sectorLower] || scale.department_name || 'Sem Departamento';
       deptMap.set(deptName, (deptMap.get(deptName) || 0) + 1);
     }
 
@@ -463,10 +464,12 @@ async function exportMonthGridPDF(
     const bh = calcBlockHeight(cult);
     const cultScales = cultMap.get(cult.id) || [];
 
-    // Agrupar por departamento
+    // Agrupar por departamento (usando mapeamento de setor)
     const deptMap = new Map<string, Scale[]>();
     for (const scale of cultScales) {
-      const deptName = scale.department_name || 'Sem Departamento';
+      const sectorLower = (scale.sector_name || '').toLowerCase().trim();
+      let deptName = SETOR_DEPARTMENT_MAP[sectorLower] || scale.department_name || 'Sem Departamento';
+      
       if (!deptMap.has(deptName)) {
         deptMap.set(deptName, []);
       }
