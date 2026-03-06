@@ -641,75 +641,34 @@ export async function exportScalePDF(
   selectedSectors?: string[],
   selectedDepartmentIds?: number[],
 ) {
-  // Mapeamento de department_id para nome
-  const DEPT_MAP: { [key: number]: string } = {
-    1: 'Diáconos / Obreiros',
-    2: 'Mídia',
-    3: 'Infantil',
-    4: 'Louvor',
-    5: 'Una',
-    6: 'Bem-Vindos',
-  };
-  
-  // Filtrar escalas pelos departamentos selecionados se fornecido
-  let filteredScales = scales;
-  if (selectedDepartmentIds && selectedDepartmentIds.length > 0) {
-    // Precisamos agrupar por departamento através do setor
-    // Usar o mapeamento do pdf.ts
-    filteredScales = scales.filter(s => {
-      const sectorLower = (s.sector_name || '').toLowerCase().trim();
-      let deptName = SETOR_DEPARTMENT_MAP[sectorLower] || s.sector_name;
-      
-      // Procurar se este departamento está selecionado
-      return selectedDepartmentIds.some(deptId => {
-        const selectedDeptName = DEPT_MAP[deptId];
-        return deptName === selectedDeptName;
-      });
-    });
-  }
+  console.log('🚀 exportScalePDF chamado:', {
+    scales: scales.length,
+    cult: cult ? `${cult.date} ${cult.time}` : 'null',
+    allCults: allCults?.length || 0,
+    selectedDepartmentIds
+  });
 
-  // Filtrar escalas pelos setores selecionados, se informados
-  if (selectedSectors && selectedSectors.length > 0) {
-    filteredScales = filteredScales.filter(s => selectedSectors.includes(s.sector_name || ''));
-  }
-
-  // Mês inteiro → grade landscape
+  // Se é mês inteiro (múltiplos cultos)
   if (allScales && allCults && allCults.length > 1) {
-    let filteredAllScales = allScales;
-    if (selectedDepartmentIds && selectedDepartmentIds.length > 0) {
-      filteredAllScales = allScales.filter(s => {
-        const sectorLower = (s.sector_name || '').toLowerCase().trim();
-        let deptName = SETOR_DEPARTMENT_MAP[sectorLower] || s.sector_name;
-        return selectedDepartmentIds.some(deptId => {
-          const selectedDeptName = DEPT_MAP[deptId];
-          return deptName === selectedDeptName;
-        });
-      });
-    }
-    if (selectedSectors && selectedSectors.length > 0) {
-      filteredAllScales = filteredAllScales.filter(s => selectedSectors.includes(s.sector_name || ''));
-    }
-    return exportMonthGridPDF(filteredAllScales, allCults, title);
+    console.log('📅 Modo MÊS detectado - usando grid landscape');
+    return exportMonthGridPDF(allScales, allCults, title);
   }
 
-  // Culto único → blocos de departamento
-  if (cult) {
-    console.log('📄 PDF Culto: Usando layout em BLOCOS');
-    return exportSingleCultBlocksPDF(filteredScales, cult, title);
+  // Se é culto único - SEMPRE usar blocos
+  if (cult && scales.length > 0) {
+    console.log('📄 Modo CULTO ÚNICO detectado - usando blocos');
+    return exportSingleCultBlocksPDF(scales, cult, title);
   }
 
-  // Fallback (não deve chegar aqui)
-  console.log('⚠️ PDF Fallback: cult é null, usando tabela simples');
-  console.log('scales:', scales.length);
-  console.log('cult:', cult);
+  console.error('❌ ERRO: Nenhuma condição atendida!', { cult, scales: scales.length, allCults: allCults?.length });
   
+  // Fallback nunca deveria chegar aqui
   const logo = await fetchLogo();
   const doc = new jsPDF({ orientation: 'portrait', format: 'a4', unit: 'mm' });
   const PW = doc.internal.pageSize.getWidth();
   const MX = 14;
 
   const subtitle = `${scales.length} voluntário(s)`;
-
   let y = drawMainHeader(doc, logo, title, subtitle, PW);
 
   const bySetor = new Map<string, Scale[]>();
