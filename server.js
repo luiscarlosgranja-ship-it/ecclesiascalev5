@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 import { randomBytes } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import nodemailer from 'nodemailer';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -69,6 +70,20 @@ async function checkTrial(res) {
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
+
+// ─── Rotas públicas (sem autenticação) ────────────────────────────────────────
+// Usadas na tela de cadastro antes do login
+app.get('/api/public/departments', async (req, res) => {
+  const { data, error } = await db.from('departments').select('id, name').order('name');
+  if (error) return res.status(500).json({ message: error.message });
+  res.json(data);
+});
+
+app.get('/api/public/cult_types', async (req, res) => {
+  const { data, error } = await db.from('cult_types').select('id, name').order('name');
+  if (error) return res.status(500).json({ message: error.message });
+  res.json(data);
+});
 
 // ─── Auth Routes ──────────────────────────────────────────────────────────────
 app.post('/api/login', async (req, res) => {
@@ -268,22 +283,33 @@ app.put('/api/members/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), 
 });
 
 // ─── Users ────────────────────────────────────────────────────────────────────
-app.put('/api/users/:id/password', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+app.put('/api/users/:id/password', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { password } = req.body;
   if (!password || password.length < 8) return res.status(400).json({ message: 'Senha deve ter mínimo 8 caracteres' });
+
+  // :id pode ser o id do membro (vindo de MembersPage) ou id do usuário
+  // Tenta primeiro por member_id, depois por id direto
+  const memberId = Number(req.params.id);
+  let { data: userByMember } = await db.from('users').select('id').eq('member_id', memberId).single();
+
   const hash = bcrypt.hashSync(password, 10);
-  await db.from('users').update({ password: hash }).eq('id', req.params.id);
+  if (userByMember) {
+    await db.from('users').update({ password: hash }).eq('id', userByMember.id);
+  } else {
+    await db.from('users').update({ password: hash }).eq('id', memberId);
+  }
   res.json({ message: 'Senha alterada' });
 });
 
 app.post('/api/users/reset-password', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
   const { email, new_password } = req.body;
   if (!email || !new_password) return res.status(400).json({ message: 'Dados obrigatórios' });
-  const { data: user } = await db.from('users').select('id').eq('email', email).single();
+  if (new_password.length < 8) return res.status(400).json({ message: 'Senha deve ter mínimo 8 caracteres' });
+  const { data: user } = await db.from('users').select('id').eq('email', email.toLowerCase().trim()).single();
   if (!user) return res.status(404).json({ message: 'Usuário não encontrado' });
   const hash = bcrypt.hashSync(new_password, 10);
   await db.from('users').update({ password: hash }).eq('id', user.id);
-  res.json({ message: 'Senha redefinida' });
+  res.json({ message: 'Senha redefinida com sucesso' });
 });
 
 // ─── Generic CRUD: ministries / departments / sectors / cult_types ────────────
@@ -469,139 +495,23 @@ app.put('/api/scales/:id/confirm', auth, async (req, res) => {
   res.json({ message: 'Confirmado' });
 });
 
+app.put('/api/scales/:id/lock', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
+  const { locked } = req.body;
+  await db.from('scales').update({ locked: !!locked }).eq('id', req.params.id);
+  res.json({ message: locked ? 'Vaga travada' : 'Vaga destravada' });
+});
+
 app.delete('/api/scales/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   await db.from('scales').delete().eq('id', req.params.id);
   res.json({ message: 'Removido' });
-});
-
-// ─── Escalas por departamento (para exibição em blocos) ───────────────────────
-app.get('/api/scales/by-department/:cultId', auth, async (req, res) => {
-  const cultId = Number(req.params.cultId);
-
-  // Buscar todos os departamentos ativos
-  const { data: departments } = await db
-    .from('departments')
-    .select('id, name')
-    .order('name');
-
-  // Buscar todos os setores ativos com seus departamentos
-  const { data: allSectors } = await db
-    .from('sectors')
-    .select('id, name, department_id')
-    .eq('is_active', true)
-    .order('name');
-
-  // Buscar escalas do culto com dados completos
-  const { data: scales, error } = await db
-    .from('scales')
-    .select('id, status, member_id, sector_id, department_id, members(name), sectors(name, department_id, departments(name))')
-    .eq('cult_id', cultId);
-
-  if (error) return res.status(500).json({ message: error.message });
-
-  // Mapear escalas existentes por setor
-  const scalesBySector = {};
-  for (const s of scales || []) {
-    scalesBySector[s.sector_id] = {
-      id: s.id,
-      status: s.status,
-      member_id: s.member_id,
-      member_name: s.members?.name || '—',
-      sector_id: s.sector_id,
-      sector_name: s.sectors?.name || '—',
-      department_id: s.sectors?.department_id || s.department_id,
-      department_name: s.sectors?.departments?.name || '—',
-    };
-  }
-
-  // Agrupar por departamento — mostra TODOS os departamentos com TODOS os seus setores
-  const blocks = [];
-  for (const dept of departments || []) {
-    const deptSectors = (allSectors || []).filter(sec => sec.department_id === dept.id);
-    if (deptSectors.length === 0) continue;
-
-    const blockScales = deptSectors.map(sec => {
-      if (scalesBySector[sec.id]) {
-        return scalesBySector[sec.id];
-      }
-      // Setor vazio — aparece como slot disponível para preenchimento
-      return {
-        id: null,
-        status: 'Vazio',
-        member_id: null,
-        member_name: null,
-        sector_id: sec.id,
-        sector_name: sec.name,
-        department_id: dept.id,
-        department_name: dept.name,
-      };
-    });
-
-    blocks.push({
-      department_id: dept.id,
-      department_name: dept.name,
-      scales: blockScales,
-    });
-  }
-
-  res.json(blocks);
-});
-
-// ─── Preencher culto automaticamente ─────────────────────────────────────────
-app.post('/api/scales/fill-cult', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
-  const { cult_id } = req.body;
-  if (!cult_id) return res.status(400).json({ message: 'cult_id obrigatório' });
-
-  const { data: cult } = await db.from('cults').select('date').eq('id', cult_id).single();
-  if (!cult) return res.status(404).json({ message: 'Culto não encontrado' });
-
-  const monthStr = cult.date.slice(0, 7);
-
-  // Setores ainda sem voluntário neste culto
-  const { data: allSectors } = await db.from('sectors').select('id, department_id').eq('is_active', true);
-  const { data: existingScales } = await db.from('scales').select('sector_id, member_id').eq('cult_id', cult_id);
-  const filledSectors = new Set((existingScales || []).map(s => s.sector_id));
-  const emptySectors = (allSectors || []).filter(s => !filledSectors.has(s.id));
-
-  if (emptySectors.length === 0) {
-    return res.json({ message: 'Todos os setores já estão preenchidos', created: 0 });
-  }
-
-  // Membros ativos com contagem mensal
-  const { data: members } = await db.from('members').select('id, department_id').eq('is_active', true);
-
-  let created = 0;
-  for (const sector of emptySectors) {
-    // Membros do mesmo departamento, não escalados neste culto, abaixo do limite mensal
-    const scaledInCult = new Set((existingScales || []).map(s => s.member_id));
-    const candidates = (members || []).filter(m =>
-      m.department_id === sector.department_id && !scaledInCult.has(m.id)
-    );
-
-    for (const member of candidates) {
-      const { count } = await db.from('scales')
-        .select('*, cults!inner(date)', { count: 'exact', head: true })
-        .eq('member_id', member.id)
-        .like('cults.date', `${monthStr}%`);
-      if (count >= 3) continue;
-
-      const { error } = await db.from('scales').insert({ cult_id, member_id: member.id, sector_id: sector.id });
-      if (!error) {
-        existingScales.push({ sector_id: sector.id, member_id: member.id });
-        created++;
-        break;
-      }
-    }
-  }
-
-  res.json({ message: `${created} voluntário(s) adicionado(s) automaticamente`, created });
 });
 
 app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { type, cult_id, month } = req.body;
   const today = new Date().toISOString().slice(0, 10);
 
-  let cultsQuery = db.from('cults').select('*').eq('status', 'Agendado');
+  // Busca cultos Agendados ou Publicados (não Travados)
+  let cultsQuery = db.from('cults').select('*').in('status', ['Agendado', 'Publicado']);
   if (type === 'month' && month) cultsQuery = cultsQuery.like('date', `${month}%`);
   else if (cult_id) cultsQuery = cultsQuery.eq('id', cult_id);
   else cultsQuery = cultsQuery.gte('date', today);
@@ -616,15 +526,24 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
     const monthStr = cult.date.slice(0, 7);
     for (const sector of sectors || []) {
       for (const member of members || []) {
-        const { data: alreadyInCult } = await db.from('scales').select('id').eq('cult_id', cult.id).eq('member_id', member.id).maybeSingle();
+        // Respeita vagas já travadas — não substitui
+        const { data: alreadyInCult } = await db.from('scales')
+          .select('id, locked').eq('cult_id', cult.id).eq('member_id', member.id).maybeSingle();
         if (alreadyInCult) continue;
 
+        // Verifica vaga travada neste setor/culto
+        const { data: lockedSlot } = await db.from('scales')
+          .select('id').eq('cult_id', cult.id).eq('sector_id', sector.id).eq('locked', true).maybeSingle();
+        if (lockedSlot) continue;
+
+        // Respeita limite semanal (max_per_week, padrão 3)
+        const maxPerWeek = member.max_per_week ?? 3;
         const { count: monthCount } = await db.from('scales')
           .select('*, cults!inner(date)', { count: 'exact', head: true })
           .eq('member_id', member.id)
           .like('cults.date', `${monthStr}%`);
 
-        if (monthCount >= 3) continue;
+        if (monthCount >= maxPerWeek) continue;
 
         await db.from('scales').insert({ cult_id: cult.id, member_id: member.id, sector_id: sector.id });
         created++;
@@ -794,304 +713,277 @@ app.post('/api/activation-codes/activate', auth, async (req, res) => {
   res.json({ message: 'Sistema ativado com sucesso!' });
 });
 
-// ─── Pastoral Cabinet Schedules ───────────────────────────────────────────────
+// ─── Church Settings ─────────────────────────────────────────────────────────
+const CHURCH_FIELDS = ['church_name','church_cnpj','church_address','church_neighborhood','church_city','church_zip','church_phone','church_pastor_dirigente','church_pastor_presidente'];
 
-// Listar todos os horários cadastrados
-app.get('/api/pastoral-cabinet/schedules', auth, async (req, res) => {
-  const { data, error } = await db
-    .from('pastoral_cabinet_schedules')
-    .select('*, pastoral_cabinet_bookings(id, volunteer_id, status, booked_name, booked_phone, subject, members(name))')
-    .order('date').order('time');
-  if (error) return res.status(500).json({ message: error.message });
-
-  const result = (data || []).map(s => {
-    const booking = (s.pastoral_cabinet_bookings || []).find(b => b.status === 'Agendado' || b.status === 'Confirmado');
-    return {
-      ...s,
-      is_available: !booking,
-      booking_id: booking?.id || null,
-      booked_by_name: booking?.booked_name || booking?.members?.name || s.booked_by_name || null,
-      booked_by_phone: booking?.booked_phone || s.booked_by_phone || null,
-      booking_subject: booking?.subject || s.booking_subject || null,
-      pastoral_cabinet_bookings: undefined,
-    };
+app.get('/api/church', auth, async (req, res) => {
+  const { data } = await db.from('settings').select('key, value').in('key', CHURCH_FIELDS);
+  const result = {};
+  (data || []).forEach(r => {
+    const k = r.key.replace('church_', '');
+    result[k === 'church_name' ? 'name' : k] = r.value || '';
   });
-  res.json(result);
-});
-
-// Disponibilidade de um mês (para o calendário do voluntário)
-app.get('/api/pastoral-cabinet/availability/:month', auth, async (req, res) => {
-  const { month } = req.params; // formato: yyyy-MM
-  const [year, mon] = month.split('-').map(Number);
-  const firstDay = `${year}-${String(mon).padStart(2, '0')}-01`;
-  const lastDay  = `${year}-${String(mon).padStart(2, '0')}-${new Date(year, mon, 0).getDate()}`;
-
-  const { data, error } = await db
-    .from('pastoral_cabinet_schedules')
-    .select('date, id, pastoral_cabinet_bookings(id, status)')
-    .gte('date', firstDay)
-    .lte('date', lastDay)
-    .order('date');
-  if (error) return res.status(500).json({ message: error.message });
-
-  // Agrupa por data e verifica se tem algum slot livre
-  const byDate = {};
-  (data || []).forEach(s => {
-    const hasBooking = (s.pastoral_cabinet_bookings || []).some(
-      (b) => b.status === 'Agendado' || b.status === 'Confirmado'
-    );
-    if (!byDate[s.date]) byDate[s.date] = { date: s.date, hasAvailable: false };
-    if (!hasBooking) byDate[s.date].hasAvailable = true;
-  });
-
-  // Gera todos os dias do mês com flag hasAvailable
-  const daysInMonth = new Date(year, mon, 0).getDate();
-  const result = [];
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dateStr = `${year}-${String(mon).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    result.push({ date: dateStr, hasAvailable: byDate[dateStr]?.hasAvailable || false });
+  // map church_name -> name
+  if (!result.name) {
+    const nameRow = (data || []).find(r => r.key === 'church_name');
+    result.name = nameRow?.value || '';
   }
   res.json(result);
 });
 
-// Horários disponíveis de uma data específica
-app.get('/api/pastoral-cabinet/available-slots/:date', auth, async (req, res) => {
-  const { date } = req.params;
+app.put('/api/church', auth, requireRole('SuperAdmin'), async (req, res) => {
+  const { name, cnpj, address, neighborhood, city, zip, phone, pastor_dirigente, pastor_presidente } = req.body;
+  if (!name?.trim()) return res.status(400).json({ message: 'Nome da igreja é obrigatório' });
+
+  const fields = { church_name: name, church_cnpj: cnpj || '', church_address: address || '', church_neighborhood: neighborhood || '', church_city: city || '', church_zip: zip || '', church_phone: phone || '', church_pastor_dirigente: pastor_dirigente || '', church_pastor_presidente: pastor_presidente || '' };
+
+  for (const [key, value] of Object.entries(fields)) {
+    await db.from('settings').upsert({ key, value }, { onConflict: 'key' });
+  }
+  res.json({ message: 'Dados salvos com sucesso' });
+});
+
+// Rota pública para exibir nome da igreja no sistema
+app.get('/api/public/church-name', async (req, res) => {
+  const { data } = await db.from('settings').select('value').eq('key', 'church_name').single();
+  res.json({ name: data?.value || '' });
+});
+
+// ─── Logo ─────────────────────────────────────────────────────────────────────
+app.get('/api/settings/logo', async (req, res) => {
+  const { data } = await db.from('settings').select('value').eq('key', 'church_logo').single();
+  res.json({ logo: data?.value || null });
+});
+
+app.put('/api/settings/logo', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const { logo } = req.body;
+  if (logo === null || logo === undefined) {
+    await db.from('settings').delete().eq('key', 'church_logo');
+    return res.json({ message: 'Logo removido' });
+  }
+  await db.from('settings').upsert({ key: 'church_logo', value: logo }, { onConflict: 'key' });
+  res.json({ message: 'Logo salvo com sucesso' });
+});
+
+app.post('/api/settings/logo', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const { logo } = req.body;
+  if (logo === null || logo === undefined) {
+    await db.from('settings').delete().eq('key', 'church_logo');
+    return res.json({ message: 'Logo removido' });
+  }
+  await db.from('settings').upsert({ key: 'church_logo', value: logo }, { onConflict: 'key' });
+  res.json({ message: 'Logo salvo com sucesso' });
+});
+
+app.delete('/api/settings/logo', auth, requireRole('SuperAdmin'), async (req, res) => {
+  await db.from('settings').delete().eq('key', 'church_logo');
+  res.json({ message: 'Logo removido' });
+});
+
+// ─── Pastoral Appointments ────────────────────────────────────────────────────
+app.get('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
   const { data, error } = await db
-    .from('pastoral_cabinet_schedules')
-    .select('*, pastoral_cabinet_bookings(id, status)')
+    .from('pastoral_appointments')
+    .select('*, users(email)')
+    .order('date', { ascending: true })
+    .order('time', { ascending: true });
+  if (error) return res.status(500).json({ message: error.message });
+  const result = (data || []).map(a => ({
+    ...a,
+    created_by_name: a.users?.email || null,
+    users: undefined,
+  }));
+  res.json(result);
+});
+
+app.post('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
+  const { name, date, time, notes, status } = req.body;
+  if (!name?.trim() || !date || !time) return res.status(400).json({ message: 'Nome, data e hora são obrigatórios' });
+
+  const { data: conflict } = await db.from('pastoral_appointments')
+    .select('id, name')
     .eq('date', date)
-    .order('time');
-  if (error) return res.status(500).json({ message: error.message });
-
-  const slots = (data || [])
-    .filter(s => {
-      // Bloqueia se is_available=false (agendado pela secretaria direto no schedule)
-      if (!s.is_available) return false;
-      // Bloqueia se há booking ativo na tabela separada (agendado por voluntário)
-      const hasActive = (s.pastoral_cabinet_bookings || []).some(
-        (b) => b.status === 'Agendado' || b.status === 'Confirmado'
-      );
-      return !hasActive;
-    })
-    .map(s => ({
-      schedule_id: s.id,
-      time: s.time,
-      duration_minutes: s.duration_minutes,
-    }));
-  res.json(slots);
-});
-
-// Criar horário de gabinete
-app.post('/api/pastoral-cabinet/schedules', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
-  const { date, time, duration_minutes, is_available,
-          booked_by_name, booked_by_phone, booking_subject } = req.body;
-  if (!date || !time) return res.status(400).json({ message: 'Data e hora são obrigatórios' });
-
-  // Validar dia da semana (seg-sex apenas)
-  const [y, m, d] = date.split('-').map(Number);
-  const dow = new Date(y, m - 1, d).getDay();
-  if (dow === 0 || dow === 6) {
-    return res.status(400).json({ message: 'Gabinete só pode ser agendado de segunda a sexta-feira' });
-  }
-
-  // Se foi informado nome do solicitante, já nasce como ocupado
-  const hasBooking = !!(booked_by_name && booked_by_name.trim());
-  const insertData = {
-    date, time,
-    duration_minutes: duration_minutes || 60,
-    is_available: hasBooking ? false : (is_available ?? true),
-  };
-  if (booked_by_name)   insertData.booked_by_name   = booked_by_name.trim();
-  if (booked_by_phone)  insertData.booked_by_phone  = booked_by_phone.trim();
-  if (booking_subject)  insertData.booking_subject  = booking_subject.trim();
-
-  const { data, error } = await db
-    .from('pastoral_cabinet_schedules')
-    .insert(insertData)
-    .select().single();
-  if (error) {
-    if (error.code === '23505') return res.status(409).json({ message: 'Já existe um horário nesta data e hora' });
-    return res.status(500).json({ message: error.message });
-  }
-  res.json(data);
-});
-
-// Excluir horário de gabinete
-app.delete('/api/pastoral-cabinet/schedules/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
-  // Verifica se há agendamento ativo
-  const { data: bookings } = await db
-    .from('pastoral_cabinet_bookings')
-    .select('id')
-    .eq('schedule_id', req.params.id)
-    .in('status', ['Agendado', 'Confirmado'])
+    .eq('time', time)
+    .not('status', 'in', '("Cancelado")')
     .maybeSingle();
-  if (bookings) return res.status(409).json({ message: 'Não é possível excluir: há agendamento ativo neste horário' });
+  if (conflict) return res.status(409).json({ message: `Horário já ocupado por ${conflict.name} neste dia. Escolha outro horário.` });
 
-  await db.from('pastoral_cabinet_schedules').delete().eq('id', req.params.id);
-  res.json({ message: 'Excluído' });
-});
-
-// Atualizar horário de gabinete (data, hora, duração, dados do solicitante, disponibilidade)
-app.put('/api/pastoral-cabinet/schedules/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
-  const { date, time, duration_minutes, is_available,
-          booked_by_name, booked_by_phone, booking_subject } = req.body;
-
-  // Validar dia da semana (seg-sex apenas) se data foi fornecida
-  if (date) {
-    const [y, m, d] = date.split('-').map(Number);
-    const dow = new Date(y, m - 1, d).getDay(); // 0=Dom, 6=Sáb
-    if (dow === 0 || dow === 6) {
-      return res.status(400).json({ message: 'Gabinete só pode ser agendado de segunda a sexta-feira' });
-    }
-  }
-
-  const updateData = {};
-  if (date             !== undefined) updateData.date             = date;
-  if (time             !== undefined) updateData.time             = time;
-  if (duration_minutes !== undefined) updateData.duration_minutes = duration_minutes;
-  if (booked_by_name   !== undefined) updateData.booked_by_name   = booked_by_name;
-  if (booked_by_phone  !== undefined) updateData.booked_by_phone  = booked_by_phone;
-  if (booking_subject  !== undefined) updateData.booking_subject  = booking_subject;
-
-  // Se está recebendo dados de solicitante, marcar como ocupado automaticamente
-  if (booked_by_name) {
-    updateData.is_available = false;
-  } else if (is_available !== undefined) {
-    updateData.is_available = is_available;
-  }
-
-  const { data, error } = await db
-    .from('pastoral_cabinet_schedules')
-    .update(updateData)
-    .eq('id', req.params.id)
-    .select().single();
-
-  if (error) return res.status(500).json({ message: error.message });
-  res.json(data);
-});
-
-// ─── Pastoral Cabinet Bookings ────────────────────────────────────────────────
-
-// Listar agendamentos de um voluntário
-app.get('/api/pastoral-cabinet/bookings/volunteer/:volunteer_id', auth, async (req, res) => {
-  const { data, error } = await db
-    .from('pastoral_cabinet_bookings')
-    .select('*, pastoral_cabinet_schedules(duration_minutes)')
-    .eq('volunteer_id', req.params.volunteer_id)
-    .order('date', { ascending: false });
-  if (error) return res.status(500).json({ message: error.message });
-
-  res.json((data || []).map(b => ({
-    ...b,
-    duration_minutes: b.pastoral_cabinet_schedules?.duration_minutes || null,
-    pastoral_cabinet_schedules: undefined,
-  })));
-});
-
-// Criar agendamento (voluntário OU secretaria)
-app.post('/api/pastoral-cabinet/bookings', auth, async (req, res) => {
-  const { volunteer_id, schedule_id, date, time, notes, booked_name, booked_phone, subject } = req.body;
-
-  if (!schedule_id) return res.status(400).json({ message: 'Horário é obrigatório' });
-  if (!volunteer_id && !booked_name) return res.status(400).json({ message: 'Nome do solicitante é obrigatório' });
-
-  // Validar dia da semana no date fornecido (se houver)
-  if (date) {
-    const [y, m, d] = date.split('-').map(Number);
-    const dow = new Date(y, m - 1, d).getDay();
-    if (dow === 0 || dow === 6) {
-      return res.status(400).json({ message: 'Gabinete só pode ser agendado de segunda a sexta-feira' });
-    }
-  }
-
-  // Buscar dados do horário
-  const { data: schedule, error: scheduleError } = await db
-    .from('pastoral_cabinet_schedules')
-    .select('id, date, time, duration_minutes, is_available')
-    .eq('id', schedule_id)
-    .single();
-  if (scheduleError || !schedule) return res.status(404).json({ message: 'Horário não encontrado' });
-
-  // Verifica se o horário ainda está disponível
-  const { data: existing } = await db
-    .from('pastoral_cabinet_bookings')
-    .select('id')
-    .eq('schedule_id', schedule_id)
-    .in('status', ['Agendado', 'Confirmado'])
-    .maybeSingle();
-  if (existing) return res.status(409).json({ message: 'Este horário já foi reservado' });
-
-  const insertData = {
-    schedule_id,
-    date: date || schedule.date,
-    time: time || schedule.time,
+  const { data, error } = await db.from('pastoral_appointments').insert({
+    name: name.trim(), date, time,
     notes: notes || null,
-    status: 'Agendado',
-  };
-  if (volunteer_id) insertData.volunteer_id = volunteer_id;
-  if (booked_name)  insertData.booked_name  = booked_name;
-  if (booked_phone) insertData.booked_phone = booked_phone;
-  if (subject)      insertData.subject      = subject;
-
-  const { data, error } = await db
-    .from('pastoral_cabinet_bookings')
-    .insert(insertData)
-    .select().single();
+    status: status || 'Agendado',
+    created_by: req.user.id,
+  }).select().single();
   if (error) return res.status(500).json({ message: error.message });
-
-  // Marca o schedule como ocupado
-  await db.from('pastoral_cabinet_schedules').update({ is_available: false }).eq('id', schedule_id);
-
-  // Notifica o admin
-  const { data: admins } = await db.from('users').select('id').in('role', ['SuperAdmin', 'Admin']);
-  const nomeSolicitante = booked_name || 'Voluntário';
-  for (const admin of admins || []) {
-    await notify(admin.id, 'Novo Agendamento de Gabinete',
-      `${nomeSolicitante} agendou o gabinete para ${insertData.date} às ${insertData.time}`);
-  }
-
-  res.json({ id: data.id });
+  res.json(data);
 });
 
-// Atualizar status de agendamento
-app.put('/api/pastoral-cabinet/bookings/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
-  const { status, booked_name, booked_phone, subject } = req.body;
-  const { data: booking } = await db.from('pastoral_cabinet_bookings').select('*').eq('id', req.params.id).single();
-  if (!booking) return res.status(404).json({ message: 'Agendamento não encontrado' });
+app.put('/api/pastoral/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
+  const { name, date, time, notes, status } = req.body;
+  if (!name?.trim() || !date || !time) return res.status(400).json({ message: 'Nome, data e hora são obrigatórios' });
 
-  const updates = {};
-  if (status !== undefined) updates.status = status;
-  if (booked_name !== undefined) updates.booked_name = booked_name;
-  if (booked_phone !== undefined) updates.booked_phone = booked_phone;
-  if (subject !== undefined) updates.subject = subject;
+  const { data: conflict } = await db.from('pastoral_appointments')
+    .select('id, name')
+    .eq('date', date)
+    .eq('time', time)
+    .not('status', 'in', '("Cancelado")')
+    .neq('id', req.params.id)
+    .maybeSingle();
+  if (conflict) return res.status(409).json({ message: `Horário já ocupado por ${conflict.name} neste dia. Escolha outro horário.` });
 
-  await db.from('pastoral_cabinet_bookings').update(updates).eq('id', req.params.id);
-
-  // Se cancelado, libera o horário
-  if (status === 'Cancelado') {
-    await db.from('pastoral_cabinet_schedules').update({ is_available: true }).eq('id', booking.schedule_id);
-  }
-
-  // Notifica o voluntário se mudou status
-  if (status) {
-    const { data: userRow } = await db.from('users').select('id').eq('member_id', booking.volunteer_id).maybeSingle();
-    if (userRow) await notify(userRow.id, 'Gabinete ' + status, `Seu agendamento de gabinete foi ${status.toLowerCase()}`);
-  }
-
+  const { error } = await db.from('pastoral_appointments').update({
+    name: name.trim(), date, time,
+    notes: notes || null,
+    status: status || 'Agendado',
+    updated_at: new Date().toISOString(),
+  }).eq('id', req.params.id);
+  if (error) return res.status(500).json({ message: error.message });
   res.json({ message: 'Atualizado' });
 });
 
-// ─── Backup ───────────────────────────────────────────────────────────────────
-app.post('/api/backup', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
-  const tables = ['members', 'cults', 'scales', 'swaps', 'notifications', 'departments', 'sectors', 'ministries'];
+app.delete('/api/pastoral/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
+  const { error } = await db.from('pastoral_appointments').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ message: error.message });
+  res.json({ message: 'Excluído' });
+});
+
+// Helper: generate backup data (single source of truth)
+const BACKUP_TABLES = ['departments', 'ministries', 'sectors', 'cult_types', 'members', 'member_ministries', 'cults', 'scales', 'swaps', 'notifications'];
+async function generateBackupData() {
   const backup = {};
-  for (const t of tables) {
+  for (const t of BACKUP_TABLES) {
     const { data } = await db.from(t).select('*');
     backup[t] = data || [];
   }
   backup.exported_at = new Date().toISOString();
+  return backup;
+}
+
+// ─── Backup ───────────────────────────────────────────────────────────────────
+app.post('/api/backup', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
+  const backup = await generateBackupData();
   res.json({ message: `Backup realizado em ${new Date().toLocaleString('pt-BR')}`, data: backup });
+});
+
+// Helper: get SMTP transporter from DB settings or env
+async function getTransporter() {
+  const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
+  const { data } = await db.from('settings').select('key,value').in('key', keys);
+  const cfg = Object.fromEntries((data || []).map(r => [r.key, r.value]));
+  return nodemailer.createTransport({
+    host: cfg.smtp_host || process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: Number(cfg.smtp_port || process.env.SMTP_PORT || 587),
+    secure: false,
+    auth: {
+      user: cfg.smtp_user || process.env.SMTP_USER,
+      pass: cfg.smtp_pass || process.env.SMTP_PASS,
+    },
+  });
+}
+
+// GET SMTP config (pass masked)
+app.get('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass'];
+  const { data } = await db.from('settings').select('key,value').in('key', keys);
+  const cfg = Object.fromEntries((data || []).map(r => [r.key, r.value]));
+  res.json({
+    host: cfg.smtp_host || '',
+    port: cfg.smtp_port || '587',
+    user: cfg.smtp_user || '',
+    pass: cfg.smtp_pass ? '••••••••' : '',
+  });
+});
+
+// POST SMTP config (save to settings table)
+app.post('/api/settings/smtp', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const { host, port, user, pass } = req.body;
+  if (!host || !user) return res.status(400).json({ message: 'Host e e-mail são obrigatórios' });
+
+  const entries = [
+    { key: 'smtp_host', value: host },
+    { key: 'smtp_port', value: String(port || '587') },
+    { key: 'smtp_user', value: user },
+  ];
+  // Only update pass if a real value was sent (not the masked placeholder)
+  if (pass && pass !== '••••••••') entries.push({ key: 'smtp_pass', value: pass });
+
+  for (const entry of entries) {
+    await db.from('settings').upsert(entry, { onConflict: 'key' });
+  }
+  res.json({ message: 'Configurações salvas com sucesso!' });
+});
+
+// POST restore from backup
+app.post('/api/backup/restore', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const { data: backupJson, confirm } = req.body;
+  if (!backupJson) return res.status(400).json({ message: 'Dados de backup obrigatórios' });
+  if (confirm !== true) return res.status(400).json({ message: 'Confirmação obrigatória (confirm: true)' });
+
+  const results = [];
+  const errors = [];
+
+  for (const table of BACKUP_TABLES) {
+    const rows = backupJson[table];
+    if (!Array.isArray(rows) || rows.length === 0) {
+      results.push({ table, status: 'skipped', count: 0 });
+      continue;
+    }
+    try {
+      const { error } = await db.from(table).upsert(rows, { ignoreDuplicates: false });
+      if (error) {
+        errors.push({ table, error: error.message });
+        results.push({ table, status: 'error', count: 0 });
+      } else {
+        results.push({ table, status: 'ok', count: rows.length });
+      }
+    } catch (e) {
+      errors.push({ table, error: e.message });
+      results.push({ table, status: 'error', count: 0 });
+    }
+  }
+
+  const hasErrors = errors.length > 0;
+  res.status(hasErrors ? 207 : 200).json({
+    message: hasErrors
+      ? `Restauração concluída com ${errors.length} erro(s). Verifique os detalhes.`
+      : `Restauração concluída! ${results.filter(r => r.status === 'ok').length} tabela(s) restaurada(s).`,
+    results,
+    errors: hasErrors ? errors : undefined,
+    restored_at: new Date().toISOString(),
+  });
+});
+
+// POST send backup by email
+app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ message: 'E-mail destinatário obrigatório' });
+
+  const backup = await generateBackupData();
+  const json = JSON.stringify(backup, null, 2);
+  const filename = `backup_ecclesiascale_${new Date().toISOString().slice(0, 10)}.json`;
+
+  // Get SMTP user for "from" field before creating transporter
+  const { data: smtpCfg } = await db.from('settings').select('key,value').in('key', ['smtp_user']);
+  const fromEmail = smtpCfg?.[0]?.value || process.env.SMTP_USER || '';
+
+  try {
+    const transporter = await getTransporter();
+    await transporter.sendMail({
+      from: `EcclesiaScale <${fromEmail}>`,
+      to: email,
+      subject: `Backup EcclesiaScale - ${new Date().toLocaleDateString('pt-BR')}`,
+      html: `<div style="font-family:sans-serif;max-width:480px;margin:auto">
+        <h2 style="color:#b45309">📦 Backup EcclesiaScale</h2>
+        <p>Segue em anexo o backup do sistema gerado em <strong>${new Date().toLocaleString('pt-BR')}</strong>.</p>
+        <p style="color:#666;font-size:13px">Este e-mail foi enviado automaticamente. Guarde o arquivo em local seguro.</p>
+      </div>`,
+      attachments: [{ filename, content: json, contentType: 'application/json' }],
+    });
+    res.json({ message: `Backup enviado para ${email} com sucesso!` });
+  } catch (err) {
+    console.error('Erro ao enviar e-mail:', err);
+    res.status(500).json({ message: 'Erro ao enviar e-mail. Verifique as configurações SMTP na aba Config. E-mail.' });
+  }
 });
 
 // ─── Static (production) ──────────────────────────────────────────────────────
