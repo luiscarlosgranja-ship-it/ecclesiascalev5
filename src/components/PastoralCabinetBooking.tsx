@@ -227,6 +227,7 @@ export default function PastoralCabinetBooking({ volunteerId, volunteerName, onB
                   <Loader2 size={20} className="animate-spin text-amber-500" />
                 </div>
               ) : (
+                <>
                 <div className="grid grid-cols-7 gap-1">
                   {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(day => (
                     <div key={day} className="text-center text-xs font-semibold text-stone-500 py-2">
@@ -293,6 +294,7 @@ export default function PastoralCabinetBooking({ volunteerId, volunteerName, onB
                     <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> Selecionado
                   </span>
                 </div>
+                </>
               )}
             </div>
           </div>
