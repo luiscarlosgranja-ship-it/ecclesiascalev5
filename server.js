@@ -743,6 +743,9 @@ app.get('/api/pastoral-cabinet/available-slots/:date', auth, async (req, res) =>
 
   const slots = (data || [])
     .filter(s => {
+      // Bloqueia se is_available=false (agendado pela secretaria direto no schedule)
+      if (!s.is_available) return false;
+      // Bloqueia se há booking ativo na tabela separada (agendado por voluntário)
       const hasActive = (s.pastoral_cabinet_bookings || []).some(
         (b) => b.status === 'Agendado' || b.status === 'Confirmado'
       );
@@ -758,7 +761,8 @@ app.get('/api/pastoral-cabinet/available-slots/:date', auth, async (req, res) =>
 
 // Criar horário de gabinete
 app.post('/api/pastoral-cabinet/schedules', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
-  const { date, time, duration_minutes, is_available } = req.body;
+  const { date, time, duration_minutes, is_available,
+          booked_by_name, booked_by_phone, booking_subject } = req.body;
   if (!date || !time) return res.status(400).json({ message: 'Data e hora são obrigatórios' });
 
   // Validar dia da semana (seg-sex apenas)
@@ -768,15 +772,26 @@ app.post('/api/pastoral-cabinet/schedules', auth, requireRole('SuperAdmin', 'Adm
     return res.status(400).json({ message: 'Gabinete só pode ser agendado de segunda a sexta-feira' });
   }
 
+  // Se foi informado nome do solicitante, já nasce como ocupado
+  const hasBooking = !!(booked_by_name && booked_by_name.trim());
+  const insertData = {
+    date, time,
+    duration_minutes: duration_minutes || 60,
+    is_available: hasBooking ? false : (is_available ?? true),
+  };
+  if (booked_by_name)   insertData.booked_by_name   = booked_by_name.trim();
+  if (booked_by_phone)  insertData.booked_by_phone  = booked_by_phone.trim();
+  if (booking_subject)  insertData.booking_subject  = booking_subject.trim();
+
   const { data, error } = await db
     .from('pastoral_cabinet_schedules')
-    .insert({ date, time, duration_minutes: duration_minutes || 60, is_available: is_available ?? true })
+    .insert(insertData)
     .select().single();
   if (error) {
     if (error.code === '23505') return res.status(409).json({ message: 'Já existe um horário nesta data e hora' });
     return res.status(500).json({ message: error.message });
   }
-  res.json({ id: data.id });
+  res.json(data);
 });
 
 // Excluir horário de gabinete

@@ -80,18 +80,14 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
     if (!formData.date || !formData.time) { setError('Data e hora são obrigatórios'); return; }
     setSaving(true); setError('');
     try {
-      // Se nome foi preenchido, já cria como ocupado com dados do agendamento
-      const hasBooking = formData.booked_by_name.trim() !== '';
+      // Envia tudo para POST /schedules — backend decide is_available baseado no nome
       await api.post('/pastoral-cabinet/schedules', {
         date: formData.date,
         time: formData.time,
         duration_minutes: formData.duration_minutes,
-        is_available: !hasBooking,
-        ...(hasBooking && {
-          booked_by_name: formData.booked_by_name,
-          booked_by_phone: formData.booked_by_phone,
-          booking_subject: formData.booking_subject,
-        }),
+        booked_by_name:   formData.booked_by_name  || undefined,
+        booked_by_phone:  formData.booked_by_phone || undefined,
+        booking_subject:  formData.booking_subject || undefined,
       });
       setModalOpen(false); loadSchedules();
     } catch (e) { setError(e instanceof Error ? e.message : 'Erro ao salvar');
@@ -125,18 +121,16 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
     if (!bookingForm.name.trim()) { setBookingError('Nome é obrigatório'); return; }
     setBookingSaving(true); setBookingError('');
     try {
-      // Salva tudo direto no schedule: dados do solicitante + horário + marca como ocupado
-      // Assim não depende da rota /bookings ter sido atualizada no servidor
+      // Salva tudo no schedule: nome, telefone, assunto + marca como ocupado
       await api.put(`/pastoral-cabinet/schedules/${bookingTarget.id}`, {
-        date: bookingForm.date,
-        time: bookingForm.time,
+        date:             bookingForm.date,
+        time:             bookingForm.time,
         duration_minutes: bookingForm.duration_minutes,
-        is_available: false,
-        booked_by_name: bookingForm.name,
-        booked_by_phone: bookingForm.phone,
-        booking_subject: bookingForm.subject,
+        booked_by_name:   bookingForm.name,
+        booked_by_phone:  bookingForm.phone  || undefined,
+        booking_subject:  bookingForm.subject || undefined,
+        // is_available é definido automaticamente pelo backend quando booked_by_name é informado
       });
-
       setBookingModal(false);
       loadSchedules();
     } catch (e) {
