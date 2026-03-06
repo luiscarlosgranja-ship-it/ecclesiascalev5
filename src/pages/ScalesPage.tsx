@@ -203,6 +203,14 @@ export default function ScalesPage({ user }: Props) {
   const canRemove = user.role === 'SuperAdmin' || user.role === 'Admin';
   function getCultLabel(c: Cult) { return `${c.name || c.type_name || 'Culto'} — ${c.date} ${c.time}`; }
 
+  // Setores filtrados pelo departamento do membro selecionado no modal de adição
+  const filteredSectorsForAdd = useMemo(() => {
+    if (!newScale.member_id) return sectors || [];
+    const member = (members || []).find(m => m.id === Number(newScale.member_id));
+    if (!member?.department_id) return sectors || [];
+    return (sectors || []).filter(s => s.department_id === member.department_id);
+  }, [newScale.member_id, members, sectors]);
+
   // Componente de seleção de departamentos reutilizável
   function DeptCheckboxList({ list, setter, label }: { list: number[]; setter: (v: number[]) => void; label: string }) {
     return (
@@ -449,10 +457,10 @@ export default function ScalesPage({ user }: Props) {
               <p><span className="text-stone-300">Data:</span> {selectedCultData.date} — {selectedCultData.time}</p>
             </div>
           )}
-          <Select label="Voluntário *" value={newScale.member_id} onChange={e=>setNewScale(n=>({...n,member_id:e.target.value}))} placeholder="Selecionar voluntário..."
+          <Select label="Voluntário *" value={newScale.member_id} onChange={e=>setNewScale(n=>({...n,member_id:e.target.value,sector_id:''}))} placeholder="Selecionar voluntário..."
             options={(members||[]).map(m=>({ value:m.id, label:`${m.name}${m.department_name?` — ${m.department_name}`:''}` }))} />
-          <Select label="Setor / Local *" value={newScale.sector_id} onChange={e=>setNewScale(n=>({...n,sector_id:e.target.value}))} placeholder="Selecionar setor..."
-            options={(sectors||[]).map(s=>({ value:s.id, label:s.name }))} />
+          <Select label="Setor / Local *" value={newScale.sector_id} onChange={e=>setNewScale(n=>({...n,sector_id:e.target.value}))} placeholder={newScale.member_id ? 'Selecionar setor...' : 'Selecione um voluntário primeiro...'}
+            options={filteredSectorsForAdd.map(s=>({ value:s.id, label:s.name }))} />
           {error && <p className="text-red-400 text-xs">{error}</p>}
           <div className="flex gap-3">
             <Button variant="outline" onClick={() => setAddModal(false)}>Cancelar</Button>

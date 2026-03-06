@@ -49,6 +49,7 @@ export interface Department {
 export interface Sector {
   id: number;
   name: string;
+  department_id?: number;
   is_active: number;
 }
 
