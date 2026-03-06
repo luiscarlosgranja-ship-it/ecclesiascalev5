@@ -272,9 +272,9 @@ async function exportSingleCultBlocksPDF(
   title: string,
 ) {
   const logo = await fetchLogo();
-  const doc = new jsPDF({ orientation: 'portrait', format: 'a4', unit: 'mm' });
-  const PW = doc.internal.pageSize.getWidth();  // 210mm
-  const PH = doc.internal.pageSize.getHeight(); // 297mm
+  const doc = new jsPDF({ orientation: 'landscape', format: 'a4', unit: 'mm' }); // ✅ LANDSCAPE!
+  const PW = doc.internal.pageSize.getWidth();  // ~297mm (landscape)
+  const PH = doc.internal.pageSize.getHeight(); // ~210mm
   const MX = 12;
   const MY = 8;
   
