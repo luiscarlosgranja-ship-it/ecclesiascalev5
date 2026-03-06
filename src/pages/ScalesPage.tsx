@@ -187,7 +187,7 @@ export default function ScalesPage({ user }: Props) {
   async function generateAuto() {
     if (autoType === 'specific' && !autoSpecificCult) { setError('Selecione um culto'); return; }
     if (autoType === 'thematic' && !autoThematicCult) { setError('Selecione um culto temático'); return; }
-    if (autoType === 'standard' && !selectedCult) { setError('Selecione um culto na tela principal'); return; }
+    if (autoType === 'standard' && !autoSpecificCult) { setError('Selecione um culto padrão'); return; }
     setSaving(true); setError(''); setAutoResult(null);
     try {
       let payload: Record<string, any>;
@@ -196,7 +196,7 @@ export default function ScalesPage({ user }: Props) {
       } else if (autoType === 'thematic') {
         payload = { type: 'thematic', cult_id: autoThematicCult };
       } else {
-        payload = { type: 'standard', cult_id: selectedCult, department_ids: autoStandardDepts.length > 0 ? autoStandardDepts : undefined };
+        payload = { type: 'standard', cult_id: autoSpecificCult };
       }
 
       const res = await api.post<{ message?: string; created?: number; cults_count?: number; scales_count?: number }>(
@@ -823,40 +823,27 @@ export default function ScalesPage({ user }: Props) {
                 </div>
               )}
 
-              {/* Cultos Padrão — culto selecionado na tela + seleção de departamentos */}
+              {/* Cultos Padrão — lista suspensa com cultos de dia fixo */}
               {autoType === 'standard' && (
-                <div className="space-y-3">
-                  {!selectedCult ? (
-                    <p className="text-amber-400 text-xs">⚠️ Selecione um culto padrão na tela principal antes de gerar.</p>
-                  ) : (
-                    <>
-                      <div className="bg-stone-800/60 rounded-lg p-3 border border-stone-700">
-                        <p className="text-stone-400 text-xs mb-1">Culto selecionado</p>
-                        <p className="text-stone-200 text-sm font-medium">
-                          {availableCults.find(c => c.id === selectedCult)?.type_name || availableCults.find(c => c.id === selectedCult)?.name}
-                        </p>
-                        <p className="text-stone-500 text-xs">
-                          {availableCults.find(c => c.id === selectedCult)?.date} {availableCults.find(c => c.id === selectedCult)?.time}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-stone-400 text-xs mb-2">Departamentos <span className="text-stone-600">(todos se nenhum selecionado)</span></p>
-                        <div className="space-y-1 max-h-36 overflow-y-auto">
-                          {(deptBlocks.length > 0 ? deptBlocks.map(d => ({ id: d.department_id, name: d.department_name })) : []).map(dept => dept.id && (
-                            <label key={dept.id} className="flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-stone-800 transition-colors">
-                              <input type="checkbox"
-                                checked={autoStandardDepts.includes(dept.id!)}
-                                onChange={e => setAutoStandardDepts(prev =>
-                                  e.target.checked ? [...prev, dept.id!] : prev.filter(id => id !== dept.id)
-                                )}
-                                className="accent-amber-500 w-4 h-4" />
-                              <span className="text-stone-300 text-sm">{dept.name}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    </>
-                  )}
+                <div className="space-y-1">
+                  <label className="text-stone-400 text-xs">Selecione o culto padrão</label>
+                  <select
+                    value={autoSpecificCult ?? ''}
+                    onChange={e => setAutoSpecificCult(e.target.value ? Number(e.target.value) : null)}
+                    className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="">Selecionar culto padrão...</option>
+                    {availableCults
+                      .filter(c => {
+                        const ct = (cultTypes || []).find(t => t.id === c.type_id);
+                        return ct && ct.default_day !== null && ct.default_day !== undefined;
+                      })
+                      .map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.name || c.type_name || 'Culto'} — {c.date} {c.time}
+                        </option>
+                      ))}
+                  </select>
                 </div>
               )}
 
@@ -864,7 +851,7 @@ export default function ScalesPage({ user }: Props) {
               <div className="flex gap-3">
                 <Button variant="outline" onClick={closeAutoModal}>Cancelar</Button>
                 <Button onClick={generateAuto} loading={saving}
-                  disabled={(autoType === 'specific' && !autoSpecificCult) || (autoType === 'thematic' && !autoThematicCult) || (autoType === 'standard' && !selectedCult)}>
+                  disabled={(autoType === 'specific' && !autoSpecificCult) || (autoType === 'thematic' && !autoThematicCult) || (autoType === 'standard' && !autoSpecificCult)}>
                   Gerar
                 </Button>
               </div>
