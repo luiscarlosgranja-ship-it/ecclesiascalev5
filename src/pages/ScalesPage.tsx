@@ -45,7 +45,7 @@ export default function ScalesPage({ user }: Props) {
   const [fillModal, setFillModal] = useState(false);
   const [fillLoading, setFillLoading] = useState(false);
   const [fillMsg, setFillMsg] = useState('');
-  const [autoType, setAutoType] = useState<'month' | 'standard' | 'thematic' | 'specific' | 'empty-month' | 'empty-specific'>('month');
+  const [autoType, setAutoType] = useState<'month' | 'standard' | 'thematic' | 'specific'>('month');
   const [addModal, setAddModal] = useState(false);
   const [newCultModal, setNewCultModal] = useState(false);
   const [newScale, setNewScale] = useState({ member_id: '', sector_id: '' });
@@ -171,38 +171,25 @@ export default function ScalesPage({ user }: Props) {
   }
 
   const AUTO_LABELS: Record<string, string> = {
-  'empty-month':    'Vagas vazias — Mês Inteiro',
-  'empty-specific': 'Vagas vazias — Culto Específico',
-    month: 'Mês Inteiro',
     standard: 'Cultos Padrão',
     thematic: 'Cultos Temáticos',
     specific: 'Culto Específico',
   };
 
   async function generateAuto() {
-    if ((autoType === 'specific' || autoType === 'empty-specific') && !autoSpecificCult) { setError('Selecione um culto'); return; }
+    if (autoType === 'specific' && !autoSpecificCult) { setError('Selecione um culto'); return; }
     if ((autoType === 'standard' || autoType === 'thematic') && !selectedCult) { setError('Selecione um culto na tela principal'); return; }
     setSaving(true); setError(''); setAutoResult(null);
     try {
       let payload: Record<string, any>;
-      let endpoint = '/scales/auto-generate';
-
-      if (autoType === 'empty-month') {
-        endpoint = '/scales/generate-empty';
-        payload = { month: autoMonth };
-      } else if (autoType === 'empty-specific') {
-        endpoint = '/scales/generate-empty';
-        payload = { cult_id: autoSpecificCult };
-      } else if (autoType === 'month') {
-        payload = { type: 'month', month: autoMonth };
-      } else if (autoType === 'specific') {
+      if (autoType === 'specific') {
         payload = { type: 'standard', cult_id: autoSpecificCult };
       } else {
         payload = { type: autoType, cult_id: selectedCult };
       }
 
       const res = await api.post<{ message?: string; created?: number; cults_count?: number; scales_count?: number }>(
-        endpoint, payload
+        '/scales/auto-generate', payload
       );
 
       const created = res?.scales_count ?? res?.created ?? 0;
@@ -765,10 +752,10 @@ export default function ScalesPage({ user }: Props) {
                 O sistema respeitará as regras de não-repetição (máx. 3x/mês) e evitará duplicidade de setor.
               </p>
               <div className="space-y-2">
-                <p className="text-xs text-amber-400 uppercase tracking-wide">Criar vagas em branco</p>
                 {[
-                  { value: 'empty-month',    label: 'Mês Inteiro (vagas vazias)',      desc: 'Cria uma vaga por setor em cada culto do mês — preencha manualmente' },
-                  { value: 'empty-specific', label: 'Culto Específico (vagas vazias)', desc: 'Cria vagas em branco para um culto específico' },
+                  { value: 'specific', label: 'Culto Específico', desc: 'Distribui voluntários em um culto específico' },
+                  { value: 'standard', label: 'Cultos Padrão',    desc: 'Preenche o culto selecionado na tela' },
+                  { value: 'thematic', label: 'Cultos Temáticos', desc: 'Preenche o culto selecionado na tela' },
                 ].map(opt => (
                   <label key={opt.value}
                     className={`flex items-start gap-3 cursor-pointer p-3 rounded-lg border transition-all ${autoType === opt.value ? 'border-amber-500 bg-amber-500/10' : 'border-stone-700 hover:border-amber-600'}`}>
@@ -780,40 +767,12 @@ export default function ScalesPage({ user }: Props) {
                     </div>
                   </label>
                 ))}
-                <p className="text-xs text-stone-500 uppercase tracking-wide pt-1">Preenchimento automático</p>
-                {[
-                  { value: 'month',    label: 'Mês Inteiro',      desc: 'Distribui voluntários automaticamente em todos os cultos do mês' },
-                  { value: 'specific', label: 'Culto Específico', desc: 'Distribui voluntários em um culto específico' },
-                  { value: 'standard', label: 'Cultos Padrão',    desc: 'Preenche o culto selecionado na tela' },
-                  { value: 'thematic', label: 'Cultos Temáticos', desc: 'Preenche o culto selecionado na tela' },
-                ].map(opt => (
-                  <label key={opt.value}
-                    className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-stone-700 hover:border-amber-600 transition-all">
-                    <input type="radio" value={opt.value} checked={autoType === opt.value}
-                      onChange={() => setAutoType(opt.value as any)} className="accent-amber-500 mt-0.5" />
-                    <div>
-                      <p className="text-stone-200 text-sm">{opt.label}</p>
-                      <p className="text-stone-500 text-xs">{opt.desc}</p>
-                    </div>
-                  </label>
-                ))}
               </div>
 
-              {/* Seletor de mês — para Mês Inteiro e vagas vazias por mês */}
-              {(autoType === 'month' || autoType === 'empty-month') && (
-                <div className="space-y-1">
-                  <label className="text-stone-400 text-xs">Mês de referência</label>
-                  <input
-                    type="month"
-                    value={autoMonth}
-                    onChange={e => setAutoMonth(e.target.value)}
-                    className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-              )}
+
 
               {/* Seletor de culto específico */}
-              {(autoType === 'specific' || autoType === 'empty-specific') && (
+              {autoType === 'specific' && (
                 <div className="space-y-1">
                   <label className="text-stone-400 text-xs">Selecione o culto</label>
                   <select
@@ -838,7 +797,7 @@ export default function ScalesPage({ user }: Props) {
               <div className="flex gap-3">
                 <Button variant="outline" onClick={closeAutoModal}>Cancelar</Button>
                 <Button onClick={generateAuto} loading={saving}
-                  disabled={((autoType === 'specific' || autoType === 'empty-specific') && !autoSpecificCult) || ((autoType === 'standard' || autoType === 'thematic') && !selectedCult)}>
+                  disabled={(autoType === 'specific' && !autoSpecificCult) || ((autoType === 'standard' || autoType === 'thematic') && !selectedCult)}>
                   Gerar
                 </Button>
               </div>
@@ -1012,4 +971,3 @@ export default function ScalesPage({ user }: Props) {
     </div>
   );
 }
-
