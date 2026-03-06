@@ -352,16 +352,17 @@ async function exportSingleCultBlocksPDF(
         doc.setFillColor(...bgColor);
         doc.rect(bx, contentY, blockW, rowH, 'F');
 
+        // Nome do voluntário (coluna esquerda)
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(5);
         doc.setTextColor(50, 45, 40);
-        doc.text(scale.member_name || '—', bx + blockPadding, contentY + 2.5, { maxWidth: blockW - blockPadding * 2 - 8 });
+        doc.text(scale.member_name || '—', bx + blockPadding, contentY + 2.5, { maxWidth: blockW / 2 - blockPadding });
 
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(...statusColor(scale.status));
+        // Setor do voluntário (coluna direita)
+        doc.setFont('helvetica', 'normal');
         doc.setFontSize(5);
-        const statusText = typeof scale.status === 'object' ? 'Pendente' : scale.status;
-        doc.text(statusText, bx + blockW - blockPadding - 8, contentY + 2.5, { maxWidth: 8 });
+        doc.setTextColor(100, 95, 90);
+        doc.text(scale.sector_name || '—', bx + blockW / 2 + blockPadding, contentY + 2.5, { maxWidth: blockW / 2 - blockPadding * 2 });
 
         contentY += rowH;
       });
@@ -411,12 +412,14 @@ async function exportMonthGridPDF(
 
   // Agrupar escalas por culto
   const cultMap = new Map<number, Scale[]>();
+  console.log('📊 Mês PDF: Total de escalas:', allScales.length);
   for (const scale of allScales) {
     if (!cultMap.has(scale.cult_id)) {
       cultMap.set(scale.cult_id, []);
     }
     cultMap.get(scale.cult_id)!.push(scale);
   }
+  console.log('📊 Mês PDF: Cultos encontrados:', cultMap.size);
 
   // Calcular altura máxima de um bloco
   function calcBlockHeight(cult: Cult): number {
