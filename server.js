@@ -704,10 +704,10 @@ app.get('/api/pastoral-cabinet/availability/:month', auth, async (req, res) => {
   if (error) return res.status(500).json({ message: error.message });
 
   // Agrupa por data e verifica se tem algum slot livre
-  const byDate: Record<string, any> = {};
+  const byDate = {};
   (data || []).forEach(s => {
     const hasBooking = (s.pastoral_cabinet_bookings || []).some(
-      (b: any) => b.status === 'Agendado' || b.status === 'Confirmado'
+      (b) => b.status === 'Agendado' || b.status === 'Confirmado'
     );
     if (!byDate[s.date]) byDate[s.date] = { date: s.date, hasAvailable: false };
     if (!hasBooking) byDate[s.date].hasAvailable = true;
@@ -737,7 +737,7 @@ app.get('/api/pastoral-cabinet/available-slots/:date', auth, async (req, res) =>
   const slots = (data || [])
     .filter(s => {
       const hasActive = (s.pastoral_cabinet_bookings || []).some(
-        (b: any) => b.status === 'Agendado' || b.status === 'Confirmado'
+        (b) => b.status === 'Agendado' || b.status === 'Confirmado'
       );
       return !hasActive;
     })
