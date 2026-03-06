@@ -2,7 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import PastoralCabinetSchedules, { type CabinetSchedulesRef } from '../components/PastoralCabinetSchedules';
 import PastoralCabinetBooking from '../components/PastoralCabinetBooking';
 import VolunteerCabinetBookings from '../components/VolunteerCabinetBookings';
-import { Plus, Edit, Trash2, CalendarClock, Clock, User, FileText, CheckCircle, XCircle, RefreshCw, Loader2, KeyRound, Shield, ShieldCheck, Calendar } from 'lucide-react';
+import {
+  Plus, Edit, Trash2, CalendarClock, Clock, User, FileText,
+  CheckCircle, XCircle, RefreshCw, Loader2, KeyRound, Shield,
+  ShieldCheck, Calendar, AlertTriangle, History,
+} from 'lucide-react';
 import { Card, Button, Modal, Input, Badge } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
@@ -40,13 +44,16 @@ export default function PastoralPage({ user }: Props) {
   const [newTime, setNewTime] = useState('');
   const [rescheduling, setRescheduling] = useState(false);
 
+  // ─── Histórico: limpar tudo ───────────────────────────────────────────────────
+  const [clearHistoryModal, setClearHistoryModal] = useState(false);
+  const [clearingHistory, setClearingHistory] = useState(false);
+
   // ─── Ativação ────────────────────────────────────────────────────────────────
   const [activationKey, setActivationKey] = useState('');
   const [activating, setActivating] = useState(false);
   const [activateMsg, setActivateMsg] = useState('');
   const [isActivated, setIsActivated] = useState(false);
 
-  // Verifica se já está ativado ao montar
   useEffect(() => {
     api.get<{ isActive: boolean; isTrial: boolean }>('/settings/trial')
       .then(res => { if (res?.isActive && !res?.isTrial) setIsActivated(true); })
@@ -72,20 +79,10 @@ export default function PastoralPage({ user }: Props) {
     a.status === 'Agendado' || a.status === 'Reagendado'
   ).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
 
+  // Histórico: Realizados + Cancelados ordenados do mais recente ao mais antigo
   const history = (appointments || []).filter(a =>
     a.status === 'Realizado' || a.status === 'Cancelado'
   ).sort((a, b) => b.date.localeCompare(a.date));
-
-
-  // Agrupa por source para exibição
-  function sourceLabel(a: any) {
-    return a.source === 'gabinete' ? 'Gabinete Pastoral' : 'Secretaria';
-  }
-  function sourceBadgeColor(a: any): 'blue' | 'gray' {
-    return a.source === 'gabinete' ? 'blue' : 'gray';
-  }
-
-  const list = tab === 'upcoming' ? upcoming : history;
 
   function openNew() {
     if (tab === 'cabinet') {
@@ -152,6 +149,19 @@ export default function PastoralPage({ user }: Props) {
     }
   }
 
+  // ─── Limpar todo o histórico ──────────────────────────────────────────────────
+  async function confirmClearHistory() {
+    setClearingHistory(true);
+    try {
+      // Exclui cada item do histórico individualmente
+      await Promise.all(history.map(a => api.delete(`/pastoral/${a.id}`)));
+      setClearHistoryModal(false);
+      refetch();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao limpar histórico');
+    } finally { setClearingHistory(false); }
+  }
+
   async function confirmReschedule() {
     if (!rescheduleTarget || !newDate || !newTime) return;
     setRescheduling(true);
@@ -177,11 +187,13 @@ export default function PastoralPage({ user }: Props) {
     return `${day}/${m}/${y}`;
   }
 
+  const canManage = isSuperAdmin(user) || isAdmin(user) || user.role === 'Secretaria';
+
   return (
     <div className="space-y-5">
       <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
         <h1 className="text-xl font-bold text-stone-100">Gabinete Pastoral</h1>
-        {(isSuperAdmin(user) || isAdmin(user) || user.role === 'Secretaria') && (
+        {canManage && (
           <Button onClick={openNew} size="sm">
             <Plus size={16} /> {tab === 'cabinet' ? 'Adicionar Horário' : 'Novo Agendamento'}
           </Button>
@@ -194,106 +206,22 @@ export default function PastoralPage({ user }: Props) {
           className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === 'cabinet' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
           <Calendar size={14} /> Gabinete Pastoral
         </button>
-        {(isSuperAdmin(user) || isAdmin(user) || user.role === 'Secretaria') && (
+        {canManage && (
           <button onClick={() => setTab('history')}
             className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${tab === 'history' ? 'border-amber-500 text-amber-400' : 'border-transparent text-stone-500 hover:text-stone-300'}`}>
-            <FileText size={14} /> Histórico
-            <span className="text-xs opacity-60">({history.length})</span>
+            <History size={14} /> Histórico
+            {history.length > 0 && (
+              <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${tab === 'history' ? 'bg-amber-500/20 text-amber-400' : 'bg-stone-700 text-stone-400'}`}>
+                {history.length}
+              </span>
+            )}
           </button>
         )}
       </div>
 
-      {/* Lista - histórico de agendamentos */}
-      {tab === 'history' && (isSuperAdmin(user) || isAdmin(user) || user.role === 'Secretaria') && <Card className="overflow-hidden">
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="animate-spin text-amber-500" size={24} />
-          </div>
-        ) : (
-          <div className="divide-y divide-stone-700">
-            {history.length === 0 ? (
-              <div className="px-6 py-8 text-center text-stone-500 text-sm">
-                'Nenhum agendamento no histórico'
-              </div>
-            ) : (
-              history.map(a => (
-                <div key={a.id} className="px-6 py-4 hover:bg-stone-800/50 transition-colors">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <p className="font-medium text-stone-200">{a.name}</p>
-                      <div className="flex items-center gap-4 mt-2 text-xs text-stone-400">
-                        <span className="flex items-center gap-1">
-                          <CalendarClock size={12} /> {formatDate(a.date)}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Clock size={12} /> {a.time}
-                        </span>
-                        <Badge color={STATUS_COLOR[a.status] || 'gray'}>{a.status}</Badge>
-                      </div>
-                      {a.notes && <p className="text-xs text-stone-500 mt-2">{a.notes}</p>}
-                      <div className="flex items-center gap-2 mt-2 flex-wrap">
-                        {(a as any).source === 'gabinete' && (
-                          <span className="text-xs bg-blue-900/30 border border-blue-700/40 text-blue-300 px-2 py-0.5 rounded-full">
-                            Via Gabinete Pastoral
-                          </span>
-                        )}
-                        {(a as any).created_by_name && (
-                          <span className="text-xs text-amber-500/80 flex items-center gap-1">
-                            <User size={10} /> Agendado por: {(a as any).created_by_name}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    {tab === 'upcoming' && (
-                      <div className="flex items-center gap-2">
-                        {isSuperAdmin(user) || isAdmin(user) ? (
-                          <>
-                            <button onClick={() => openEdit(a)} title="Editar"
-                              className="text-stone-500 hover:text-amber-400 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
-                              <Edit size={15} />
-                            </button>
-                            <button onClick={() => { setRescheduleTarget(a); setRescheduleModal(true); }} title="Reagendar"
-                              className="text-stone-500 hover:text-blue-400 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
-                              <RefreshCw size={15} />
-                            </button>
-                            <button onClick={() => markDone(a)} title="Marcar como Realizado"
-                              className="text-stone-500 hover:text-green-400 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
-                              <CheckCircle size={15} />
-                            </button>
-                            <button onClick={() => cancelAppointment(a)} title="Cancelar"
-                              className="text-stone-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
-                              <XCircle size={15} />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button onClick={() => markDone(a)} title="Marcar como Realizado"
-                              className="text-stone-500 hover:text-green-400 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
-                              <CheckCircle size={15} />
-                            </button>
-                            <button onClick={() => cancelAppointment(a)} title="Cancelar"
-                              className="text-stone-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
-                              <XCircle size={15} />
-                            </button>
-                          </>
-                        )}
-                        <button onClick={() => { setDeleteTarget(a); setDeleteModal(true); }} title="Excluir"
-                          className="text-stone-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-stone-800 transition-colors">
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-      </Card>}
-
       {/* ─── Aba: Gabinete Pastoral ─────────────────────────────────────────── */}
       {tab === 'cabinet' && (
-        (isSuperAdmin(user) || isAdmin(user) || user.role === 'Secretaria')
+        canManage
           ? <PastoralCabinetSchedules ref={cabinetRef} title="Disponibilidade do Gabinete" />
           : (
             <div className="space-y-5">
@@ -311,12 +239,101 @@ export default function PastoralPage({ user }: Props) {
           )
       )}
 
+      {/* ─── Aba: Histórico ─────────────────────────────────────────────────── */}
+      {tab === 'history' && canManage && (
+        <div className="space-y-3">
+          {/* Header do histórico com botão limpar */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-stone-300 font-semibold text-sm">Agendamentos Concluídos e Cancelados</p>
+              <p className="text-stone-500 text-xs mt-0.5">
+                {history.length === 0
+                  ? 'Nenhum registro no histórico ainda'
+                  : `${history.length} registro${history.length !== 1 ? 's' : ''} no histórico`}
+              </p>
+            </div>
+            {history.length > 0 && (
+              <button
+                onClick={() => setClearHistoryModal(true)}
+                className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 bg-red-900/10 hover:bg-red-900/20 border border-red-800/40 hover:border-red-700/60 px-3 py-1.5 rounded-lg transition-all"
+              >
+                <Trash2 size={13} /> Limpar Histórico
+              </button>
+            )}
+          </div>
+
+          <Card className="overflow-hidden">
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="animate-spin text-amber-500" size={24} />
+              </div>
+            ) : history.length === 0 ? (
+              <div className="px-6 py-12 text-center">
+                <History size={40} className="text-stone-700 mx-auto mb-3" />
+                <p className="text-stone-500 text-sm font-medium">Nenhum agendamento no histórico</p>
+                <p className="text-stone-600 text-xs mt-1">
+                  Agendamentos concluídos ou cancelados aparecerão aqui.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-stone-800">
+                {history.map(a => (
+                  <div key={a.id} className="px-5 py-4 hover:bg-stone-800/40 transition-colors">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        {/* Nome e status */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-semibold text-stone-200 text-sm">{a.name}</p>
+                          <Badge color={STATUS_COLOR[a.status] || 'gray'}>{a.status}</Badge>
+                          {(a as any).source === 'gabinete' && (
+                            <span className="text-xs bg-blue-900/30 border border-blue-700/40 text-blue-300 px-2 py-0.5 rounded-full">
+                              Via Gabinete Pastoral
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Data e hora */}
+                        <div className="flex items-center gap-4 mt-1.5 text-xs text-stone-500">
+                          <span className="flex items-center gap-1">
+                            <CalendarClock size={11} /> {formatDate(a.date)}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock size={11} /> {a.time}
+                          </span>
+                          {(a as any).created_by_name && (
+                            <span className="flex items-center gap-1 text-amber-600/80">
+                              <User size={11} /> Agendado por: {(a as any).created_by_name}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Observações */}
+                        {a.notes && (
+                          <p className="text-xs text-stone-500 mt-1.5 italic">"{a.notes}"</p>
+                        )}
+                      </div>
+
+                      {/* Ação: excluir individualmente */}
+                      <button
+                        onClick={() => { setDeleteTarget(a); setDeleteModal(true); }}
+                        title="Excluir do histórico"
+                        className="flex-shrink-0 text-stone-600 hover:text-red-400 p-1.5 rounded-lg hover:bg-red-900/20 transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
       {/* ─── Aba: Ativar Sistema ─────────────────────────────────────────────────── */}
       {tab === 'activation' && (
         <div className="max-w-md space-y-4">
           <div className="bg-stone-900 border border-stone-700 rounded-2xl p-6 space-y-5">
-
-            {/* Status atual */}
             {isActivated ? (
               <div className="flex items-center gap-3 bg-emerald-900/20 border border-emerald-700/40 rounded-xl px-4 py-3">
                 <ShieldCheck size={20} className="text-emerald-400 flex-shrink-0" />
@@ -334,8 +351,6 @@ export default function PastoralPage({ user }: Props) {
                 </div>
               </div>
             )}
-
-            {/* Formulário de ativação */}
             {!isActivated && (
               <div className="space-y-3">
                 <div>
@@ -351,7 +366,6 @@ export default function PastoralPage({ user }: Props) {
                     className="w-full bg-stone-800 border border-stone-600 rounded-xl px-4 py-3 text-stone-100 text-sm font-mono tracking-widest focus:outline-none focus:border-amber-500 placeholder-stone-600"
                   />
                 </div>
-
                 {activateMsg && (
                   <p className={`text-sm px-3 py-2 rounded-lg border ${
                     activateMsg.startsWith('✅')
@@ -359,14 +373,11 @@ export default function PastoralPage({ user }: Props) {
                       : 'text-red-300 bg-red-900/20 border-red-700/40'
                   }`}>{activateMsg}</p>
                 )}
-
                 <Button onClick={activateSystem} loading={activating} disabled={!activationKey.trim()}>
                   <Shield size={15} /> Ativar Sistema
                 </Button>
               </div>
             )}
-
-            {/* Instrução */}
             <p className="text-stone-600 text-xs border-t border-stone-800 pt-4">
               A chave de ativação é fornecida pelo administrador do sistema. Entre em contato caso não tenha recebido.
             </p>
@@ -472,6 +483,31 @@ export default function PastoralPage({ user }: Props) {
           <div className="flex gap-3">
             <Button variant="outline" onClick={() => setDeleteModal(false)}>Cancelar</Button>
             <Button variant="danger" onClick={confirmDelete}>Excluir</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal: Limpar todo o histórico */}
+      <Modal open={clearHistoryModal} onClose={() => setClearHistoryModal(false)} title="Limpar Histórico" size="sm">
+        <div className="space-y-4">
+          <div className="bg-red-900/20 border border-red-700/50 rounded-xl p-4 flex gap-3">
+            <AlertTriangle size={20} className="text-red-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-stone-200 text-sm font-semibold">Atenção: ação irreversível</p>
+              <p className="text-stone-400 text-sm mt-1">
+                Todos os <strong className="text-red-300">{history.length} registros</strong> do histórico
+                (concluídos e cancelados) serão permanentemente excluídos.
+              </p>
+              <p className="text-stone-500 text-xs mt-2">Esta ação não pode ser desfeita.</p>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setClearHistoryModal(false)} disabled={clearingHistory}>
+              Cancelar
+            </Button>
+            <Button variant="danger" onClick={confirmClearHistory} loading={clearingHistory}>
+              <Trash2 size={14} /> Limpar Tudo
+            </Button>
           </div>
         </div>
       </Modal>

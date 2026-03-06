@@ -28,7 +28,7 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
   // ─── Estado para editar agendamento ocupado ──────────────────────────────────
   const [bookingModal, setBookingModal] = useState(false);
   const [bookingTarget, setBookingTarget] = useState<PastoralCabinetSchedule | null>(null);
-  const [bookingForm, setBookingForm] = useState({ name: '', phone: '', subject: '' });
+  const [bookingForm, setBookingForm] = useState({ name: '', phone: '', subject: '', date: '', time: '', duration_minutes: 60 });
   const [bookingSaving, setBookingSaving] = useState(false);
   const [bookingError, setBookingError] = useState('');
 
@@ -36,7 +36,16 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
   const todayStr = today.toISOString().slice(0, 10);
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
-  const [formData, setFormData] = useState({ date: '', time: '', duration_minutes: 60 });
+
+  // ─── Formulário estendido com nome, telefone e assunto ───────────────────────
+  const [formData, setFormData] = useState({
+    date: '',
+    time: '',
+    duration_minutes: 60,
+    booked_by_name: '',
+    booked_by_phone: '',
+    booking_subject: '',
+  });
 
   useImperativeHandle(ref, () => ({
     openNew: (date?: string) => openNew(date),
@@ -55,15 +64,35 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
   }
 
   function openNew(date?: string) {
-    setFormData({ date: date || todayStr, time: '09:00', duration_minutes: 60 });
-    setError(''); setModalOpen(true);
+    setFormData({
+      date: date || todayStr,
+      time: '09:00',
+      duration_minutes: 60,
+      booked_by_name: '',
+      booked_by_phone: '',
+      booking_subject: '',
+    });
+    setError('');
+    setModalOpen(true);
   }
 
   async function handleSave() {
     if (!formData.date || !formData.time) { setError('Data e hora são obrigatórios'); return; }
     setSaving(true); setError('');
     try {
-      await api.post('/pastoral-cabinet/schedules', { ...formData, is_available: true });
+      // Se nome foi preenchido, já cria como ocupado com dados do agendamento
+      const hasBooking = formData.booked_by_name.trim() !== '';
+      await api.post('/pastoral-cabinet/schedules', {
+        date: formData.date,
+        time: formData.time,
+        duration_minutes: formData.duration_minutes,
+        is_available: !hasBooking,
+        ...(hasBooking && {
+          booked_by_name: formData.booked_by_name,
+          booked_by_phone: formData.booked_by_phone,
+          booking_subject: formData.booking_subject,
+        }),
+      });
       setModalOpen(false); loadSchedules();
     } catch (e) { setError(e instanceof Error ? e.message : 'Erro ao salvar');
     } finally { setSaving(false); }
@@ -83,6 +112,9 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
       name: (s as any).booked_by_name || '',
       phone: (s as any).booked_by_phone || '',
       subject: (s as any).booking_subject || '',
+      date: s.date,
+      time: s.time,
+      duration_minutes: s.duration_minutes,
     });
     setBookingError('');
     setBookingModal(true);
@@ -93,11 +125,27 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
     if (!bookingForm.name.trim()) { setBookingError('Nome é obrigatório'); return; }
     setBookingSaving(true); setBookingError('');
     try {
-      await api.put(`/pastoral-cabinet/bookings/${(bookingTarget as any).booking_id}`, {
-        booked_name: bookingForm.name,
-        booked_phone: bookingForm.phone,
-        subject: bookingForm.subject,
-      });
+      // Atualiza dados do agendamento (nome, telefone, assunto)
+      if ((bookingTarget as any).booking_id) {
+        await api.put(`/pastoral-cabinet/bookings/${(bookingTarget as any).booking_id}`, {
+          booked_name: bookingForm.name,
+          booked_phone: bookingForm.phone,
+          subject: bookingForm.subject,
+        });
+      }
+
+      // Atualiza horário/data/duração se mudou
+      const dateChanged = bookingForm.date !== bookingTarget.date;
+      const timeChanged = bookingForm.time !== bookingTarget.time;
+      const durChanged  = bookingForm.duration_minutes !== bookingTarget.duration_minutes;
+      if (dateChanged || timeChanged || durChanged) {
+        await api.put(`/pastoral-cabinet/schedules/${bookingTarget.id}`, {
+          date: bookingForm.date,
+          time: bookingForm.time,
+          duration_minutes: bookingForm.duration_minutes,
+        });
+      }
+
       setBookingModal(false);
       loadSchedules();
     } catch (e) {
@@ -339,13 +387,19 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
                       <span className="text-xs text-stone-500">{s.duration_minutes} min</span>
                     </div>
                     {(s as any).booked_by_name && (
-                      <p className="text-xs text-amber-400/80 mt-0.5 truncate">👤 {(s as any).booked_by_name}</p>
+                      <p className="text-xs text-amber-400/80 mt-0.5 truncate flex items-center gap-1">
+                        <User size={10} /> {(s as any).booked_by_name}
+                      </p>
                     )}
                     {(s as any).booked_by_phone && (
-                      <p className="text-xs text-stone-500 mt-0.5">📞 {(s as any).booked_by_phone}</p>
+                      <p className="text-xs text-stone-500 mt-0.5 flex items-center gap-1">
+                        <Phone size={10} /> {(s as any).booked_by_phone}
+                      </p>
                     )}
                     {(s as any).booking_subject && (
-                      <p className="text-xs text-stone-400 mt-0.5 truncate">💬 {(s as any).booking_subject}</p>
+                      <p className="text-xs text-stone-400 mt-0.5 truncate flex items-center gap-1">
+                        <MessageSquare size={10} /> {(s as any).booking_subject}
+                      </p>
                     )}
                   </div>
                   {/* Actions */}
@@ -369,10 +423,17 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
         </div>
       )}
 
-      {/* Modal: Adicionar */}
+      {/* ═══════════════════════════════════════════════════════════════════════
+          Modal: Adicionar Horário — agora com nome, telefone e assunto
+      ═══════════════════════════════════════════════════════════════════════ */}
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Adicionar Horário de Gabinete" size="md">
         <div className="space-y-4">
-          <p className="text-sm text-stone-400">Defina um novo horário disponível para os voluntários agendarem atendimento pastoral.</p>
+          <p className="text-sm text-stone-400">
+            Defina um novo horário disponível para os voluntários agendarem atendimento pastoral.
+            Preencha os dados do solicitante abaixo para já criar o horário como agendado.
+          </p>
+
+          {/* Data, Hora e Duração */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 block">Data *</label>
@@ -387,6 +448,7 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
                 className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500" />
             </div>
           </div>
+
           <div>
             <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 block">Duração *</label>
             <select value={formData.duration_minutes}
@@ -395,35 +457,23 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
               {DURATION_OPTIONS.map(d => <option key={d} value={d}>{d} minutos</option>)}
             </select>
           </div>
-          {error && <p className="text-red-400 text-xs bg-red-900/20 border border-red-700/40 rounded p-2">{error}</p>}
-          <div className="flex gap-3 pt-2">
-            <Button variant="outline" onClick={() => setModalOpen(false)} disabled={saving}>Cancelar</Button>
-            <Button onClick={handleSave} loading={saving}>Adicionar Horário</Button>
-          </div>
-        </div>
-      </Modal>
 
-      {/* Modal: Editar Agendamento Ocupado */}
-      <Modal open={bookingModal} onClose={() => setBookingModal(false)} title="Editar Agendamento" size="md">
-        {bookingTarget && (
-          <div className="space-y-4">
-            <div className="bg-stone-800/50 border border-stone-700 rounded-lg p-3 flex items-center gap-3 text-sm">
-              <Clock size={15} className="text-red-400" />
-              <span className="text-stone-300 font-medium">
-                {formatDate(bookingTarget.date)} às {bookingTarget.time.slice(0, 5)}
-              </span>
-              <span className="text-stone-500">· {bookingTarget.duration_minutes} min</span>
-            </div>
+          {/* Divisor */}
+          <div className="border-t border-stone-700 pt-3">
+            <p className="text-xs text-stone-500 uppercase tracking-wide mb-3 flex items-center gap-2">
+              <User size={12} className="text-amber-400" />
+              Dados do Solicitante <span className="text-stone-600 normal-case">(opcional — preencha para já agendar)</span>
+            </p>
 
             <div className="space-y-3">
               <div>
                 <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5 block">
-                  <User size={12} /> Nome *
+                  <User size={11} /> Nome
                 </label>
                 <input
                   type="text"
-                  value={bookingForm.name}
-                  onChange={e => setBookingForm(f => ({ ...f, name: e.target.value }))}
+                  value={formData.booked_by_name}
+                  onChange={e => setFormData(p => ({ ...p, booked_by_name: e.target.value }))}
                   placeholder="Nome do solicitante"
                   className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
                 />
@@ -431,12 +481,12 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
 
               <div>
                 <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5 block">
-                  <Phone size={12} /> Telefone
+                  <Phone size={11} /> Telefone
                 </label>
                 <input
                   type="text"
-                  value={bookingForm.phone}
-                  onChange={e => setBookingForm(f => ({ ...f, phone: e.target.value }))}
+                  value={formData.booked_by_phone}
+                  onChange={e => setFormData(p => ({ ...p, booked_by_phone: e.target.value }))}
                   placeholder="(11) 99999-0000"
                   className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
                 />
@@ -444,15 +494,131 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
 
               <div>
                 <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5 block">
-                  <MessageSquare size={12} /> Assunto
+                  <MessageSquare size={11} /> Assunto
                 </label>
                 <textarea
-                  value={bookingForm.subject}
-                  onChange={e => setBookingForm(f => ({ ...f, subject: e.target.value }))}
+                  value={formData.booking_subject}
+                  onChange={e => setFormData(p => ({ ...p, booking_subject: e.target.value }))}
                   placeholder="Descreva o motivo do atendimento..."
                   rows={3}
                   className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500 resize-none"
                 />
+              </div>
+            </div>
+          </div>
+
+          {/* Aviso quando nome é preenchido */}
+          {formData.booked_by_name.trim() && (
+            <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg p-2.5 flex items-center gap-2">
+              <CheckCircle size={14} className="text-amber-400 flex-shrink-0" />
+              <p className="text-amber-300 text-xs">
+                Horário será criado como <strong>agendado</strong> com os dados acima.
+              </p>
+            </div>
+          )}
+
+          {error && <p className="text-red-400 text-xs bg-red-900/20 border border-red-700/40 rounded p-2">{error}</p>}
+
+          <div className="flex gap-3 pt-2">
+            <Button variant="outline" onClick={() => setModalOpen(false)} disabled={saving}>Cancelar</Button>
+            <Button onClick={handleSave} loading={saving}>
+              {formData.booked_by_name.trim() ? 'Adicionar e Agendar' : 'Adicionar Horário'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          Modal: Editar Agendamento Ocupado — com edição de nome, telefone,
+          assunto E também data/hora/duração
+      ═══════════════════════════════════════════════════════════════════════ */}
+      <Modal open={bookingModal} onClose={() => setBookingModal(false)} title="Editar Agendamento" size="md">
+        {bookingTarget && (
+          <div className="space-y-4">
+
+            {/* Seção: Dados de Horário */}
+            <div>
+              <p className="text-xs text-stone-500 uppercase tracking-wide mb-3 flex items-center gap-2">
+                <Clock size={12} className="text-amber-400" /> Horário
+              </p>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 block">Data</label>
+                  <input
+                    type="date"
+                    value={bookingForm.date}
+                    min={todayStr}
+                    onChange={e => setBookingForm(f => ({ ...f, date: e.target.value }))}
+                    className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 block">Hora</label>
+                  <input
+                    type="time"
+                    value={bookingForm.time}
+                    onChange={e => setBookingForm(f => ({ ...f, time: e.target.value }))}
+                    className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 block">Duração</label>
+                  <select
+                    value={bookingForm.duration_minutes}
+                    onChange={e => setBookingForm(f => ({ ...f, duration_minutes: parseInt(e.target.value) }))}
+                    className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+                  >
+                    {DURATION_OPTIONS.map(d => <option key={d} value={d}>{d} min</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Divisor */}
+            <div className="border-t border-stone-700 pt-3">
+              <p className="text-xs text-stone-500 uppercase tracking-wide mb-3 flex items-center gap-2">
+                <User size={12} className="text-amber-400" /> Dados do Solicitante
+              </p>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5 block">
+                    <User size={12} /> Nome *
+                  </label>
+                  <input
+                    type="text"
+                    value={bookingForm.name}
+                    onChange={e => setBookingForm(f => ({ ...f, name: e.target.value }))}
+                    placeholder="Nome do solicitante"
+                    className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5 block">
+                    <Phone size={12} /> Telefone
+                  </label>
+                  <input
+                    type="text"
+                    value={bookingForm.phone}
+                    onChange={e => setBookingForm(f => ({ ...f, phone: e.target.value }))}
+                    placeholder="(11) 99999-0000"
+                    className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5 block">
+                    <MessageSquare size={12} /> Assunto
+                  </label>
+                  <textarea
+                    value={bookingForm.subject}
+                    onChange={e => setBookingForm(f => ({ ...f, subject: e.target.value }))}
+                    placeholder="Descreva o motivo do atendimento..."
+                    rows={3}
+                    className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500 resize-none"
+                  />
+                </div>
               </div>
             </div>
 
@@ -460,7 +626,7 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
 
             <div className="flex gap-3 pt-1">
               <Button variant="outline" onClick={() => setBookingModal(false)} disabled={bookingSaving}>Cancelar</Button>
-              <Button onClick={saveBookingDetails} loading={bookingSaving}>Salvar</Button>
+              <Button onClick={saveBookingDetails} loading={bookingSaving}>Salvar Alterações</Button>
             </div>
           </div>
         )}
