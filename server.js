@@ -719,7 +719,6 @@ app.get('/api/pastoral-cabinet/availability/:month', auth, async (req, res) => {
   });
 
   // Gera todos os dias do mês com flag hasAvailable
-  const [year, mon] = month.split('-').map(Number);
   const daysInMonth = new Date(year, mon, 0).getDate();
   const result = [];
   for (let d = 1; d <= daysInMonth; d++) {
