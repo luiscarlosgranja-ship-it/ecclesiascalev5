@@ -510,49 +510,93 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
   const { type, cult_id, month } = req.body;
   const today = new Date().toISOString().slice(0, 10);
 
-  // Busca cultos Agendados ou Publicados (não Travados)
+  // ── 1. Busca tudo de uma vez (4 queries paralelas) ───────────────────────────
   let cultsQuery = db.from('cults').select('*').in('status', ['Agendado', 'Publicado']);
   if (type === 'month' && month) cultsQuery = cultsQuery.like('date', `${month}%`);
-  else if (cult_id) cultsQuery = cultsQuery.eq('id', cult_id);
-  else cultsQuery = cultsQuery.gte('date', today);
+  else if (cult_id)              cultsQuery = cultsQuery.eq('id', cult_id);
+  else                           cultsQuery = cultsQuery.gte('date', today);
 
-  const { data: cults } = await cultsQuery;
-  const { data: members } = await db.from('members').select('*').eq('is_active', true).eq('status', 'Ativo');
-  const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
+  const [
+    { data: cults },
+    { data: members },
+    { data: sectors },
+    { data: existingScales },
+  ] = await Promise.all([
+    cultsQuery,
+    db.from('members').select('id, name, department_id, max_per_week').eq('is_active', true).eq('status', 'Ativo'),
+    db.from('sectors').select('id').eq('is_active', true),
+    db.from('scales').select('id, cult_id, member_id, sector_id, locked'),
+  ]);
 
-  let created = 0;
+  if (!cults?.length || !members?.length || !sectors?.length) {
+    return res.json({ message: '0 escala(s) gerada(s) — verifique cultos, membros e setores ativos' });
+  }
 
-  for (const cult of cults || []) {
+  // ── 2. Monta índices em memória para lookup O(1) ──────────────────────────────
+  // Escalas já existentes: "cult_id:member_id" → true
+  const alreadyScaled = new Set(existingScales?.map(s => `${s.cult_id}:${s.member_id}`) || []);
+
+  // Vagas travadas por setor: "cult_id:sector_id" → true
+  const lockedSlots = new Set(
+    existingScales?.filter(s => s.locked).map(s => `${s.cult_id}:${s.sector_id}`) || []
+  );
+
+  // Contagem mensal por membro: "member_id:yyyy-mm" → count
+  const monthlyCount = new Map<string, number>();
+  for (const s of existingScales || []) {
+    const cult = cults.find(c => c.id === s.cult_id);
+    if (!cult) continue;
+    const key = `${s.member_id}:${cult.date.slice(0, 7)}`;
+    monthlyCount.set(key, (monthlyCount.get(key) || 0) + 1);
+  }
+
+  // Setor já preenchido neste culto (não travado): "cult_id:sector_id" → true
+  const filledSlots = new Set(existingScales?.map(s => `${s.cult_id}:${s.sector_id}`) || []);
+
+  // ── 3. Embaralha membros para distribuição justa ─────────────────────────────
+  const shuffled = [...members].sort(() => Math.random() - 0.5);
+
+  // ── 4. Gera escalas em memória ───────────────────────────────────────────────
+  const toInsert: { cult_id: number; member_id: number; sector_id: number }[] = [];
+
+  for (const cult of cults) {
     const monthStr = cult.date.slice(0, 7);
-    for (const sector of sectors || []) {
-      for (const member of members || []) {
-        // Respeita vagas já travadas — não substitui
-        const { data: alreadyInCult } = await db.from('scales')
-          .select('id, locked').eq('cult_id', cult.id).eq('member_id', member.id).maybeSingle();
-        if (alreadyInCult) continue;
 
-        // Verifica vaga travada neste setor/culto
-        const { data: lockedSlot } = await db.from('scales')
-          .select('id').eq('cult_id', cult.id).eq('sector_id', sector.id).eq('locked', true).maybeSingle();
-        if (lockedSlot) continue;
+    for (const sector of sectors) {
+      // Setor já preenchido (travado ou já escalado)?
+      if (lockedSlots.has(`${cult.id}:${sector.id}`)) continue;
+      if (filledSlots.has(`${cult.id}:${sector.id}`)) continue;
 
-        // Respeita limite semanal (max_per_week, padrão 3)
+      for (const member of shuffled) {
+        // Já escalado neste culto?
+        if (alreadyScaled.has(`${cult.id}:${member.id}`)) continue;
+
+        // Limite mensal
         const maxPerWeek = member.max_per_week ?? 3;
-        const { count: monthCount } = await db.from('scales')
-          .select('*, cults!inner(date)', { count: 'exact', head: true })
-          .eq('member_id', member.id)
-          .like('cults.date', `${monthStr}%`);
+        const monthKey = `${member.id}:${monthStr}`;
+        if ((monthlyCount.get(monthKey) || 0) >= maxPerWeek) continue;
 
-        if (monthCount >= maxPerWeek) continue;
+        // ✅ Escalar!
+        toInsert.push({ cult_id: cult.id, member_id: member.id, sector_id: sector.id });
 
-        await db.from('scales').insert({ cult_id: cult.id, member_id: member.id, sector_id: sector.id });
-        created++;
-        break; // one member per sector per cult
+        // Atualiza índices em memória para próximas iterações
+        alreadyScaled.add(`${cult.id}:${member.id}`);
+        filledSlots.add(`${cult.id}:${sector.id}`);
+        monthlyCount.set(monthKey, (monthlyCount.get(monthKey) || 0) + 1);
+        break;
       }
     }
   }
 
-  res.json({ message: `${created} escala(s) gerada(s)` });
+  // ── 5. Insere tudo de uma vez em batch ───────────────────────────────────────
+  if (toInsert.length > 0) {
+    const BATCH = 100;
+    for (let i = 0; i < toInsert.length; i += BATCH) {
+      await db.from('scales').insert(toInsert.slice(i, i + BATCH));
+    }
+  }
+
+  res.json({ message: `${toInsert.length} escala(s) gerada(s)` });
 });
 
 // ─── Swaps ────────────────────────────────────────────────────────────────────
