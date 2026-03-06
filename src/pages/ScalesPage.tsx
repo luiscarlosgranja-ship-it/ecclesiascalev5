@@ -5,9 +5,6 @@ import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
 import { getSupabase } from '../utils/supabaseClient';
 import type { AuthUser, Scale, Cult, Member, Sector, CultType } from '../types';
-
-// Extend CultType locally to include default_day
-type CultTypeEx = CultType & { default_day?: number | null };
 import { isAdmin, isLeader, isSuperAdmin } from '../utils/permissions';
 import { exportScalePDF } from '../utils/pdf';
 
@@ -43,16 +40,10 @@ export default function ScalesPage({ user }: Props) {
   const [collapsedBlocks, setCollapsedBlocks] = useState<Set<string>>(new Set());
 
   const [autoModal, setAutoModal] = useState(false);
-  const [autoMonth, setAutoMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [autoSpecificCult, setAutoSpecificCult] = useState<number | null>(null);
   const [fillModal, setFillModal] = useState(false);
   const [fillLoading, setFillLoading] = useState(false);
   const [fillMsg, setFillMsg] = useState('');
-  const [autoType, setAutoType] = useState<'specific' | 'standard' | 'thematic'>('specific');
-  const [autoThematicCult, setAutoThematicCult] = useState<number | null>(null);
-  const [autoStandardType, setAutoStandardType] = useState<number | null>(null);
-  const [autoStandardDepts, setAutoStandardDepts] = useState<number[]>([]);
-  const [fillDone, setFillDone] = useState(false);
+  const [autoType, setAutoType] = useState<'month' | 'standard' | 'thematic'>('month');
   const [addModal, setAddModal] = useState(false);
   const [newCultModal, setNewCultModal] = useState(false);
   const [newScale, setNewScale] = useState({ member_id: '', sector_id: '' });
@@ -86,7 +77,7 @@ export default function ScalesPage({ user }: Props) {
   );
   const { data: members } = useApi<Member[]>('/members?is_active=1');
   const { data: sectors } = useApi<Sector[]>('/sectors?is_active=1');
-  const { data: cultTypes } = useApi<CultTypeEx[]>('/cult_types');
+  const { data: cultTypes } = useApi<CultType[]>('/cult_types');
 
   const availableCults = cults || [];
 
@@ -164,42 +155,27 @@ export default function ScalesPage({ user }: Props) {
     setAutoModal(true);
     setAutoResult(null);
     setError('');
-    const defaultMonth = selectedCultData
-      ? selectedCultData.date.slice(0, 7)
-      : new Date().toISOString().slice(0, 7);
-    setAutoMonth(defaultMonth);
-    setAutoSpecificCult(selectedCult);
   }
 
   function closeAutoModal() {
     setAutoModal(false);
     setAutoResult(null);
     setError('');
-    setAutoThematicCult(null);
-    setAutoStandardDepts([]);
-    setAutoStandardType(null);
   }
 
   const AUTO_LABELS: Record<string, string> = {
+    month: 'Mês Inteiro',
     standard: 'Cultos Padrão',
     thematic: 'Cultos Temáticos',
-    specific: 'Culto Específico',
   };
 
   async function generateAuto() {
-    if (autoType === 'specific' && !autoSpecificCult) { setError('Selecione um culto'); return; }
-    if (autoType === 'thematic' && !autoThematicCult) { setError('Selecione um culto temático'); return; }
-    if (autoType === 'standard' && !autoStandardType) { setError('Selecione um tipo de culto padrão'); return; }
+    if (!selectedCult && autoType !== 'month') { setError('Selecione um culto antes de gerar'); return; }
     setSaving(true); setError(''); setAutoResult(null);
     try {
-      let payload: Record<string, any>;
-      if (autoType === 'specific') {
-        payload = { type: 'standard', cult_id: autoSpecificCult };
-      } else if (autoType === 'thematic') {
-        payload = { type: 'thematic', cult_id: autoThematicCult };
-      } else {
-        payload = { type: 'standard', type_id: autoStandardType };
-      }
+      const payload = autoType === 'month'
+        ? { type: 'month', month: new Date().toISOString().slice(0, 7) }
+        : { type: autoType, cult_id: selectedCult };
 
       const res = await api.post<{ message?: string; created?: number; cults_count?: number; scales_count?: number }>(
         '/scales/auto-generate', payload
@@ -214,8 +190,12 @@ export default function ScalesPage({ user }: Props) {
         label: AUTO_LABELS[autoType],
       });
 
-      refetchScales();
-      fetchDeptBlocks();
+      if (autoType !== 'month') {
+        refetchScales();
+        fetchDeptBlocks();
+      } else {
+        refetchCults();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao gerar escala');
     } finally { setSaving(false); }
@@ -227,32 +207,51 @@ export default function ScalesPage({ user }: Props) {
   }
 
   async function removeScale(id: number) {
-    if (!confirm('Remover este voluntário da escala?')) return;
+    if (!confirm('Remover desta escala? O membro ficará disponível novamente.')) return;
+    const remaining = (scales || []).filter(s => s.id !== id);
+    const cultToDelete = remaining.length === 0 ? selectedCult : null;
+    if (cultToDelete) {
+      suppressRealtimeRef.current = true;
+      setSelectedCult(null);
+      setDeptBlocks([]);
+    }
     try {
       await api.delete(`/scales/${id}`);
-      refetchScales();
-      fetchDeptBlocks();
+      if (cultToDelete) {
+        await api.delete(`/cults/${cultToDelete}`);
+        await refetchCults();
+      } else {
+        refetchScales();
+        fetchDeptBlocks();
+      }
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Erro ao remover voluntário');
+      if (cultToDelete) setSelectedCult(cultToDelete);
+      alert(e instanceof Error ? e.message : 'Erro ao remover membro');
+    } finally {
+      if (cultToDelete) setTimeout(() => { suppressRealtimeRef.current = false; }, 1500);
     }
   }
 
   async function deleteEntireScale() {
     if (!selectedCult) return;
     setDeletingScale(true);
+    const cultToDelete = selectedCult;
     try {
-      const freshScales = await api.get<{ id: number }[]>(`/scales?cult_id=${selectedCult}`);
+      const freshScales = await api.get<{ id: number }[]>(`/scales?cult_id=${cultToDelete}`);
+      suppressRealtimeRef.current = true;
       if (freshScales && freshScales.length > 0) {
         await Promise.all(freshScales.map(s => api.delete(`/scales/${s.id}`)));
       }
+      await api.delete(`/cults/${cultToDelete}`);
       setDeleteScaleModal(false);
+      setSelectedCult(null);
       setDeptBlocks([]);
-      refetchScales();
-      fetchDeptBlocks();
+      await refetchCults();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Erro ao remover escala');
     } finally {
       setDeletingScale(false);
+      setTimeout(() => { suppressRealtimeRef.current = false; }, 1500);
     }
   }
 
@@ -315,31 +314,64 @@ export default function ScalesPage({ user }: Props) {
 
   async function handlePrint() {
     if (!scales || !selectedCultData) return;
-    const { data: depts } = await api.get<Array<{ id: number; name: string }>>('/public/departments');
-    const allDepts = depts || [];
-    setAvailableDepartments(allDepts);
-    setSelectedDepartmentsForPrint(allDepts.map(d => d.id));
+    
+    // Buscar TODOS os departamentos do banco
+    try {
+      const { data: allDepts } = await api.get<Array<{ id: number; name: string }>>('/departments');
+      
+      if (allDepts && allDepts.length > 0) {
+        setAvailableDepartments(allDepts);
+        // Selecionar todos por padrão
+        setSelectedDepartmentsForPrint(allDepts.map(d => d.id));
+      }
+    } catch (err) {
+      console.error('Erro ao buscar departamentos:', err);
+      // Se falhar, usar departamentos padrão
+      const defaultDepts = [
+        { id: 1, name: 'Diáconos / Obreiros' },
+        { id: 2, name: 'Mídia' },
+        { id: 3, name: 'Infantil' },
+        { id: 4, name: 'Louvor' },
+        { id: 5, name: 'Una' },
+        { id: 6, name: 'Bem-Vindos' },
+      ];
+      setAvailableDepartments(defaultDepts);
+      setSelectedDepartmentsForPrint(defaultDepts.map(d => d.id));
+    }
+    
     setPrintingMode('cult');
     setPrintConfigModal(true);
   }
 
   async function handlePrintMonth() {
     const month = new Date().toISOString().slice(0, 7);
-    const monthCults = availableCults.filter(c => c.date.startsWith(month));
+    const monthCults = (availableCults || []).filter(c => c.date.startsWith(month));
     if (monthCults.length === 0) return;
     
-    const token = localStorage.getItem('token') || '';
-    const results = await Promise.all(
-      monthCults.map(c =>
-        fetch(`/api/scales?cult_id=${c.id}`, { headers: { Authorization: `Bearer ${token}` } })
-          .then(r => r.json()).then((s: Scale[]) => s).catch(() => [] as Scale[])
-      )
-    );
+    // Buscar TODOS os departamentos do banco
+    try {
+      const { data: allDepts } = await api.get<Array<{ id: number; name: string }>>('/departments');
+      
+      if (allDepts && allDepts.length > 0) {
+        setAvailableDepartments(allDepts);
+        // Selecionar todos por padrão
+        setSelectedDepartmentsForPrint(allDepts.map(d => d.id));
+      }
+    } catch (err) {
+      console.error('Erro ao buscar departamentos:', err);
+      // Se falhar, usar departamentos padrão
+      const defaultDepts = [
+        { id: 1, name: 'Diáconos / Obreiros' },
+        { id: 2, name: 'Mídia' },
+        { id: 3, name: 'Infantil' },
+        { id: 4, name: 'Louvor' },
+        { id: 5, name: 'Una' },
+        { id: 6, name: 'Bem-Vindos' },
+      ];
+      setAvailableDepartments(defaultDepts);
+      setSelectedDepartmentsForPrint(defaultDepts.map(d => d.id));
+    }
     
-    const { data: depts } = await api.get<Array<{ id: number; name: string }>>('/public/departments');
-    const allDepts = depts || [];
-    setAvailableDepartments(allDepts);
-    setSelectedDepartmentsForPrint(allDepts.map(d => d.id));
     setPrintingMode('month');
     setPrintConfigModal(true);
   }
@@ -712,24 +744,31 @@ export default function ScalesPage({ user }: Props) {
                 </div>
 
                 {/* Contadores */}
-                <div className={`grid gap-3 ${autoResult.created > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                  <div className="bg-amber-900/30 rounded-lg p-3 text-center">
-                    <p className="text-amber-200 text-2xl font-bold">{autoResult.cultsCount ?? 1}</p>
-                    <p className="text-amber-400 text-xs mt-0.5">
-                      {(autoResult.cultsCount ?? 1) === 1 ? 'culto processado' : 'cultos processados'}
-                    </p>
-                  </div>
-                  {autoResult.created > 0 && (
-                    <div className="bg-emerald-900/30 rounded-lg p-3 text-center">
-                      <p className="text-emerald-200 text-2xl font-bold">{autoResult.created}</p>
-                      <p className="text-emerald-400 text-xs mt-0.5">
-                        {autoResult.created === 1 ? 'voluntário alocado' : 'voluntários alocados'}
+                <div className={`grid gap-3 ${autoResult.cultsCount !== undefined ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  {autoResult.cultsCount !== undefined && (
+                    <div className="bg-amber-900/30 rounded-lg p-3 text-center">
+                      <p className="text-amber-200 text-2xl font-bold">{autoResult.cultsCount}</p>
+                      <p className="text-amber-400 text-xs mt-0.5">
+                        {autoResult.cultsCount === 1 ? 'culto processado' : 'cultos processados'}
                       </p>
                     </div>
                   )}
+                  <div className="bg-emerald-900/30 rounded-lg p-3 text-center">
+                    <p className="text-emerald-200 text-2xl font-bold">{autoResult.created}</p>
+                    <p className="text-emerald-400 text-xs mt-0.5">
+                      {autoResult.created === 1 ? 'escala gerada' : 'escalas geradas'}
+                    </p>
+                  </div>
                 </div>
+
+                {/* Mensagem complementar por tipo */}
                 <p className="text-stone-400 text-xs leading-relaxed">
-                  Selecione um culto e use <strong className="text-amber-400">Preencher Automático</strong> para alocar voluntários, ou adicione-os manualmente.
+                  {autoResult.label === 'Mês Inteiro' &&
+                    'Todos os cultos do mês foram processados e as escalas distribuídas respeitando o limite de 3x/mês por voluntário.'}
+                  {autoResult.label === 'Cultos Padrão' &&
+                    'As escalas dos cultos padrão foram geradas com a distribuição automática de voluntários.'}
+                  {autoResult.label === 'Cultos Temáticos' &&
+                    'As escalas dos cultos temáticos foram geradas com a distribuição automática de voluntários.'}
                 </p>
               </div>
 
@@ -744,91 +783,26 @@ export default function ScalesPage({ user }: Props) {
               </p>
               <div className="space-y-2">
                 {[
-                  { value: 'specific', label: 'Culto Específico', desc: 'Selecione qualquer culto da lista' },
-                  { value: 'standard', label: 'Cultos Padrão',    desc: 'Dom Manhã/Noite, Ter EDP, Qua Milagres/4D, Qui Vitória' },
-                  { value: 'thematic', label: 'Cultos Temáticos', desc: 'Cultos fora do calendário padrão (sem dia fixo)' },
+                  { value: 'month',    label: 'Mês Inteiro' },
+                  { value: 'standard', label: 'Cultos Padrão' },
+                  { value: 'thematic', label: 'Cultos Temáticos' },
                 ].map(opt => (
                   <label key={opt.value}
-                    className={`flex items-start gap-3 cursor-pointer p-3 rounded-lg border transition-all ${autoType === opt.value ? 'border-amber-500 bg-amber-500/10' : 'border-stone-700 hover:border-amber-600'}`}>
+                    className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-stone-700 hover:border-amber-600 transition-all">
                     <input type="radio" value={opt.value} checked={autoType === opt.value}
-                      onChange={() => setAutoType(opt.value as any)} className="accent-amber-500 mt-0.5" />
-                    <div>
-                      <p className="text-stone-200 text-sm">{opt.label}</p>
-                      <p className="text-stone-500 text-xs">{opt.desc}</p>
-                    </div>
+                      onChange={() => setAutoType(opt.value as any)} className="accent-amber-500" />
+                    <span className="text-stone-200 text-sm">{opt.label}</span>
                   </label>
                 ))}
               </div>
-
-              {/* Culto Específico — lista todos */}
-              {autoType === 'specific' && (
-                <div className="space-y-1">
-                  <label className="text-stone-400 text-xs">Selecione o culto</label>
-                  <select
-                    value={autoSpecificCult ?? ''}
-                    onChange={e => setAutoSpecificCult(e.target.value ? Number(e.target.value) : null)}
-                    className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
-                  >
-                    <option value="">Selecionar culto...</option>
-                    {availableCults.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name || c.type_name || 'Culto'} — {c.date} {c.time}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              {!selectedCult && autoType !== 'month' && (
+                <p className="text-amber-400 text-xs">⚠️ Para gerar Cultos Padrão ou Temáticos, selecione um culto na tela principal primeiro.</p>
               )}
-
-              {/* Cultos Temáticos — lista apenas não-padrão */}
-              {autoType === 'thematic' && (
-                <div className="space-y-1">
-                  <label className="text-stone-400 text-xs">Selecione o culto temático</label>
-                  <select
-                    value={autoThematicCult ?? ''}
-                    onChange={e => setAutoThematicCult(e.target.value ? Number(e.target.value) : null)}
-                    className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
-                  >
-                    <option value="">Selecionar culto temático...</option>
-                    {availableCults
-                      .filter(c => {
-                        const ct = (cultTypes || []).find(t => t.id === c.type_id);
-                        return !ct || ct.default_day === null || ct.default_day === undefined;
-                      })
-                      .map(c => (
-                        <option key={c.id} value={c.id}>
-                          {c.name || c.type_name || 'Culto'} — {c.date} {c.time}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Cultos Padrão — lista de tipos de culto com dia fixo */}
-              {autoType === 'standard' && (
-                <div className="space-y-1">
-                  <label className="text-stone-400 text-xs">Selecione o tipo de culto</label>
-                  <select
-                    value={autoStandardType ?? ''}
-                    onChange={e => setAutoStandardType(e.target.value ? Number(e.target.value) : null)}
-                    className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
-                  >
-                    <option value="">Selecionar tipo de culto...</option>
-                    {(cultTypes || [])
-                      .filter(ct => ct.default_day !== null && ct.default_day !== undefined)
-                      .map(ct => (
-                        <option key={ct.id} value={ct.id}>
-                          {ct.name}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-              )}
-
               {error && <p className="text-red-400 text-xs">{error}</p>}
               <div className="flex gap-3">
                 <Button variant="outline" onClick={closeAutoModal}>Cancelar</Button>
                 <Button onClick={generateAuto} loading={saving}
-                  disabled={(autoType === 'specific' && !autoSpecificCult) || (autoType === 'thematic' && !autoThematicCult) || (autoType === 'standard' && !autoStandardType)}>
+                  disabled={!selectedCult && autoType !== 'month'}>
                   Gerar
                 </Button>
               </div>
@@ -857,18 +831,12 @@ export default function ScalesPage({ user }: Props) {
           {fillMsg && (
             <p className={`text-sm font-medium ${fillMsg.startsWith('❌') ? 'text-red-400' : 'text-emerald-400'}`}>{fillMsg}</p>
           )}
-          {fillMsg && !fillMsg.startsWith('❌') ? (
-            <Button className="w-full" onClick={() => { setFillModal(false); setFillMsg(''); setFillDone(false); }}>
-              ✓ Concluir
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => { setFillModal(false); setFillMsg(''); }}>Cancelar</Button>
+            <Button onClick={fillCult} loading={fillLoading} disabled={!!fillMsg && !fillMsg.startsWith('❌')}>
+              <Zap size={15} /> Preencher
             </Button>
-          ) : (
-            <div className="flex gap-3">
-              <Button variant="outline" onClick={() => { setFillModal(false); setFillMsg(''); }}>Cancelar</Button>
-              <Button onClick={fillCult} loading={fillLoading}>
-                <Zap size={15} /> Preencher
-              </Button>
-            </div>
-          )}
+          </div>
         </div>
       </Modal>
 
@@ -880,7 +848,7 @@ export default function ScalesPage({ user }: Props) {
             <div>
               <p className="text-red-300 text-sm font-semibold">Ação irreversível</p>
               <p className="text-red-400/80 text-xs mt-1">
-                Todos os voluntários serão removidos desta escala. O culto permanece agendado. Esta ação não pode ser desfeita.
+                Todos os voluntários serão removidos desta escala e o culto será desfeito. Esta ação não pode ser desfeita.
               </p>
             </div>
           </div>
