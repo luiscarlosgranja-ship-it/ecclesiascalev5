@@ -32,23 +32,23 @@
 
 /* ── Tema claro ─────────────────────────────────────────────── */
 html.light {
-  --bg-base:        #f8f7f4;
-  --bg-surface:     #ffffff;
-  --bg-elevated:    #f5f4f1;
-  --bg-input:       #f0efe9;
-  --border-soft:    #e8e5de;
-  --border-subtle:  #f0ede6;
-  --text-primary:   #1c1917;
-  --text-secondary: #57534e;
-  --text-muted:     #a8a29e;
-  --text-faint:     #d6d0c8;
-  --accent:         #b45309;
-  --accent-soft:    #fffbeb;
-  --shadow-sm:      0 1px 3px rgba(0,0,0,.06);
-  --shadow-md:      0 4px 16px rgba(0,0,0,.08);
-  --shadow-lg:      0 12px 40px rgba(0,0,0,.10);
-  --scrollbar-track: #f0efe9;
-  --scrollbar-thumb: #d1cfc6;
+  --bg-base:        #f5f3ed;
+  --bg-surface:     #faf9f6;
+  --bg-elevated:    #eeeade;
+  --bg-input:       #f0ece2;
+  --border-soft:    #ddd8cc;
+  --border-subtle:  #e8e4da;
+  --text-primary:   #1a1a1a;
+  --text-secondary: #4a4540;
+  --text-muted:     #9a9088;
+  --text-faint:     #ccc8be;
+  --accent:         #c9a227;
+  --accent-soft:    #fdf6e0;
+  --shadow-sm:      0 1px 4px rgba(0,0,0,.08);
+  --shadow-md:      0 4px 18px rgba(0,0,0,.10);
+  --shadow-lg:      0 12px 40px rgba(0,0,0,.13);
+  --scrollbar-track: #eeeade;
+  --scrollbar-thumb: #ccc8be;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }

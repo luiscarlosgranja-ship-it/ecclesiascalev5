@@ -300,23 +300,23 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
 
         /* ── Variáveis de tema ── */
         :root {
-          --bg-base:       #f8f7f4;
-          --bg-surface:    #ffffff;
-          --bg-elevated:   #f5f4f1;
-          --bg-input:      #f0efe9;
-          --border-soft:   #e8e5de;
-          --border-subtle: #f0ede6;
-          --text-primary:  #1c1917;
-          --text-secondary:#57534e;
-          --text-muted:    #a8a29e;
-          --text-faint:    #d6d0c8;
-          --shadow-sm:     0 1px 3px rgba(0,0,0,.06);
-          --shadow-md:     0 4px 16px rgba(0,0,0,.08);
-          --shadow-lg:     0 12px 40px rgba(0,0,0,.10);
-          --accent:        #b45309;
-          --accent-soft:   #fffbeb;
-          --scrollbar-track: #f0efe9;
-          --scrollbar-thumb: #d1cfc6;
+          --bg-base:       #f5f3ed;
+          --bg-surface:    #faf9f6;
+          --bg-elevated:   #eeeade;
+          --bg-input:      #f0ece2;
+          --border-soft:   #ddd8cc;
+          --border-subtle: #e8e4da;
+          --text-primary:  #1a1a1a;
+          --text-secondary:#4a4540;
+          --text-muted:    #9a9088;
+          --text-faint:    #ccc8be;
+          --shadow-sm:     0 1px 4px rgba(0,0,0,.08);
+          --shadow-md:     0 4px 18px rgba(0,0,0,.10);
+          --shadow-lg:     0 12px 40px rgba(0,0,0,.13);
+          --accent:        #c9a227;
+          --accent-soft:   #fdf6e0;
+          --scrollbar-track: #eeeade;
+          --scrollbar-thumb: #ccc8be;
         }
         .dark {
           --bg-base:       #0d0d14;
@@ -391,7 +391,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
           style={{ display: 'flex', alignItems: 'center', gap: 9, marginRight: 20, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
           {logoUrl
             ? <img src={logoUrl} alt="Logo" style={{ width: 30, height: 30, borderRadius: 8, objectFit: 'contain' }} />
-            : <div style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(135deg,#92400e,#b45309)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(180,83,9,.25)' }}>
+            : <div style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(135deg,#a07c10,#c9a227)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(180,83,9,.25)' }}>
                 <span style={{ color: '#fef3c7', fontWeight: 800, fontSize: 13 }}>{(churchName || 'E')[0].toUpperCase()}</span>
               </div>
           }
@@ -464,7 +464,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border-soft)', borderRadius: 10, padding: '5px 10px', flexShrink: 0 }}>
-            <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'linear-gradient(135deg,#92400e,#b45309)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'linear-gradient(135deg,#a07c10,#c9a227)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <span style={{ color: '#fef3c7', fontSize: 10, fontWeight: 800 }}>{(user.name || user.email)[0].toUpperCase()}</span>
             </div>
             <div className="hidden sm:block">
