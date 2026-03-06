@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Plus, Printer, Zap, Trash2, CheckCircle, Repeat, Calendar, Lock, Unlock, Users } from 'lucide-react';
+import { Plus, Printer, Zap, Trash2, CheckCircle, Repeat, Calendar, Lock, Unlock, Users, ChevronDown } from 'lucide-react';
 import { Card, Button, Modal, Badge, Select, Spinner, Input } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
@@ -12,16 +12,30 @@ interface Props { user: AuthUser; }
 
 export default function ScalesPage({ user }: Props) {
   const [selectedCult, setSelectedCult] = useState<number | null>(null);
+
+  // Modal gerar automático
   const [autoModal, setAutoModal] = useState(false);
   const [autoType, setAutoType] = useState<'standard' | 'thematic'>('standard');
-  const [addModal, setAddModal] = useState(false);
-  const [newCultModal, setNewCultModal] = useState(false);
-  const [newScale, setNewScale] = useState({ member_id: '', sector_id: '' });
-  const [newCult, setNewCult] = useState({ type_id: '', name: '', date: '', time: '', sector_id: '' });
+  const [selectedDepts, setSelectedDepts] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
-  const [savingCult, setSavingCult] = useState(false);
   const [error, setError] = useState('');
+
+  // Modal imprimir mês
+  const [printModal, setPrintModal] = useState(false);
+  const [printDepts, setPrintDepts] = useState<number[]>([]);
+  const [printing, setPrinting] = useState(false);
+
+  // Modal nova escala
+  const [newCultModal, setNewCultModal] = useState(false);
+  const [newCult, setNewCult] = useState({ type_id: '', name: '', date: '', time: '' });
+  const [savingCult, setSavingCult] = useState(false);
   const [cultError, setCultError] = useState('');
+
+  // Modal adicionar voluntário
+  const [addModal, setAddModal] = useState(false);
+  const [newScale, setNewScale] = useState({ member_id: '', sector_id: '' });
+
+  // Modal troca
   const [swapModal, setSwapModal] = useState(false);
   const [swapScaleId, setSwapScaleId] = useState<number | null>(null);
   const [swapEmail, setSwapEmail] = useState('');
@@ -38,7 +52,19 @@ export default function ScalesPage({ user }: Props) {
   const { data: cultTypes } = useApi<CultType[]>('/cult_types');
 
   const availableCults = cults || [];
+  const allDepts = departments || [];
 
+  // Inicia seleção com todos os departamentos
+  useEffect(() => {
+    if (allDepts.length > 0 && selectedDepts.length === 0) {
+      setSelectedDepts(allDepts.map(d => d.id));
+    }
+    if (allDepts.length > 0 && printDepts.length === 0) {
+      setPrintDepts(allDepts.map(d => d.id));
+    }
+  }, [allDepts]);
+
+  // Realtime
   useEffect(() => {
     const sb = getSupabase();
     if (!sb) return;
@@ -49,6 +75,13 @@ export default function ScalesPage({ user }: Props) {
       .subscribe();
     return () => { sb.removeChannel(channel); };
   }, [refetchScales, refetchCults]);
+
+  // Map member_id → department_id para uso no PDF
+  const memberDeptMap = useMemo(() => {
+    const map = new Map<number, number | null>();
+    for (const m of members || []) map.set(m.id, m.department_id ?? null);
+    return map;
+  }, [members]);
 
   // Quadros agrupados por departamento → setor
   const boardsByDepartment = useMemo(() => {
@@ -63,7 +96,7 @@ export default function ScalesPage({ user }: Props) {
     }
     const boards: { dept: Department | null; sectorGroups: { sector: string; scales: Scale[] }[] }[] = [];
     for (const [deptId, deptScales] of deptMap) {
-      const dept = (departments || []).find(d => d.id === deptId) ?? null;
+      const dept = allDepts.find(d => d.id === deptId) ?? null;
       const sectorMap = new Map<string, Scale[]>();
       for (const s of deptScales) {
         const key = s.sector_name || 'Sem Setor';
@@ -73,18 +106,56 @@ export default function ScalesPage({ user }: Props) {
       boards.push({ dept, sectorGroups: Array.from(sectorMap.entries()).map(([sector, scls]) => ({ sector, scales: scls })) });
     }
     return boards.sort((a, b) => !a.dept ? 1 : !b.dept ? -1 : a.dept.name.localeCompare(b.dept.name));
-  }, [scales, members, departments]);
+  }, [scales, members, allDepts]);
 
+  // ─── Gerar automático ────────────────────────────────────────────────────────
   async function generateAuto() {
     if (!selectedCult) { setError('Selecione um culto primeiro'); return; }
     setSaving(true); setError('');
     try {
-      await api.post('/scales/auto-generate', { type: autoType, cult_id: selectedCult });
-      setAutoModal(false); refetchScales();
-    } catch (e) { setError(e instanceof Error ? e.message : 'Erro ao gerar escala'); }
-    finally { setSaving(false); }
+      await api.post('/scales/auto-generate', {
+        type: autoType,
+        cult_id: selectedCult,
+        department_ids: selectedDepts.length > 0 ? selectedDepts : undefined,
+      });
+      setAutoModal(false);
+      refetchScales();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao gerar escala');
+    } finally { setSaving(false); }
   }
 
+  // ─── Imprimir mês ────────────────────────────────────────────────────────────
+  async function handlePrintMonth() {
+    setPrinting(true);
+    try {
+      const month = new Date().toISOString().slice(0, 7);
+      const monthCults = availableCults.filter(c => c.date.startsWith(month));
+      if (!monthCults.length) return;
+      const stored = localStorage.getItem('ecclesia_user');
+      const token = stored ? JSON.parse(stored).token : '';
+      const results = await Promise.all(monthCults.map(c =>
+        fetch(`/api/scales?cult_id=${c.id}`, { headers: { Authorization: `Bearer ${token}` } })
+          .then(r => r.json()).then((s: Scale[]) => s).catch(() => [] as Scale[])
+      ));
+      const allScales = results.flat();
+      const deptsForPDF = allDepts.filter(d => printDepts.includes(d.id));
+      await exportScalePDF(allScales, null, `Escalas — ${month}`, allScales, monthCults, deptsForPDF, memberDeptMap);
+      setPrintModal(false);
+    } finally { setPrinting(false); }
+  }
+
+  // ─── Imprimir culto único ─────────────────────────────────────────────────────
+  async function handlePrint() {
+    if (!scales || !selectedCultData) return;
+    await exportScalePDF(
+      scales,
+      selectedCultData,
+      `Escala — ${selectedCultData.type_name || selectedCultData.name || 'Culto'}`,
+    );
+  }
+
+  // ─── Ações de escala ─────────────────────────────────────────────────────────
   async function confirmScale(id: number) { await api.put(`/scales/${id}/confirm`, {}); refetchScales(); }
   async function toggleLock(s: Scale) { await api.put(`/scales/${s.id}/lock`, { locked: !s.locked }); refetchScales(); }
   async function removeScale(id: number) {
@@ -107,13 +178,12 @@ export default function ScalesPage({ user }: Props) {
     setSavingCult(true); setCultError('');
     try {
       const cult = await api.post<{ id: number }>('/cults', { type_id: newCult.type_id ? Number(newCult.type_id) : null, name: newCult.name || null, date: newCult.date, time: newCult.time, status: 'Agendado' });
-      setSelectedCult(cult.id); setNewCultModal(false); setNewCult({ type_id: '', name: '', date: '', time: '', sector_id: '' }); refetchCults();
+      setSelectedCult(cult.id); setNewCultModal(false); setNewCult({ type_id: '', name: '', date: '', time: '' }); refetchCults();
     } catch (e) { setCultError(e instanceof Error ? e.message : 'Erro ao criar escala'); }
     finally { setSavingCult(false); }
   }
 
   function openSwapModal(scaleId: number) { setSwapScaleId(scaleId); setSwapEmail(''); setSwapMsg(''); setSwapModal(true); }
-
   async function confirmSwap() {
     if (!swapScaleId) return;
     setSwapSaving(true); setSwapMsg('');
@@ -121,32 +191,41 @@ export default function ScalesPage({ user }: Props) {
       await api.post('/swaps', { scale_id: swapScaleId, suggested_email: swapEmail.trim() || undefined });
       setSwapMsg('✅ Solicitação enviada com sucesso!');
       setTimeout(() => { setSwapModal(false); setSwapScaleId(null); }, 1500);
-    } catch (e) { setSwapMsg('❌ ' + (e instanceof Error ? e.message : 'Erro ao solicitar troca')); }
+    } catch (e) { setSwapMsg('❌ ' + (e instanceof Error ? e.message : 'Erro')); }
     finally { setSwapSaving(false); }
+  }
+
+  function toggleDept(id: number, list: number[], setter: (v: number[]) => void) {
+    setter(list.includes(id) ? list.filter(x => x !== id) : [...list, id]);
   }
 
   const selectedCultData = availableCults.find(c => c.id === selectedCult);
   const canRemove = user.role === 'SuperAdmin' || user.role === 'Admin';
-
-  async function handlePrint() {
-    if (!scales || !selectedCultData) return;
-    await exportScalePDF(scales, selectedCultData, `Escala — ${selectedCultData.type_name || selectedCultData.name || 'Culto'}`);
-  }
-
-  async function handlePrintMonth() {
-    const month = new Date().toISOString().slice(0, 7);
-    const monthCults = availableCults.filter(c => c.date.startsWith(month));
-    if (!monthCults.length) return;
-    const stored = localStorage.getItem('ecclesia_user');
-    const token = stored ? JSON.parse(stored).token : '';
-    const results = await Promise.all(monthCults.map(c =>
-      fetch(`/api/scales?cult_id=${c.id}`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.json()).then((s: Scale[]) => s).catch(() => [] as Scale[])
-    ));
-    await exportScalePDF(results.flat(), null, `Escalas — ${month}`, results.flat(), monthCults);
-  }
-
   function getCultLabel(c: Cult) { return `${c.name || c.type_name || 'Culto'} — ${c.date} ${c.time}`; }
+
+  // Componente de seleção de departamentos reutilizável
+  function DeptCheckboxList({ list, setter, label }: { list: number[]; setter: (v: number[]) => void; label: string }) {
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-stone-400 uppercase tracking-wide">{label}</span>
+          <div className="flex gap-2">
+            <button onClick={() => setter(allDepts.map(d => d.id))} className="text-xs text-amber-400 hover:text-amber-300">Todos</button>
+            <span className="text-stone-600">|</span>
+            <button onClick={() => setter([])} className="text-xs text-stone-400 hover:text-stone-300">Nenhum</button>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {allDepts.map(d => (
+            <label key={d.id} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all text-sm ${list.includes(d.id) ? 'border-amber-600 bg-amber-900/20 text-stone-100' : 'border-stone-700 text-stone-400 hover:border-stone-500'}`}>
+              <input type="checkbox" checked={list.includes(d.id)} onChange={() => toggleDept(d.id, list, setter)} className="accent-amber-500" />
+              {d.name}
+            </label>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -175,7 +254,7 @@ export default function ScalesPage({ user }: Props) {
               <Printer size={16} /> Imprimir Culto
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={handlePrintMonth}>
+          <Button variant="outline" size="sm" onClick={() => setPrintModal(true)}>
             <Printer size={16} /> Imprimir Mês
           </Button>
         </div>
@@ -217,18 +296,13 @@ export default function ScalesPage({ user }: Props) {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {boardsByDepartment.map(({ dept, sectorGroups }) => (
                 <Card key={dept?.id ?? 'sem-dept'} className="overflow-hidden">
-                  {/* Cabeçalho do departamento */}
                   <div className="flex items-center gap-2 px-4 py-3 bg-stone-800 border-b border-stone-700">
                     <div className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
-                    <h3 className="text-sm font-semibold text-stone-100 truncate">
-                      {dept?.name ?? 'Sem Departamento'}
-                    </h3>
+                    <h3 className="text-sm font-semibold text-stone-100 truncate">{dept?.name ?? 'Sem Departamento'}</h3>
                     <span className="ml-auto text-xs text-stone-500 shrink-0">
                       {sectorGroups.reduce((acc, sg) => acc + sg.scales.length, 0)} membro(s)
                     </span>
                   </div>
-
-                  {/* Grupos por setor */}
                   <div className="divide-y divide-stone-800/60">
                     {sectorGroups.map(({ sector, scales: sScales }) => (
                       <div key={sector}>
@@ -242,10 +316,7 @@ export default function ScalesPage({ user }: Props) {
                               <span className="text-sm text-stone-200 truncate">{s.member_name}</span>
                             </div>
                             <div className="flex items-center gap-1 shrink-0 ml-2">
-                              <Badge
-                                label={s.status}
-                                color={s.status === 'Confirmado' ? 'green' : s.status === 'Pendente' ? 'yellow' : s.status === 'Troca' ? 'blue' : 'red'}
-                              />
+                              <Badge label={s.status} color={s.status === 'Confirmado' ? 'green' : s.status === 'Pendente' ? 'yellow' : s.status === 'Troca' ? 'blue' : 'red'} />
                               {s.status === 'Pendente' && (
                                 <button onClick={() => confirmScale(s.id)} title="Confirmar" className="text-emerald-400 hover:text-emerald-300 p-0.5 transition-colors">
                                   <CheckCircle size={13} />
@@ -278,7 +349,60 @@ export default function ScalesPage({ user }: Props) {
         </>
       )}
 
-      {/* Modal: Troca */}
+      {/* ── Modal: Gerar Automático ── */}
+      <Modal open={autoModal} onClose={() => setAutoModal(false)} title="Gerar Escala Automática" size="md">
+        <div className="space-y-5">
+          {!selectedCult && (
+            <div className="bg-amber-900/30 border border-amber-700 rounded-lg p-3 text-amber-300 text-xs">
+              ⚠️ Selecione um culto antes de gerar.
+            </div>
+          )}
+
+          {/* Tipo */}
+          <div className="space-y-2">
+            <span className="text-xs text-stone-400 uppercase tracking-wide">Tipo de geração</span>
+            {[
+              { value: 'standard', label: '📋 Cultos Padrão', desc: 'Para cultos do tipo padrão agendados' },
+              { value: 'thematic', label: '🎉 Cultos Temáticos', desc: 'Para cultos temáticos agendados' },
+            ].map(opt => (
+              <label key={opt.value} className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-stone-700 hover:border-amber-600 transition-all">
+                <input type="radio" value={opt.value} checked={autoType === opt.value} onChange={() => setAutoType(opt.value as any)} className="accent-amber-500 mt-0.5" />
+                <div>
+                  <span className="text-stone-200 text-sm font-medium">{opt.label}</span>
+                  <p className="text-stone-500 text-xs mt-0.5">{opt.desc}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+
+          {/* Departamentos */}
+          <DeptCheckboxList list={selectedDepts} setter={setSelectedDepts} label="Departamentos a escalar" />
+
+          {error && <p className="text-red-400 text-xs">{error}</p>}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setAutoModal(false)}>Cancelar</Button>
+            <Button onClick={generateAuto} loading={saving} disabled={!selectedCult || selectedDepts.length === 0}>
+              Gerar Escala
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Modal: Imprimir Mês ── */}
+      <Modal open={printModal} onClose={() => setPrintModal(false)} title="Imprimir Escalas do Mês" size="md">
+        <div className="space-y-5">
+          <p className="text-stone-400 text-sm">Selecione os departamentos que devem aparecer no PDF do mês.</p>
+          <DeptCheckboxList list={printDepts} setter={setPrintDepts} label="Departamentos no PDF" />
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setPrintModal(false)}>Cancelar</Button>
+            <Button onClick={handlePrintMonth} loading={printing} disabled={printDepts.length === 0}>
+              <Printer size={15} /> Gerar PDF
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Modal: Troca ── */}
       <Modal open={swapModal} onClose={() => setSwapModal(false)} title="Solicitar Troca" size="sm">
         <div className="space-y-4">
           <p className="text-stone-400 text-sm">Informe o e-mail do voluntário sugerido ou deixe em branco para qualquer disponível.</p>
@@ -291,7 +415,7 @@ export default function ScalesPage({ user }: Props) {
         </div>
       </Modal>
 
-      {/* Modal: Nova Escala */}
+      {/* ── Modal: Nova Escala ── */}
       <Modal open={newCultModal} onClose={() => setNewCultModal(false)} title="Nova Escala" size="md">
         <div className="space-y-4">
           <p className="text-stone-400 text-xs">Preencha os dados do culto/evento para criar uma nova escala.</p>
@@ -316,38 +440,7 @@ export default function ScalesPage({ user }: Props) {
         </div>
       </Modal>
 
-      {/* Modal: Gerar Automático */}
-      <Modal open={autoModal} onClose={() => setAutoModal(false)} title="Gerar Escala Automática" size="sm">
-        <div className="space-y-4">
-          {!selectedCult && (
-            <div className="bg-amber-900/30 border border-amber-700 rounded-lg p-3 text-amber-300 text-xs">
-              ⚠️ Selecione um culto antes de gerar.
-            </div>
-          )}
-          <p className="text-stone-400 text-sm">Respeita o limite semanal por voluntário, vagas travadas e evita duplicidade de setor.</p>
-          <div className="space-y-2">
-            {[
-              { value: 'standard', label: '📋 Cultos Padrão', desc: 'Para cultos do tipo padrão agendados' },
-              { value: 'thematic', label: '🎉 Cultos Temáticos', desc: 'Para cultos temáticos agendados' },
-            ].map(opt => (
-              <label key={opt.value} className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-stone-700 hover:border-amber-600 transition-all">
-                <input type="radio" value={opt.value} checked={autoType === opt.value} onChange={() => setAutoType(opt.value as any)} className="accent-amber-500 mt-0.5" />
-                <div>
-                  <span className="text-stone-200 text-sm font-medium">{opt.label}</span>
-                  <p className="text-stone-500 text-xs mt-0.5">{opt.desc}</p>
-                </div>
-              </label>
-            ))}
-          </div>
-          {error && <p className="text-red-400 text-xs">{error}</p>}
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setAutoModal(false)}>Cancelar</Button>
-            <Button onClick={generateAuto} loading={saving} disabled={!selectedCult}>Gerar</Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Modal: Adicionar Voluntário */}
+      {/* ── Modal: Adicionar Voluntário ── */}
       <Modal open={addModal} onClose={() => setAddModal(false)} title="Adicionar Voluntário à Escala" size="sm">
         <div className="space-y-4">
           {selectedCultData && (
