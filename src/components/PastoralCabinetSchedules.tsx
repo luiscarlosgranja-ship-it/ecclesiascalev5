@@ -412,20 +412,22 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
                       </p>
                     )}
                   </div>
-                  {/* Actions */}
+                  {/* Actions — lápis em TODOS, lixeira só nos livres */}
                   <div className="flex-shrink-0 flex items-center gap-0.5">
-                    <button onClick={() => openBookingEdit(s)}
+                    <button
+                      onClick={() => openBookingEdit(s)}
                       title={s.is_available ? 'Inserir dados e agendar' : 'Editar agendamento'}
-                      className="text-stone-500 hover:text-amber-400 p-1 rounded transition-colors">
+                      className="text-stone-500 hover:text-amber-400 p-1 rounded transition-colors"
+                    >
                       <Edit size={14} />
                     </button>
-                    {s.is_available && (
-                      <button onClick={() => { setDeleteTarget(s); setDeleteModal(true); }}
-                        title="Excluir horário"
-                        className="text-stone-600 hover:text-red-400 p-1 rounded transition-colors">
-                        <Trash2 size={14} />
-                      </button>
-                    )}
+                    <button
+                      onClick={() => { setDeleteTarget(s); setDeleteModal(true); }}
+                      title="Excluir horário"
+                      className="text-stone-600 hover:text-red-400 p-1 rounded transition-colors"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 </div>
               ))}
