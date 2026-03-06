@@ -315,13 +315,23 @@ export default function ScalesPage({ user }: Props) {
   async function handlePrint() {
     if (!scales || !selectedCultData) return;
     
-    // Buscar TODOS os departamentos do banco
+    // Buscar TODOS os departamentos do banco COM autenticação
     try {
-      const { data: allDepts } = await api.get<Array<{ id: number; name: string }>>('/departments');
+      const token = localStorage.getItem('token');
+      const headers: HeadersInit = token 
+        ? { 'Authorization': `Bearer ${token}` }
+        : {};
+      
+      const response = await fetch('/api/departments', { headers });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const allDepts = await response.json();
       
       if (allDepts && allDepts.length > 0) {
         setAvailableDepartments(allDepts);
-        // Selecionar todos por padrão
         setSelectedDepartmentsForPrint(allDepts.map(d => d.id));
       }
     } catch (err) {
@@ -348,13 +358,23 @@ export default function ScalesPage({ user }: Props) {
     const monthCults = (availableCults || []).filter(c => c.date.startsWith(month));
     if (monthCults.length === 0) return;
     
-    // Buscar TODOS os departamentos do banco
+    // Buscar TODOS os departamentos do banco COM autenticação
     try {
-      const { data: allDepts } = await api.get<Array<{ id: number; name: string }>>('/departments');
+      const token = localStorage.getItem('token');
+      const headers: HeadersInit = token 
+        ? { 'Authorization': `Bearer ${token}` }
+        : {};
+      
+      const response = await fetch('/api/departments', { headers });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const allDepts = await response.json();
       
       if (allDepts && allDepts.length > 0) {
         setAvailableDepartments(allDepts);
-        // Selecionar todos por padrão
         setSelectedDepartmentsForPrint(allDepts.map(d => d.id));
       }
     } catch (err) {
