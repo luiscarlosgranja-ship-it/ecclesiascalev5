@@ -754,8 +754,8 @@ export default function ScalesPage({ user }: Props) {
               <div className="space-y-2">
                 {[
                   { value: 'specific', label: 'Culto Específico', desc: 'Distribui voluntários em um culto específico' },
-                  { value: 'standard', label: 'Cultos Padrão',    desc: 'Preenche o culto selecionado na tela' },
-                  { value: 'thematic', label: 'Cultos Temáticos', desc: 'Preenche o culto selecionado na tela' },
+                  { value: 'standard', label: 'Cultos Padrão',    desc: 'Dom Manhã/Noite, Ter EDP, Qua Milagres/4D, Qui Vitória' },
+                  { value: 'thematic', label: 'Cultos Temáticos', desc: 'Cultos fora do calendário padrão (sem dia fixo)' },
                 ].map(opt => (
                   <label key={opt.value}
                     className={`flex items-start gap-3 cursor-pointer p-3 rounded-lg border transition-all ${autoType === opt.value ? 'border-amber-500 bg-amber-500/10' : 'border-stone-700 hover:border-amber-600'}`}>

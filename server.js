@@ -668,49 +668,6 @@ app.delete('/api/scales/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder')
   res.json({ message: 'Removido' });
 });
 
-// ─── Generate Empty Scale Slots ──────────────────────────────────────────────
-app.post('/api/scales/generate-empty', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
-  const { month, cult_id } = req.body;
-  if (!month && !cult_id) return res.status(400).json({ message: 'Informe month ou cult_id' });
-
-  let cultsQuery = db.from('cults').select('*').neq('status', 'Cancelado');
-  if (month) cultsQuery = cultsQuery.like('date', `${month}%`);
-  else       cultsQuery = cultsQuery.eq('id', cult_id);
-
-  const { data: cults } = await cultsQuery;
-  if (!cults?.length) return res.json({ message: 'Nenhum culto encontrado no período', created: 0, cults_count: 0 });
-
-  const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
-  if (!sectors?.length) return res.status(400).json({ message: 'Nenhum setor ativo cadastrado' });
-
-  let totalCreated = 0;
-
-  for (const cult of cults) {
-    const { data: existing } = await db.from('scales').select('sector_id').eq('cult_id', cult.id);
-    const usedSectorIds = new Set((existing || []).map(s => s.sector_id));
-    const pendingSectors = sectors.filter(s => !usedSectorIds.has(s.id));
-    if (!pendingSectors.length) continue;
-
-    const toInsert = pendingSectors.map(s => ({
-      cult_id: cult.id,
-      sector_id: s.id,
-      department_id: s.department_id || null,
-      member_id: null,
-      status: 'Pendente',
-    }));
-
-    const { error } = await db.from('scales').insert(toInsert);
-    if (!error) totalCreated += toInsert.length;
-    else console.error('[generate-empty] insert error:', error.message);
-  }
-
-  res.json({
-    message: `${totalCreated} vaga(s) criada(s) em ${cults.length} culto(s)`,
-    created: totalCreated,
-    cults_count: cults.length,
-  });
-});
-
 // ─── Auto Generate — OTIMIZADO ────────────────────────────────────────────────
 app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { type, cult_id, month } = req.body;
@@ -718,13 +675,23 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
 
   console.log('[auto-generate] payload:', { type, cult_id, month });
 
-  // Busca cultos
-  let cultsQuery = db.from('cults').select('*').neq('status', 'Cancelado');
+  // Busca cultos com join no tipo para saber se é padrão ou temático
+  let cultsQuery = db.from('cults')
+    .select('*, cult_types(id, name, default_day)')
+    .neq('status', 'Cancelado');
+
   if (type === 'month' && month)  cultsQuery = cultsQuery.like('date', `${month}%`);
   else if (cult_id)               cultsQuery = cultsQuery.eq('id', cult_id);
   else                            cultsQuery = cultsQuery.gte('date', today);
 
-  const { data: cults } = await cultsQuery;
+  let { data: cults } = await cultsQuery;
+
+  // Filtra por tipo: padrão = cult_type com default_day definido, temático = default_day null
+  if (type === 'standard') {
+    cults = (cults || []).filter(c => c.cult_types?.default_day !== null && c.cult_types?.default_day !== undefined);
+  } else if (type === 'thematic') {
+    cults = (cults || []).filter(c => c.cult_types?.default_day === null || c.cult_types?.default_day === undefined);
+  }
   const { data: sectors } = await db.from('sectors').select('*').eq('is_active', true);
   const { data: members } = await db.from('members').select('id, name, department_id').eq('is_active', true).eq('status', 'Ativo');
 
