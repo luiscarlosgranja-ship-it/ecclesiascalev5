@@ -125,16 +125,26 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
     if (!bookingForm.name.trim()) { setBookingError('Nome é obrigatório'); return; }
     setBookingSaving(true); setBookingError('');
     try {
-      // Atualiza dados do agendamento (nome, telefone, assunto)
-      if ((bookingTarget as any).booking_id) {
-        await api.put(`/pastoral-cabinet/bookings/${(bookingTarget as any).booking_id}`, {
+      if (bookingTarget.is_available) {
+        // Horário livre: cria agendamento e marca slot como ocupado
+        await api.post('/pastoral-cabinet/bookings', {
+          schedule_id: bookingTarget.id,
           booked_name: bookingForm.name,
           booked_phone: bookingForm.phone,
           subject: bookingForm.subject,
         });
+      } else {
+        // Horário já ocupado: atualiza dados do agendamento existente
+        if ((bookingTarget as any).booking_id) {
+          await api.put(`/pastoral-cabinet/bookings/${(bookingTarget as any).booking_id}`, {
+            booked_name: bookingForm.name,
+            booked_phone: bookingForm.phone,
+            subject: bookingForm.subject,
+          });
+        }
       }
 
-      // Atualiza horário/data/duração se mudou
+      // Atualiza data/hora/duração se mudou (para ambos os casos)
       const dateChanged = bookingForm.date !== bookingTarget.date;
       const timeChanged = bookingForm.time !== bookingTarget.time;
       const durChanged  = bookingForm.duration_minutes !== bookingTarget.duration_minutes;
@@ -403,19 +413,20 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
                     )}
                   </div>
                   {/* Actions */}
-                  {!s.is_available && (
+                  <div className="flex-shrink-0 flex items-center gap-0.5">
                     <button onClick={() => openBookingEdit(s)}
-                      title="Editar agendamento"
-                      className="flex-shrink-0 text-stone-500 hover:text-amber-400 p-1 rounded transition-colors">
+                      title={s.is_available ? 'Inserir dados e agendar' : 'Editar agendamento'}
+                      className="text-stone-500 hover:text-amber-400 p-1 rounded transition-colors">
                       <Edit size={14} />
                     </button>
-                  )}
-                  {s.is_available && (
-                    <button onClick={() => { setDeleteTarget(s); setDeleteModal(true); }}
-                      className="flex-shrink-0 text-stone-600 hover:text-red-400 p-1 rounded transition-colors">
-                      <Trash2 size={14} />
-                    </button>
-                  )}
+                    {s.is_available && (
+                      <button onClick={() => { setDeleteTarget(s); setDeleteModal(true); }}
+                        title="Excluir horário"
+                        className="text-stone-600 hover:text-red-400 p-1 rounded transition-colors">
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -532,7 +543,7 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
           Modal: Editar Agendamento Ocupado — com edição de nome, telefone,
           assunto E também data/hora/duração
       ═══════════════════════════════════════════════════════════════════════ */}
-      <Modal open={bookingModal} onClose={() => setBookingModal(false)} title="Editar Agendamento" size="md">
+      <Modal open={bookingModal} onClose={() => setBookingModal(false)} title={bookingTarget?.is_available ? "Registrar Agendamento" : "Editar Agendamento"} size="md">
         {bookingTarget && (
           <div className="space-y-4">
 
@@ -626,7 +637,7 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
 
             <div className="flex gap-3 pt-1">
               <Button variant="outline" onClick={() => setBookingModal(false)} disabled={bookingSaving}>Cancelar</Button>
-              <Button onClick={saveBookingDetails} loading={bookingSaving}>Salvar Alterações</Button>
+              <Button onClick={saveBookingDetails} loading={bookingSaving}>{bookingTarget?.is_available ? "Confirmar Agendamento" : "Salvar Alterações"}</Button>
             </div>
           </div>
         )}
