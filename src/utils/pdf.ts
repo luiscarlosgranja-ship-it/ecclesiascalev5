@@ -115,58 +115,84 @@ async function exportMonthGridPDF(
   memberDeptMap?: Map<number, number | null>,
 ) {
   const logo = await fetchLogo();
-  // Portrait A4 para melhor organização dos quadros
-  const doc = new jsPDF({ orientation: 'portrait', format: 'a4', unit: 'mm' });
-  const PW = doc.internal.pageSize.getWidth();   // 210
-  const PH = doc.internal.pageSize.getHeight();  // 297
+
+  // ── Landscape A4 ────────────────────────────────────────────────────────────
+  const doc = new jsPDF({ orientation: 'landscape', format: 'a4', unit: 'mm' });
+  const PW = doc.internal.pageSize.getWidth();   // 297
+  const PH = doc.internal.pageSize.getHeight();  // 210
   const MX = 8;
-  const GAP = 3;
+  const GAP = 4;
 
   const sorted = [...allCults].sort((a, b) => a.date.localeCompare(b.date));
   const totalVol = allScales.length;
-  const subtitle = `${sorted.length} culto(s)  ·  ${totalVol} voluntário(s)  ·  ${new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}`;
+  const subtitle = `${sorted.length} culto(s)  ·  ${totalVol} voluntário(s) escalado(s)  ·  ${new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}`;
 
-  // Agrupa departamentos para exibição
-  const deptList = departments && departments.length > 0 ? departments : [{ id: -1, name: 'Voluntários' }];
+  // Departamentos selecionados (ou fallback genérico)
+  const deptList = departments && departments.length > 0
+    ? departments
+    : [{ id: -1, name: 'Voluntários' }];
 
-  // Para cada culto, gera uma página (ou seção)
-  // Layout: 2 colunas de departamentos por culto, cultos empilhados
-  // Cada culto = bloco com cabeçalho + sub-blocos por departamento
-
-  const CULT_COLS = sorted.length <= 4 ? 1 : 2; // 1 col p/ poucos cultos, 2 col p/ muitos
+  // Número de colunas baseado na quantidade de cultos no mês
+  const CULT_COLS = sorted.length <= 2 ? 2 : sorted.length <= 4 ? 2 : 3;
   const cultColW = (PW - MX * 2 - GAP * (CULT_COLS - 1)) / CULT_COLS;
 
-  // Calcula altura de um bloco de culto
-  const cultHeaderH = 10;
-  const deptHeaderH = 6;
-  const rowH = 5;
-  const minBlockH = cultHeaderH + deptHeaderH + rowH + 4;
+  // Alturas fixas
+  const CULT_HDR_H  = 12; // cabeçalho do culto (data, hora, tipo)
+  const DEPT_HDR_H  = 6;  // faixa do departamento
+  const SECT_HDR_H  = 5;  // faixa do setor
+  const ROW_H       = 5;  // linha de membro
+  const BLOCK_PAD   = 3;  // padding inferior do bloco
+
+  // Retorna escalas do culto agrupadas: dept → setor → scales[]
+  function buildDeptSectorMap(cultId: number) {
+    const cScales = allScales.filter(s => s.cult_id === cultId);
+    const result: { dept: { id: number; name: string }; sectors: { name: string; scales: Scale[] }[] }[] = [];
+
+    for (const dept of deptList) {
+      const dScales = dept.id === -1
+        ? cScales
+        : cScales.filter(s => (memberDeptMap?.get(s.member_id) ?? null) === dept.id);
+
+      if (dScales.length === 0) continue;
+
+      // Agrupa por setor e ordena setores alfabeticamente
+      const sectorMap = new Map<string, Scale[]>();
+      for (const s of dScales) {
+        const k = s.sector_name || 'Sem Setor';
+        if (!sectorMap.has(k)) sectorMap.set(k, []);
+        sectorMap.get(k)!.push(s);
+      }
+      const sectors = Array.from(sectorMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([name, scales]) => ({ name, scales }));
+
+      result.push({ dept, sectors });
+    }
+    return result;
+  }
 
   function calcCultBlockH(cultId: number): number {
-    const cScales = allScales.filter(s => s.cult_id === cultId);
-    let h = cultHeaderH;
-    for (const dept of deptList) {
-      const dScales = dept.id === -1 ? cScales : cScales.filter(s => {
-        const dId = memberDeptMap?.get(s.member_id) ?? null;
-        return dept.id === -1 ? true : dId === dept.id;
-      });
-      if (dScales.length === 0) continue;
-      h += deptHeaderH + dScales.length * rowH;
+    const deptSectors = buildDeptSectorMap(cultId);
+    if (deptSectors.length === 0) return CULT_HDR_H + ROW_H + BLOCK_PAD;
+    let h = CULT_HDR_H;
+    for (const { sectors } of deptSectors) {
+      h += DEPT_HDR_H;
+      for (const { scales } of sectors) {
+        h += SECT_HDR_H + scales.length * ROW_H;
+      }
     }
-    return Math.max(minBlockH, h + 4);
+    return h + BLOCK_PAD;
   }
 
   let headerY = drawMainHeader(doc, logo, title, subtitle, PW);
   let curY = headerY + GAP;
   let col = 0;
   let rowMaxH = 0;
-  let pageNum = 1;
 
   for (let i = 0; i < sorted.length; i++) {
     const cult = sorted[i];
-    const bh = calcCultBlockH(cult.id);
 
-    // Início de nova linha de colunas
+    // Início de nova linha — pré-calcula altura máxima
     if (col === 0) {
       rowMaxH = 0;
       for (let j = i; j < Math.min(i + CULT_COLS, sorted.length); j++) {
@@ -175,7 +201,6 @@ async function exportMonthGridPDF(
       // Nova página?
       if (curY + rowMaxH > PH - 14) {
         doc.addPage();
-        pageNum++;
         headerY = drawMainHeader(doc, logo, title, subtitle, PW);
         curY = headerY + GAP;
       }
@@ -183,7 +208,7 @@ async function exportMonthGridPDF(
 
     const bx = MX + col * (cultColW + GAP);
     const by = curY;
-    const cScales = allScales.filter(s => s.cult_id === cult.id);
+    const deptSectors = buildDeptSectorMap(cult.id);
 
     // ── Borda do bloco ────────────────────────────────────────────────────────
     doc.setDrawColor(...C_BORDER);
@@ -192,80 +217,84 @@ async function exportMonthGridPDF(
 
     // ── Cabeçalho do culto ────────────────────────────────────────────────────
     doc.setFillColor(...C_BLOCK_HDR);
-    doc.rect(bx, by, cultColW, cultHeaderH, 'F');
+    doc.rect(bx, by, cultColW, CULT_HDR_H, 'F');
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.5);
+    doc.setFontSize(9);
     doc.setTextColor(...C_BLOCK_FG);
-    doc.text(fmtDate(cult.date), bx + 3, by + 4.5);
+    doc.text(fmtDate(cult.date), bx + 3, by + 5);
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.setTextColor(180, 175, 165);
-    doc.text(fmtTime(cult.time), bx + cultColW - 3, by + 4.5, { align: 'right' });
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(...C_HEADER_FG);
+    doc.text(fmtTime(cult.time), bx + cultColW - 3, by + 5, { align: 'right' });
 
     const typeName = cult.type_name || cult.name || '';
     if (typeName) {
       doc.setFont('helvetica', 'italic');
-      doc.setFontSize(6.5);
+      doc.setFontSize(7);
       doc.setTextColor(200, 185, 155);
-      doc.text(typeName, bx + 3, by + 8.5, { maxWidth: cultColW - 6 });
+      doc.text(typeName, bx + 3, by + 10, { maxWidth: cultColW - 6 });
     }
 
-    // ── Sub-blocos por Departamento ───────────────────────────────────────────
-    let dy = by + cultHeaderH;
+    let dy = by + CULT_HDR_H;
 
-    if (cScales.length === 0) {
+    if (deptSectors.length === 0) {
       doc.setFont('helvetica', 'italic');
       doc.setFontSize(6.5);
       doc.setTextColor(160, 150, 140);
-      doc.text('Sem voluntários escalados', bx + 3, dy + 5);
+      doc.text('Sem voluntários escalados', bx + 3, dy + 4);
     } else {
-      for (const dept of deptList) {
-        const dScales = dept.id === -1
-          ? cScales
-          : cScales.filter(s => (memberDeptMap?.get(s.member_id) ?? null) === dept.id);
+      for (const { dept, sectors } of deptSectors) {
 
-        if (dScales.length === 0) continue;
-
-        // Cabeçalho do departamento
+        // ── Faixa do Departamento ─────────────────────────────────────────────
         doc.setFillColor(42, 37, 35);
-        doc.rect(bx, dy, cultColW, deptHeaderH, 'F');
+        doc.rect(bx, dy, cultColW, DEPT_HDR_H, 'F');
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(6.5);
         doc.setTextColor(251, 191, 36);
-        doc.text(dept.name.toUpperCase(), bx + 3, dy + 4);
+        doc.text(dept.name.toUpperCase(), bx + 3, dy + 4.2);
+        const totalDept = sectors.reduce((a, s) => a + s.scales.length, 0);
         doc.setFont('helvetica', 'normal');
+        doc.setFontSize(6);
         doc.setTextColor(160, 150, 130);
-        doc.text(`${dScales.length} membro(s)`, bx + cultColW - 3, dy + 4, { align: 'right' });
-        dy += deptHeaderH;
+        doc.text(`${totalDept} membro(s)`, bx + cultColW - 3, dy + 4.2, { align: 'right' });
+        dy += DEPT_HDR_H;
 
-        // Linhas de membros
-        const colNameW = cultColW * 0.45;
-        const colSectorW = cultColW * 0.35;
-        const colStatusW = cultColW * 0.20;
+        for (const { name: sectorName, scales: sScales } of sectors) {
 
-        for (let ri = 0; ri < dScales.length; ri++) {
-          const s = dScales[ri];
-          doc.setFillColor(...(ri % 2 === 0 ? C_ROW_ODD : C_ROW_EVEN));
-          doc.rect(bx, dy, cultColW, rowH, 'F');
-          doc.setDrawColor(230, 225, 220);
-          doc.setLineWidth(0.08);
-          doc.line(bx, dy, bx + cultColW, dy);
-
-          doc.setFontSize(6.5);
-          doc.setFont('helvetica', 'normal');
-          doc.setTextColor(40, 35, 30);
-          doc.text(s.member_name || '—', bx + 2, dy + 3.5, { maxWidth: colNameW - 2 });
-
-          doc.setTextColor(100, 90, 80);
-          doc.text(s.sector_name || '—', bx + colNameW + 1, dy + 3.5, { maxWidth: colSectorW - 2 });
-
+          // ── Faixa do Setor ──────────────────────────────────────────────────
+          doc.setFillColor(60, 54, 50);
+          doc.rect(bx, dy, cultColW, SECT_HDR_H, 'F');
           doc.setFont('helvetica', 'bold');
-          doc.setTextColor(...statusColor(s.status));
-          doc.text(s.status, bx + colNameW + colSectorW + 1, dy + 3.5, { maxWidth: colStatusW - 1 });
+          doc.setFontSize(6);
+          doc.setTextColor(210, 200, 180);
+          doc.text(sectorName, bx + 4, dy + 3.5);
+          dy += SECT_HDR_H;
 
-          dy += rowH;
+          // ── Linhas de membros ───────────────────────────────────────────────
+          const colNameW   = cultColW * 0.58;
+          const colStatusW = cultColW * 0.22;
+
+          for (let ri = 0; ri < sScales.length; ri++) {
+            const s = sScales[ri];
+            doc.setFillColor(...(ri % 2 === 0 ? C_ROW_ODD : C_ROW_EVEN));
+            doc.rect(bx, dy, cultColW, ROW_H, 'F');
+            doc.setDrawColor(230, 225, 220);
+            doc.setLineWidth(0.08);
+            doc.line(bx, dy, bx + cultColW, dy);
+
+            doc.setFontSize(6.5);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(40, 35, 30);
+            doc.text(s.member_name || '—', bx + 3, dy + 3.5, { maxWidth: colNameW - 3 });
+
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(...statusColor(s.status));
+            doc.text(s.status, bx + cultColW - 3, dy + 3.5, { align: 'right', maxWidth: colStatusW });
+
+            dy += ROW_H;
+          }
         }
       }
     }
@@ -284,8 +313,10 @@ async function exportMonthGridPDF(
     drawFooter(doc, p, total, PW, PH);
   }
 
-  doc.save(`escalas_${new Date().toISOString().slice(0,7)}.pdf`);
+  doc.save(`escalas_${new Date().toISOString().slice(0, 7)}.pdf`);
 }
+
+
 
 
 // ─────────────────────────────────────────────────────────────────────────────
