@@ -677,7 +677,7 @@ app.post('/api/activation-codes/activate', auth, async (req, res) => {
 app.get('/api/pastoral-cabinet/schedules', auth, async (req, res) => {
   const { data, error } = await db
     .from('pastoral_cabinet_schedules')
-    .select('*, pastoral_cabinet_bookings(id, volunteer_id, status, members(name))')
+    .select('*, pastoral_cabinet_bookings(id, volunteer_id, status, booked_name, booked_phone, subject, members(name))')
     .order('date').order('time');
   if (error) return res.status(500).json({ message: error.message });
 
@@ -686,7 +686,10 @@ app.get('/api/pastoral-cabinet/schedules', auth, async (req, res) => {
     return {
       ...s,
       is_available: !booking,
-      booked_by_name: booking?.members?.name || null,
+      booking_id: booking?.id || null,
+      booked_by_name: booking?.booked_name || booking?.members?.name || null,
+      booked_by_phone: booking?.booked_phone || null,
+      booking_subject: booking?.subject || null,
       pastoral_cabinet_bookings: undefined,
     };
   });
@@ -838,20 +841,28 @@ app.post('/api/pastoral-cabinet/bookings', auth, async (req, res) => {
 
 // Atualizar status de agendamento
 app.put('/api/pastoral-cabinet/bookings/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
-  const { status } = req.body;
+  const { status, booked_name, booked_phone, subject } = req.body;
   const { data: booking } = await db.from('pastoral_cabinet_bookings').select('*').eq('id', req.params.id).single();
   if (!booking) return res.status(404).json({ message: 'Agendamento não encontrado' });
 
-  await db.from('pastoral_cabinet_bookings').update({ status }).eq('id', req.params.id);
+  const updates = {};
+  if (status !== undefined) updates.status = status;
+  if (booked_name !== undefined) updates.booked_name = booked_name;
+  if (booked_phone !== undefined) updates.booked_phone = booked_phone;
+  if (subject !== undefined) updates.subject = subject;
+
+  await db.from('pastoral_cabinet_bookings').update(updates).eq('id', req.params.id);
 
   // Se cancelado, libera o horário
   if (status === 'Cancelado') {
     await db.from('pastoral_cabinet_schedules').update({ is_available: true }).eq('id', booking.schedule_id);
   }
 
-  // Notifica o voluntário
-  const { data: userRow } = await db.from('users').select('id').eq('member_id', booking.volunteer_id).maybeSingle();
-  if (userRow) await notify(userRow.id, 'Gabinete ' + status, `Seu agendamento de gabinete foi ${status.toLowerCase()}`);
+  // Notifica o voluntário se mudou status
+  if (status) {
+    const { data: userRow } = await db.from('users').select('id').eq('member_id', booking.volunteer_id).maybeSingle();
+    if (userRow) await notify(userRow.id, 'Gabinete ' + status, `Seu agendamento de gabinete foi ${status.toLowerCase()}`);
+  }
 
   res.json({ message: 'Atualizado' });
 });

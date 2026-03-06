@@ -1,6 +1,6 @@
 import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { Plus, Trash2, Clock, Loader2, AlertCircle, ChevronLeft, ChevronRight, Calendar, CheckCircle, XCircle, CalendarClock } from 'lucide-react';
-import { Card, Button, Modal, Badge } from '../components/ui';
+import { Plus, Trash2, Clock, Loader2, AlertCircle, ChevronLeft, ChevronRight, Calendar, CheckCircle, XCircle, CalendarClock, Edit, Phone, MessageSquare, User } from 'lucide-react';
+import { Card, Button, Modal, Badge, Input } from '../components/ui';
 import api from '../utils/api';
 import type { PastoralCabinetSchedule } from '../types';
 
@@ -24,6 +24,13 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
   const [deleteModal, setDeleteModal] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'available' | 'occupied'>('all');
+
+  // ─── Estado para editar agendamento ocupado ──────────────────────────────────
+  const [bookingModal, setBookingModal] = useState(false);
+  const [bookingTarget, setBookingTarget] = useState<PastoralCabinetSchedule | null>(null);
+  const [bookingForm, setBookingForm] = useState({ name: '', phone: '', subject: '' });
+  const [bookingSaving, setBookingSaving] = useState(false);
+  const [bookingError, setBookingError] = useState('');
 
   const today = new Date();
   const todayStr = today.toISOString().slice(0, 10);
@@ -68,6 +75,34 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
       await api.delete(`/pastoral-cabinet/schedules/${deleteTarget.id}`);
       setDeleteModal(false); setDeleteTarget(null); loadSchedules();
     } catch (e) { alert(e instanceof Error ? e.message : 'Erro ao excluir'); }
+  }
+
+  function openBookingEdit(s: PastoralCabinetSchedule) {
+    setBookingTarget(s);
+    setBookingForm({
+      name: (s as any).booked_by_name || '',
+      phone: (s as any).booked_by_phone || '',
+      subject: (s as any).booking_subject || '',
+    });
+    setBookingError('');
+    setBookingModal(true);
+  }
+
+  async function saveBookingDetails() {
+    if (!bookingTarget) return;
+    if (!bookingForm.name.trim()) { setBookingError('Nome é obrigatório'); return; }
+    setBookingSaving(true); setBookingError('');
+    try {
+      await api.put(`/pastoral-cabinet/bookings/${(bookingTarget as any).booking_id}`, {
+        booked_name: bookingForm.name,
+        booked_phone: bookingForm.phone,
+        subject: bookingForm.subject,
+      });
+      setBookingModal(false);
+      loadSchedules();
+    } catch (e) {
+      setBookingError(e instanceof Error ? e.message : 'Erro ao salvar');
+    } finally { setBookingSaving(false); }
   }
 
   function formatDate(d: string) {
@@ -306,8 +341,21 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
                     {(s as any).booked_by_name && (
                       <p className="text-xs text-amber-400/80 mt-0.5 truncate">👤 {(s as any).booked_by_name}</p>
                     )}
+                    {(s as any).booked_by_phone && (
+                      <p className="text-xs text-stone-500 mt-0.5">📞 {(s as any).booked_by_phone}</p>
+                    )}
+                    {(s as any).booking_subject && (
+                      <p className="text-xs text-stone-400 mt-0.5 truncate">💬 {(s as any).booking_subject}</p>
+                    )}
                   </div>
                   {/* Actions */}
+                  {!s.is_available && (
+                    <button onClick={() => openBookingEdit(s)}
+                      title="Editar agendamento"
+                      className="flex-shrink-0 text-stone-500 hover:text-amber-400 p-1 rounded transition-colors">
+                      <Edit size={14} />
+                    </button>
+                  )}
                   {s.is_available && (
                     <button onClick={() => { setDeleteTarget(s); setDeleteModal(true); }}
                       className="flex-shrink-0 text-stone-600 hover:text-red-400 p-1 rounded transition-colors">
@@ -353,6 +401,69 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
             <Button onClick={handleSave} loading={saving}>Adicionar Horário</Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Modal: Editar Agendamento Ocupado */}
+      <Modal open={bookingModal} onClose={() => setBookingModal(false)} title="Editar Agendamento" size="md">
+        {bookingTarget && (
+          <div className="space-y-4">
+            <div className="bg-stone-800/50 border border-stone-700 rounded-lg p-3 flex items-center gap-3 text-sm">
+              <Clock size={15} className="text-red-400" />
+              <span className="text-stone-300 font-medium">
+                {formatDate(bookingTarget.date)} às {bookingTarget.time.slice(0, 5)}
+              </span>
+              <span className="text-stone-500">· {bookingTarget.duration_minutes} min</span>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5 block">
+                  <User size={12} /> Nome *
+                </label>
+                <input
+                  type="text"
+                  value={bookingForm.name}
+                  onChange={e => setBookingForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="Nome do solicitante"
+                  className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5 block">
+                  <Phone size={12} /> Telefone
+                </label>
+                <input
+                  type="text"
+                  value={bookingForm.phone}
+                  onChange={e => setBookingForm(f => ({ ...f, phone: e.target.value }))}
+                  placeholder="(11) 99999-0000"
+                  className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5 block">
+                  <MessageSquare size={12} /> Assunto
+                </label>
+                <textarea
+                  value={bookingForm.subject}
+                  onChange={e => setBookingForm(f => ({ ...f, subject: e.target.value }))}
+                  placeholder="Descreva o motivo do atendimento..."
+                  rows={3}
+                  className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500 resize-none"
+                />
+              </div>
+            </div>
+
+            {bookingError && <p className="text-red-400 text-xs bg-red-900/20 border border-red-700/40 rounded p-2">{bookingError}</p>}
+
+            <div className="flex gap-3 pt-1">
+              <Button variant="outline" onClick={() => setBookingModal(false)} disabled={bookingSaving}>Cancelar</Button>
+              <Button onClick={saveBookingDetails} loading={bookingSaving}>Salvar</Button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Modal: Excluir */}

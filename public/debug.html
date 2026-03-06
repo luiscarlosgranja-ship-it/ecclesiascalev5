@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug - Verificação de Sistema</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: #2d2d30;
+            border: 1px solid #3e3e42;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+
+        .header h1 {
+            color: #4ec9b0;
+            margin-bottom: 5px;
+        }
+
+        .check-section {
+            background: #252526;
+            border: 1px solid #3e3e42;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .check-title {
+            background: #2d2d30;
+            padding: 12px 15px;
+            border-bottom: 1px solid #3e3e42;
+            font-weight: bold;
+            color: #4ec9b0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .status {
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .status.success {
+            background: #13a10e;
+            color: white;
+        }
+
+        .status.error {
+            background: #f14c4c;
+            color: white;
+        }
+
+        .status.warning {
+            background: #dcdcaa;
+            color: black;
+        }
+
+        .status.loading {
+            background: #0e639c;
+            color: white;
+        }
+
+        .check-content {
+            padding: 15px;
+        }
+
+        .info-line {
+            padding: 8px 0;
+            border-bottom: 1px solid #3e3e42;
+        }
+
+        .info-line:last-child {
+            border-bottom: none;
+        }
+
+        .label {
+            color: #9cdcfe;
+            font-weight: bold;
+        }
+
+        .value {
+            color: #ce9178;
+            margin-left: 10px;
+            word-break: break-all;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        button {
+            padding: 10px 15px;
+            background: #0e639c;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+        }
+
+        button:hover {
+            background: #1177bb;
+        }
+
+        .output {
+            background: #1e1e1e;
+            border: 1px solid #3e3e42;
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 3px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+
+        .error-text {
+            color: #f48771;
+        }
+
+        .success-text {
+            color: #89d185;
+        }
+
+        .warning-text {
+            color: #dcdcaa;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 Debug - Verificação de Sistema</h1>
+            <p>Verifique conexão, autenticação e dados</p>
+        </div>
+
+        <!-- Verificação 1: Local Storage -->
+        <div class="check-section">
+            <div class="check-title">
+                1. Local Storage (Token)
+                <span class="status" id="status1">Verificando...</span>
+            </div>
+            <div class="check-content">
+                <div class="info-line">
+                    <span class="label">Token Exists:</span>
+                    <span class="value" id="token-exists">?</span>
+                </div>
+                <div class="info-line">
+                    <span class="label">Token Length:</span>
+                    <span class="value" id="token-length">?</span>
+                </div>
+                <div class="info-line">
+                    <span class="label">User ID:</span>
+                    <span class="value" id="user-id">?</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Verificação 2: Conexão com Backend -->
+        <div class="check-section">
+            <div class="check-title">
+                2. Conexão com Backend
+                <span class="status" id="status2">Verificando...</span>
+            </div>
+            <div class="check-content">
+                <div class="info-line">
+                    <span class="label">Backend URL:</span>
+                    <span class="value" id="backend-url">?</span>
+                </div>
+                <div class="info-line">
+                    <span class="label">Status:</span>
+                    <span class="value" id="backend-status">?</span>
+                </div>
+                <div class="buttons">
+                    <button onclick="testBackendConnection()">Testar Conexão</button>
+                </div>
+                <div class="output" id="backend-output"></div>
+            </div>
+        </div>
+
+        <!-- Verificação 3: Autenticação -->
+        <div class="check-section">
+            <div class="check-title">
+                3. Autenticação
+                <span class="status" id="status3">Verificando...</span>
+            </div>
+            <div class="check-content">
+                <div class="info-line">
+                    <span class="label">Auth Status:</span>
+                    <span class="value" id="auth-status">?</span>
+                </div>
+                <div class="buttons">
+                    <button onclick="testAuth()">Testar Autenticação</button>
+                    <button onclick="clearAuth()">Limpar Token</button>
+                </div>
+                <div class="output" id="auth-output"></div>
+            </div>
+        </div>
+
+        <!-- Verificação 4: Escalas -->
+        <div class="check-section">
+            <div class="check-title">
+                4. Escalas (Dados)
+                <span class="status" id="status4">Verificando...</span>
+            </div>
+            <div class="check-content">
+                <div class="info-line">
+                    <span class="label">Total de Escalas:</span>
+                    <span class="value" id="scales-count">?</span>
+                </div>
+                <div class="info-line">
+                    <span class="label">Setores Encontrados:</span>
+                    <span class="value" id="sectors-count">?</span>
+                </div>
+                <div class="buttons">
+                    <button onclick="testScales()">Carregar Escalas</button>
+                </div>
+                <div class="output" id="scales-output"></div>
+            </div>
+        </div>
+
+        <!-- Verificação 5: Cultos -->
+        <div class="check-section">
+            <div class="check-title">
+                5. Cultos
+                <span class="status" id="status5">Verificando...</span>
+            </div>
+            <div class="check-content">
+                <div class="info-line">
+                    <span class="label">Total de Cultos:</span>
+                    <span class="value" id="cults-count">?</span>
+                </div>
+                <div class="buttons">
+                    <button onclick="testCults()">Carregar Cultos</button>
+                </div>
+                <div class="output" id="cults-output"></div>
+            </div>
+        </div>
+
+        <!-- Verificação 6: Departamentos -->
+        <div class="check-section">
+            <div class="check-title">
+                6. Departamentos
+                <span class="status" id="status6">Verificando...</span>
+            </div>
+            <div class="check-content">
+                <div class="info-line">
+                    <span class="label">Total de Departamentos:</span>
+                    <span class="value" id="depts-count">?</span>
+                </div>
+                <div class="buttons">
+                    <button onclick="testDepartments()">Carregar Departamentos</button>
+                </div>
+                <div class="output" id="depts-output"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function setStatus(id, status, text) {
+            const el = document.getElementById(id);
+            el.className = `status ${status}`;
+            el.textContent = text;
+        }
+
+        function addOutput(id, text, type = 'normal') {
+            const el = document.getElementById(id);
+            const color = type === 'error' ? 'error-text' : type === 'success' ? 'success-text' : 'warning-text';
+            el.innerHTML += `<div class="${color}">${text}</div>`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function clearOutput(id) {
+            document.getElementById(id).innerHTML = '';
+        }
+
+        // Verificação inicial
+        window.onload = function() {
+            checkLocalStorage();
+            checkBackendURL();
+        };
+
+        function checkLocalStorage() {
+            const token = localStorage.getItem('token');
+            const userId = localStorage.getItem('userId');
+            
+            if (token) {
+                document.getElementById('token-exists').textContent = '✓ Existe';
+                document.getElementById('token-length').textContent = token.length + ' caracteres';
+                setStatus('status1', 'success', '✓ OK');
+            } else {
+                document.getElementById('token-exists').textContent = '✗ NÃO EXISTE';
+                document.getElementById('token-length').textContent = '0';
+                setStatus('status1', 'error', '✗ Sem Token');
+            }
+            
+            document.getElementById('user-id').textContent = userId || 'Não definido';
+        }
+
+        function checkBackendURL() {
+            const url = window.location.origin;
+            document.getElementById('backend-url').textContent = url;
+        }
+
+        async function testBackendConnection() {
+            clearOutput('backend-output');
+            setStatus('status2', 'loading', 'Testando...');
+            addOutput('backend-output', '⏳ Testando conexão...', 'warning');
+
+            try {
+                const response = await fetch('/api/health');
+                if (response.ok) {
+                    setStatus('status2', 'success', '✓ Conectado');
+                    addOutput('backend-output', '✓ Backend respondendo', 'success');
+                } else {
+                    setStatus('status2', 'error', `✗ Status ${response.status}`);
+                    addOutput('backend-output', `✗ Status: ${response.status}`, 'error');
+                }
+            } catch (e) {
+                setStatus('status2', 'error', '✗ Erro');
+                addOutput('backend-output', `✗ Erro: ${e.message}`, 'error');
+            }
+        }
+
+        async function testAuth() {
+            clearOutput('auth-output');
+            setStatus('status3', 'loading', 'Testando...');
+            addOutput('auth-output', '⏳ Testando autenticação...', 'warning');
+
+            const token = localStorage.getItem('token');
+            if (!token) {
+                setStatus('status3', 'error', '✗ Sem Token');
+                addOutput('auth-output', '✗ Nenhum token encontrado', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/me', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    setStatus('status3', 'success', '✓ Autenticado');
+                    addOutput('auth-output', `✓ Usuário: ${data.email || data.name}`, 'success');
+                } else if (response.status === 401) {
+                    setStatus('status3', 'error', '✗ Não Autenticado');
+                    addOutput('auth-output', '✗ Token inválido (401)', 'error');
+                } else {
+                    setStatus('status3', 'error', `✗ Status ${response.status}`);
+                    addOutput('auth-output', `✗ Erro: ${response.status}`, 'error');
+                }
+            } catch (e) {
+                setStatus('status3', 'error', '✗ Erro');
+                addOutput('auth-output', `✗ Erro: ${e.message}`, 'error');
+            }
+        }
+
+        async function testScales() {
+            clearOutput('scales-output');
+            setStatus('status4', 'loading', 'Carregando...');
+            addOutput('scales-output', '⏳ Carregando escalas...', 'warning');
+
+            const token = localStorage.getItem('token');
+            if (!token) {
+                setStatus('status4', 'error', '✗ Sem Token');
+                addOutput('scales-output', '✗ Token não encontrado', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/scales', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('scales-count').textContent = data.length || 0;
+                    
+                    const setores = new Set(data.map(s => s.sector_name).filter(Boolean));
+                    document.getElementById('sectors-count').textContent = setores.size;
+                    
+                    setStatus('status4', 'success', '✓ OK');
+                    addOutput('scales-output', `✓ Total: ${data.length} escalas`, 'success');
+                    addOutput('scales-output', `✓ Setores: ${setores.size} únicos`, 'success');
+                    
+                    if (data.length > 0) {
+                        addOutput('scales-output', `Exemplo: ${data[0].member_name} - ${data[0].sector_name}`, 'success');
+                    }
+                } else {
+                    setStatus('status4', 'error', `✗ Status ${response.status}`);
+                    addOutput('scales-output', `✗ Erro ${response.status}`, 'error');
+                }
+            } catch (e) {
+                setStatus('status4', 'error', '✗ Erro');
+                addOutput('scales-output', `✗ Erro: ${e.message}`, 'error');
+            }
+        }
+
+        async function testCults() {
+            clearOutput('cults-output');
+            setStatus('status5', 'loading', 'Carregando...');
+            addOutput('cults-output', '⏳ Carregando cultos...', 'warning');
+
+            const token = localStorage.getItem('token');
+            if (!token) {
+                setStatus('status5', 'error', '✗ Sem Token');
+                addOutput('cults-output', '✗ Token não encontrado', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/cults', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('cults-count').textContent = data.length || 0;
+                    
+                    setStatus('status5', 'success', '✓ OK');
+                    addOutput('cults-output', `✓ Total: ${data.length} cultos`, 'success');
+                    
+                    if (data.length > 0) {
+                        addOutput('cults-output', `Exemplo: ${data[0].date} - ${data[0].name || data[0].type_name}`, 'success');
+                    }
+                } else {
+                    setStatus('status5', 'error', `✗ Status ${response.status}`);
+                    addOutput('cults-output', `✗ Erro ${response.status}`, 'error');
+                }
+            } catch (e) {
+                setStatus('status5', 'error', '✗ Erro');
+                addOutput('cults-output', `✗ Erro: ${e.message}`, 'error');
+            }
+        }
+
+        async function testDepartments() {
+            clearOutput('depts-output');
+            setStatus('status6', 'loading', 'Carregando...');
+            addOutput('depts-output', '⏳ Carregando departamentos...', 'warning');
+
+            const token = localStorage.getItem('token');
+            if (!token) {
+                setStatus('status6', 'error', '✗ Sem Token');
+                addOutput('depts-output', '✗ Token não encontrado', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/departments', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('depts-count').textContent = data.length || 0;
+                    
+                    setStatus('status6', 'success', '✓ OK');
+                    addOutput('depts-output', `✓ Total: ${data.length} departamentos`, 'success');
+                    
+                    data.forEach(d => {
+                        addOutput('depts-output', `  - ${d.name}`, 'success');
+                    });
+                } else {
+                    setStatus('status6', 'error', `✗ Status ${response.status}`);
+                    addOutput('depts-output', `✗ Erro ${response.status}`, 'error');
+                }
+            } catch (e) {
+                setStatus('status6', 'error', '✗ Erro');
+                addOutput('depts-output', `✗ Erro: ${e.message}`, 'error');
+            }
+        }
+
+        function clearAuth() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('userId');
+            checkLocalStorage();
+            setStatus('status3', 'error', '✗ Token Removido');
+            addOutput('auth-output', 'Token removido. Faça login novamente.', 'warning');
+        }
+    </script>
+</body>
+</html>
