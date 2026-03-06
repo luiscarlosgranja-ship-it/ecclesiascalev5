@@ -189,7 +189,7 @@ export default function ScalesPage({ user }: Props) {
     setSaving(true); setError(''); setAutoResult(null);
     try {
       const payload = autoType === 'month'
-        ? { type: 'month', month: new Date().toISOString().slice(0, 7) }
+        ? { type: 'month', month: printMonth }
         : { type: autoType, cult_id: selectedCult };
 
       const res = await api.post<{ message?: string; created?: number; cults_count?: number; scales_count?: number }>(
@@ -206,10 +206,22 @@ export default function ScalesPage({ user }: Props) {
       });
 
       if (autoType !== 'month') {
-        refetchScales();
-        fetchDeptBlocks();
+        // Culto já selecionado — recarrega escalas e blocos
+        await refetchScales();
+        await fetchDeptBlocks();
       } else {
-        refetchCults();
+        // Mês inteiro: recarrega cultos e auto-seleciona o primeiro do mês gerado
+        await refetchCults();
+        try {
+          const freshCults = await api.get<Cult[]>('/cults?status=Agendado');
+          const monthCults = (freshCults || [])
+            .filter(c => c.date.startsWith(printMonth))
+            .sort((a, b) => a.date.localeCompare(b.date));
+          if (monthCults.length > 0) {
+            setSelectedCult(monthCults[0].id);
+            // fetchDeptBlocks será disparado automaticamente pelo useEffect de selectedCult
+          }
+        } catch { /* sem cultos no mês, ignora */ }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao gerar escala');
@@ -803,15 +815,15 @@ export default function ScalesPage({ user }: Props) {
                 {/* Mensagem complementar por tipo */}
                 <p className="text-stone-400 text-xs leading-relaxed">
                   {autoResult.label === 'Mês Inteiro' &&
-                    'Todos os cultos do mês foram processados e as escalas distribuídas respeitando o limite de 3x/mês por voluntário.'}
+                    `Todos os cultos de ${printMonth} foram processados. O primeiro culto do mês foi selecionado automaticamente — as escalas já aparecem na tela.`}
                   {autoResult.label === 'Cultos Padrão' &&
-                    'As escalas dos cultos padrão foram geradas com a distribuição automática de voluntários.'}
+                    'As escalas dos cultos padrão foram geradas. As escalas já aparecem na tela.'}
                   {autoResult.label === 'Cultos Temáticos' &&
-                    'As escalas dos cultos temáticos foram geradas com a distribuição automática de voluntários.'}
+                    'As escalas dos cultos temáticos foram geradas. As escalas já aparecem na tela.'}
                 </p>
               </div>
 
-              <Button onClick={closeAutoModal} className="w-full">Fechar</Button>
+              <Button onClick={closeAutoModal} className="w-full">✓ Fechar e Ver Escalas</Button>
             </div>
 
           ) : (
@@ -836,6 +848,17 @@ export default function ScalesPage({ user }: Props) {
               </div>
               {!selectedCult && autoType !== 'month' && (
                 <p className="text-amber-400 text-xs">⚠️ Para gerar Cultos Padrão ou Temáticos, selecione um culto na tela principal primeiro.</p>
+              )}
+              {autoType === 'month' && (
+                <div className="flex items-center gap-2 bg-stone-800 rounded-lg px-3 py-2 text-xs">
+                  <span className="text-stone-400">Mês a gerar:</span>
+                  <input
+                    type="month"
+                    value={printMonth}
+                    onChange={e => setPrintMonth(e.target.value)}
+                    className="bg-transparent text-amber-300 focus:outline-none"
+                  />
+                </div>
               )}
               {error && <p className="text-red-400 text-xs">{error}</p>}
               <div className="flex gap-3">
