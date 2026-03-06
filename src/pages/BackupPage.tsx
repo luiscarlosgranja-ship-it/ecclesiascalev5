@@ -110,7 +110,7 @@ export default function BackupPage(props: Props) {
     if (!logoPreview) return;
     setSavingLogo(true); setLogoMsg('');
     try {
-      await api.post('/settings/logo', { logo: logoPreview });
+      await api.put('/settings/logo', { logo: logoPreview });
       setCurrentLogo(logoPreview);
       setLogoMsg('✅ Logotipo salvo com sucesso!');
       // Dispara evento para Layout e LoginPage atualizarem sem reload
@@ -124,7 +124,7 @@ export default function BackupPage(props: Props) {
   async function removeLogo() {
     setSavingLogo(true); setLogoMsg('');
     try {
-      await api.post('/settings/logo', { logo: null });
+      await api.delete('/settings/logo');
       setCurrentLogo(null); setLogoPreview(null);
       setLogoMsg('✅ Logotipo removido.');
       window.dispatchEvent(new CustomEvent('ecclesia-logo-updated', { detail: { logo: null } }));
