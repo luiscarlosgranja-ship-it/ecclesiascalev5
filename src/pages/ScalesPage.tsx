@@ -315,7 +315,7 @@ export default function ScalesPage({ user }: Props) {
 
   async function handlePrint() {
     if (!scales || !selectedCultData) return;
-    const { data: depts } = await api.get<Array<{ id: number; name: string }>>('/departments');
+    const { data: depts } = await api.get<Array<{ id: number; name: string }>>('/public/departments');
     const allDepts = depts || [];
     setAvailableDepartments(allDepts);
     setSelectedDepartmentsForPrint(allDepts.map(d => d.id));
@@ -336,7 +336,7 @@ export default function ScalesPage({ user }: Props) {
       )
     );
     
-    const { data: depts } = await api.get<Array<{ id: number; name: string }>>('/departments');
+    const { data: depts } = await api.get<Array<{ id: number; name: string }>>('/public/departments');
     const allDepts = depts || [];
     setAvailableDepartments(allDepts);
     setSelectedDepartmentsForPrint(allDepts.map(d => d.id));
