@@ -71,7 +71,21 @@ export default function ScalesPage({ user }: Props) {
   const [selectedDepartmentsForPrint, setSelectedDepartmentsForPrint] = useState<number[]>([]);
   const [printingMode, setPrintingMode] = useState<'cult' | 'month'>('cult');
 
-  const { data: cults, refetch: refetchCults } = useApi<Cult[]>('/cults?status=Agendado');
+  // ─── Helper: lê o token salvo pelo api.ts ────────────────────────────────
+  function getAuthToken(): string {
+    try {
+      const stored = localStorage.getItem('ecclesia_user');
+      return stored ? JSON.parse(stored).token : '';
+    } catch { return ''; }
+  }
+
+  // ─── Helper: retorna headers com Authorization ────────────────────────────
+  function authHeaders(): HeadersInit {
+    const token = getAuthToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  const [printMonth, setPrintMonth] = useState<string>(new Date().toISOString().slice(0, 7));
   const { data: scales, refetch: refetchScales } = useApi<Scale[]>(
     selectedCult ? `/scales?cult_id=${selectedCult}` : null, [selectedCult]
   );
@@ -315,28 +329,26 @@ export default function ScalesPage({ user }: Props) {
   async function handlePrint() {
     if (!scales || !selectedCultData) return;
     
-    // Buscar TODOS os departamentos do banco COM autenticação
     try {
-      const token = localStorage.getItem('token');
-      const headers: HeadersInit = token 
-        ? { 'Authorization': `Bearer ${token}` }
-        : {};
+      const response = await fetch('/api/departments', { headers: authHeaders() });
       
-      const response = await fetch('/api/departments', { headers });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
       const allDepts = await response.json();
-      
-      if (allDepts && allDepts.length > 0) {
-        setAvailableDepartments(allDepts);
-        setSelectedDepartmentsForPrint(allDepts.map(d => d.id));
-      }
+      const depts = Array.isArray(allDepts) && allDepts.length > 0
+        ? allDepts
+        : [
+            { id: 1, name: 'Diáconos / Obreiros' },
+            { id: 2, name: 'Mídia' },
+            { id: 3, name: 'Infantil' },
+            { id: 4, name: 'Louvor' },
+            { id: 5, name: 'Una' },
+            { id: 6, name: 'Bem-Vindos' },
+          ];
+      setAvailableDepartments(depts);
+      setSelectedDepartmentsForPrint(depts.map((d: { id: number }) => d.id));
     } catch (err) {
       console.error('Erro ao buscar departamentos:', err);
-      // Se falhar, usar departamentos padrão
       const defaultDepts = [
         { id: 1, name: 'Diáconos / Obreiros' },
         { id: 2, name: 'Mídia' },
@@ -354,32 +366,32 @@ export default function ScalesPage({ user }: Props) {
   }
 
   async function handlePrintMonth() {
-    const month = new Date().toISOString().slice(0, 7);
-    const monthCults = (availableCults || []).filter(c => c.date.startsWith(month));
-    if (monthCults.length === 0) return;
+    const monthCults = (availableCults || []).filter(c => c.date.startsWith(printMonth));
+    if (monthCults.length === 0) {
+      alert(`Nenhum culto encontrado para ${printMonth}. Verifique o mês selecionado.`);
+      return;
+    }
     
-    // Buscar TODOS os departamentos do banco COM autenticação
     try {
-      const token = localStorage.getItem('token');
-      const headers: HeadersInit = token 
-        ? { 'Authorization': `Bearer ${token}` }
-        : {};
+      const response = await fetch('/api/departments', { headers: authHeaders() });
       
-      const response = await fetch('/api/departments', { headers });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
       const allDepts = await response.json();
-      
-      if (allDepts && allDepts.length > 0) {
-        setAvailableDepartments(allDepts);
-        setSelectedDepartmentsForPrint(allDepts.map(d => d.id));
-      }
+      const depts = Array.isArray(allDepts) && allDepts.length > 0
+        ? allDepts
+        : [
+            { id: 1, name: 'Diáconos / Obreiros' },
+            { id: 2, name: 'Mídia' },
+            { id: 3, name: 'Infantil' },
+            { id: 4, name: 'Louvor' },
+            { id: 5, name: 'Una' },
+            { id: 6, name: 'Bem-Vindos' },
+          ];
+      setAvailableDepartments(depts);
+      setSelectedDepartmentsForPrint(depts.map((d: { id: number }) => d.id));
     } catch (err) {
       console.error('Erro ao buscar departamentos:', err);
-      // Se falhar, usar departamentos padrão
       const defaultDepts = [
         { id: 1, name: 'Diáconos / Obreiros' },
         { id: 2, name: 'Mídia' },
@@ -409,11 +421,10 @@ export default function ScalesPage({ user }: Props) {
         selectedDepartmentsForPrint
       );
     } else {
-      const month = new Date().toISOString().slice(0, 7);
-      const monthCults = availableCults.filter(c => c.date.startsWith(month));
+      const monthCults = availableCults.filter(c => c.date.startsWith(printMonth));
       if (monthCults.length === 0) return;
       
-      const token = localStorage.getItem('token') || '';
+      const token = getAuthToken();
       const results = await Promise.all(
         monthCults.map(c =>
           fetch(`/api/scales?cult_id=${c.id}`, { headers: { Authorization: `Bearer ${token}` } })
@@ -425,7 +436,7 @@ export default function ScalesPage({ user }: Props) {
       await exportScalePDF(
         allMonthScales, 
         null, 
-        `Escalas — ${month}`, 
+        `Escalas — ${printMonth}`, 
         allMonthScales, 
         monthCults,
         undefined,
@@ -501,6 +512,13 @@ export default function ScalesPage({ user }: Props) {
           <Button variant="outline" size="sm" onClick={handlePrintMonth}>
             <Printer size={16} /> Imprimir Mês
           </Button>
+          <input
+            type="month"
+            value={printMonth}
+            onChange={e => setPrintMonth(e.target.value)}
+            className="bg-stone-800 border border-stone-600 rounded-lg px-2 py-1 text-stone-300 text-xs focus:outline-none focus:border-amber-500"
+            title="Selecionar mês para impressão"
+          />
         </div>
       </div>
 
@@ -649,7 +667,7 @@ export default function ScalesPage({ user }: Props) {
                       <td className="p-3 text-stone-500 text-xs">{i + 1}</td>
                       <td className="p-3 text-stone-200">{s.member_name}</td>
                       <td className="p-3 text-stone-400 text-xs">{s.sector_name || '—'}</td>
-                      <td className="p-3 text-stone-400 text-xs">{(s as any).department_name || '—'}</td>
+                      <td className="p-3 text-stone-400 text-xs">{s.department_name || '—'}</td>
                       <td className="p-3">
                         <Badge
                           label={s.status}

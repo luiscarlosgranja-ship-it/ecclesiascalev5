@@ -193,60 +193,36 @@ const DEPARTMENT_ORDER = [
 ];
 
 function groupScalesByDepartment(scales: Scale[]): DepartmentGroup[] {
-  // Agrupar escalas por departamento usando o mapeamento
   const deptMap = new Map<string, Scale[]>();
   
-  console.log('=== AGRUPAMENTO DE DEPARTAMENTOS ===');
-  console.log('Escalas recebidas:', scales.length);
-  console.log('Mapeamento disponível:', Object.keys(SETOR_DEPARTMENT_MAP).length, 'setores mapeados');
-  
   for (const scale of scales) {
-    const sectorName = scale.sector_name || 'Sem Setor';
-    const sectorLower = sectorName.toLowerCase().trim();
+    // 1ª prioridade: department_name que vem direto da API
+    let deptName = scale.department_name?.trim();
     
-    // Procurar no mapeamento
-    let deptName = SETOR_DEPARTMENT_MAP[sectorLower];
-    
-    // Se não encontrou, mostrar aviso e usar o nome do setor como departamento
+    // 2ª prioridade: mapeamento por nome do setor (fallback)
     if (!deptName) {
-      console.warn(`⚠️ Setor não mapeado: "${sectorName}" (${sectorLower})`);
-      deptName = sectorName;
+      const sectorLower = (scale.sector_name || '').toLowerCase().trim();
+      deptName = SETOR_DEPARTMENT_MAP[sectorLower] || scale.sector_name || 'Sem Departamento';
     }
     
-    console.log(`"${sectorName}" → "${deptName}"`);
-    
-    if (!deptMap.has(deptName)) {
-      deptMap.set(deptName, []);
-    }
+    if (!deptMap.has(deptName)) deptMap.set(deptName, []);
     deptMap.get(deptName)!.push(scale);
   }
   
-  console.log('Departamentos encontrados:', Array.from(deptMap.keys()));
-  console.log('Ordem esperada:', DEPARTMENT_ORDER);
-  
-  // Retornar na ordem fixa dos departamentos
   const result: DepartmentGroup[] = [];
   
-  // Primeiro: adicionar departamentos na ordem fixa (se houver escalas)
-  for (const deptName of DEPARTMENT_ORDER) {
-    if (deptMap.has(deptName)) {
-      result.push({
-        name: deptName,
-        scales: deptMap.get(deptName)!
-      });
-      console.log(`✅ Adicionado: ${deptName} (${deptMap.get(deptName)!.length} escalas)`);
-      deptMap.delete(deptName);
+  // Primeiro: ordem fixa dos departamentos conhecidos
+  for (const name of DEPARTMENT_ORDER) {
+    if (deptMap.has(name)) {
+      result.push({ name, scales: deptMap.get(name)! });
+      deptMap.delete(name);
     }
   }
   
-  // Depois: adicionar departamentos não mapeados no final
-  for (const [deptName, scaleList] of deptMap) {
-    console.warn(`⚠️ Departamento não padrão encontrado: "${deptName}" (${scaleList.length} escalas)`);
-    result.push({ name: deptName, scales: scaleList });
+  // Depois: departamentos extras no final
+  for (const [name, scaleList] of deptMap) {
+    result.push({ name, scales: scaleList });
   }
-  
-  console.log('Resultado final:', result.map(r => ({ name: r.name, count: r.scales.length })));
-  console.log('=== FIM DO AGRUPAMENTO ===');
   
   return result;
 }
@@ -427,8 +403,10 @@ async function exportMonthGridPDF(
     const deptMap = new Map<string, number>();
     
     for (const scale of cultScales) {
-      const sectorLower = (scale.sector_name || '').toLowerCase().trim();
-      const deptName = SETOR_DEPARTMENT_MAP[sectorLower] || scale.department_name || 'Sem Departamento';
+      const deptName = scale.department_name?.trim()
+        || SETOR_DEPARTMENT_MAP[(scale.sector_name || '').toLowerCase().trim()]
+        || scale.sector_name
+        || 'Sem Departamento';
       deptMap.set(deptName, (deptMap.get(deptName) || 0) + 1);
     }
 
@@ -467,15 +445,14 @@ async function exportMonthGridPDF(
     const bh = calcBlockHeight(cult);
     const cultScales = cultMap.get(cult.id) || [];
 
-    // Agrupar por departamento (usando mapeamento de setor)
+    // Agrupar por departamento (prioriza department_name da API)
     const deptMap = new Map<string, Scale[]>();
     for (const scale of cultScales) {
-      const sectorLower = (scale.sector_name || '').toLowerCase().trim();
-      let deptName = SETOR_DEPARTMENT_MAP[sectorLower] || scale.department_name || 'Sem Departamento';
-      
-      if (!deptMap.has(deptName)) {
-        deptMap.set(deptName, []);
-      }
+      const deptName = scale.department_name?.trim()
+        || SETOR_DEPARTMENT_MAP[(scale.sector_name || '').toLowerCase().trim()]
+        || scale.sector_name
+        || 'Sem Departamento';
+      if (!deptMap.has(deptName)) deptMap.set(deptName, []);
       deptMap.get(deptName)!.push(scale);
     }
 
@@ -565,28 +542,20 @@ async function exportMonthGridPDF(
 
 
 function groupScalesByDepartmentForMonth(scales: Scale[]): DepartmentGroup[] {
-  // Se não há escalas, retorna array vazio
-  if (!scales || scales.length === 0) {
-    return [];
-  }
+  if (!scales || scales.length === 0) return [];
   
-  // Usar o mesmo mapeamento que no culto individual
   const deptMap = new Map<string, Scale[]>();
   
   for (const scale of scales) {
-    const sectorName = scale.sector_name || 'Sem Setor';
-    // Converter para lowercase para buscar no mapeamento
-    const sectorLower = sectorName.toLowerCase().trim();
-    const deptName = SETOR_DEPARTMENT_MAP[sectorLower] || sectorName;
-    
-    if (!deptMap.has(deptName)) {
-      deptMap.set(deptName, []);
-    }
+    // 1ª prioridade: department_name da API
+    const deptName = scale.department_name?.trim()
+      || SETOR_DEPARTMENT_MAP[(scale.sector_name || '').toLowerCase().trim()]
+      || scale.sector_name
+      || 'Sem Departamento';
+    if (!deptMap.has(deptName)) deptMap.set(deptName, []);
     deptMap.get(deptName)!.push(scale);
   }
   
-  // Retornar na ordem fixa dos departamentos (nomes curtos para mês)
-  const result: DepartmentGroup[] = [];
   const shortNames: { [key: string]: string } = {
     'Diáconos / Obreiros': 'Diáconos',
     'Mídia': 'Mídia',
@@ -596,21 +565,16 @@ function groupScalesByDepartmentForMonth(scales: Scale[]): DepartmentGroup[] {
     'Bem-Vindos': 'Bem-Vindos',
   };
   
-  for (const deptName of DEPARTMENT_ORDER) {
-    if (deptMap.has(deptName)) {
-      result.push({
-        name: shortNames[deptName] || deptName,
-        scales: deptMap.get(deptName)!
-      });
-      deptMap.delete(deptName);
+  const result: DepartmentGroup[] = [];
+  for (const name of DEPARTMENT_ORDER) {
+    if (deptMap.has(name)) {
+      result.push({ name: shortNames[name] || name, scales: deptMap.get(name)! });
+      deptMap.delete(name);
     }
   }
-  
-  // Adicionar departamentos não mapeados
-  for (const [deptName, scaleList] of deptMap) {
-    result.push({ name: deptName, scales: scaleList });
+  for (const [name, scaleList] of deptMap) {
+    result.push({ name, scales: scaleList });
   }
-  
   return result;
 }
 
@@ -639,17 +603,12 @@ export async function exportScalePDF(
   // Filtrar escalas pelos departamentos selecionados se fornecido
   let filteredScales = scales;
   if (selectedDepartmentIds && selectedDepartmentIds.length > 0) {
-    // Precisamos agrupar por departamento através do setor
-    // Usar o mapeamento do pdf.ts
     filteredScales = scales.filter(s => {
-      const sectorLower = (s.sector_name || '').toLowerCase().trim();
-      let deptName = SETOR_DEPARTMENT_MAP[sectorLower] || s.sector_name;
-      
-      // Procurar se este departamento está selecionado
-      return selectedDepartmentIds.some(deptId => {
-        const selectedDeptName = DEPT_MAP[deptId];
-        return deptName === selectedDeptName;
-      });
+      // 1ª prioridade: department_name da API
+      const deptName = s.department_name?.trim()
+        || SETOR_DEPARTMENT_MAP[(s.sector_name || '').toLowerCase().trim()]
+        || s.sector_name;
+      return selectedDepartmentIds.some(deptId => DEPT_MAP[deptId] === deptName);
     });
   }
 
@@ -663,12 +622,10 @@ export async function exportScalePDF(
     let filteredAllScales = allScales;
     if (selectedDepartmentIds && selectedDepartmentIds.length > 0) {
       filteredAllScales = allScales.filter(s => {
-        const sectorLower = (s.sector_name || '').toLowerCase().trim();
-        let deptName = SETOR_DEPARTMENT_MAP[sectorLower] || s.sector_name;
-        return selectedDepartmentIds.some(deptId => {
-          const selectedDeptName = DEPT_MAP[deptId];
-          return deptName === selectedDeptName;
-        });
+        const deptName = s.department_name?.trim()
+          || SETOR_DEPARTMENT_MAP[(s.sector_name || '').toLowerCase().trim()]
+          || s.sector_name;
+        return selectedDepartmentIds.some(deptId => DEPT_MAP[deptId] === deptName);
       });
     }
     if (selectedSectors && selectedSectors.length > 0) {
