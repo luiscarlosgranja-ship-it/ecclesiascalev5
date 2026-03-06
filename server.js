@@ -696,10 +696,15 @@ app.get('/api/pastoral-cabinet/schedules', auth, async (req, res) => {
 // Disponibilidade de um mês (para o calendário do voluntário)
 app.get('/api/pastoral-cabinet/availability/:month', auth, async (req, res) => {
   const { month } = req.params; // formato: yyyy-MM
+  const [year, mon] = month.split('-').map(Number);
+  const firstDay = `${year}-${String(mon).padStart(2, '0')}-01`;
+  const lastDay  = `${year}-${String(mon).padStart(2, '0')}-${new Date(year, mon, 0).getDate()}`;
+
   const { data, error } = await db
     .from('pastoral_cabinet_schedules')
     .select('date, id, pastoral_cabinet_bookings(id, status)')
-    .like('date', `${month}%`)
+    .gte('date', firstDay)
+    .lte('date', lastDay)
     .order('date');
   if (error) return res.status(500).json({ message: error.message });
 
@@ -750,7 +755,7 @@ app.get('/api/pastoral-cabinet/available-slots/:date', auth, async (req, res) =>
 });
 
 // Criar horário de gabinete
-app.post('/api/pastoral-cabinet/schedules', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+app.post('/api/pastoral-cabinet/schedules', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
   const { date, time, duration_minutes, is_available } = req.body;
   if (!date || !time) return res.status(400).json({ message: 'Data e hora são obrigatórios' });
 
@@ -766,7 +771,7 @@ app.post('/api/pastoral-cabinet/schedules', auth, requireRole('SuperAdmin', 'Adm
 });
 
 // Excluir horário de gabinete
-app.delete('/api/pastoral-cabinet/schedules/:id', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+app.delete('/api/pastoral-cabinet/schedules/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
   // Verifica se há agendamento ativo
   const { data: bookings } = await db
     .from('pastoral_cabinet_bookings')
@@ -833,7 +838,7 @@ app.post('/api/pastoral-cabinet/bookings', auth, async (req, res) => {
 });
 
 // Atualizar status de agendamento
-app.put('/api/pastoral-cabinet/bookings/:id', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
+app.put('/api/pastoral-cabinet/bookings/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
   const { status } = req.body;
   const { data: booking } = await db.from('pastoral_cabinet_bookings').select('*').eq('id', req.params.id).single();
   if (!booking) return res.status(404).json({ message: 'Agendamento não encontrado' });
