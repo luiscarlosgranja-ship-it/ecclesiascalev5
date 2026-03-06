@@ -5,6 +5,9 @@ import { useApi } from '../hooks/useApi';
 import api from '../utils/api';
 import { getSupabase } from '../utils/supabaseClient';
 import type { AuthUser, Scale, Cult, Member, Sector, CultType } from '../types';
+
+// Extend CultType locally to include default_day
+type CultTypeEx = CultType & { default_day?: number | null };
 import { isAdmin, isLeader, isSuperAdmin } from '../utils/permissions';
 import { exportScalePDF } from '../utils/pdf';
 
@@ -45,7 +48,10 @@ export default function ScalesPage({ user }: Props) {
   const [fillModal, setFillModal] = useState(false);
   const [fillLoading, setFillLoading] = useState(false);
   const [fillMsg, setFillMsg] = useState('');
-  const [autoType, setAutoType] = useState<'month' | 'standard' | 'thematic' | 'specific'>('month');
+  const [autoType, setAutoType] = useState<'specific' | 'standard' | 'thematic'>('specific');
+  const [autoThematicCult, setAutoThematicCult] = useState<number | null>(null);
+  const [autoStandardDepts, setAutoStandardDepts] = useState<number[]>([]);
+  const [fillDone, setFillDone] = useState(false);
   const [addModal, setAddModal] = useState(false);
   const [newCultModal, setNewCultModal] = useState(false);
   const [newScale, setNewScale] = useState({ member_id: '', sector_id: '' });
@@ -79,7 +85,7 @@ export default function ScalesPage({ user }: Props) {
   );
   const { data: members } = useApi<Member[]>('/members?is_active=1');
   const { data: sectors } = useApi<Sector[]>('/sectors?is_active=1');
-  const { data: cultTypes } = useApi<CultType[]>('/cult_types');
+  const { data: cultTypes } = useApi<CultTypeEx[]>('/cult_types');
 
   const availableCults = cults || [];
 
@@ -168,6 +174,8 @@ export default function ScalesPage({ user }: Props) {
     setAutoModal(false);
     setAutoResult(null);
     setError('');
+    setAutoThematicCult(null);
+    setAutoStandardDepts([]);
   }
 
   const AUTO_LABELS: Record<string, string> = {
@@ -178,14 +186,17 @@ export default function ScalesPage({ user }: Props) {
 
   async function generateAuto() {
     if (autoType === 'specific' && !autoSpecificCult) { setError('Selecione um culto'); return; }
-    if ((autoType === 'standard' || autoType === 'thematic') && !selectedCult) { setError('Selecione um culto na tela principal'); return; }
+    if (autoType === 'thematic' && !autoThematicCult) { setError('Selecione um culto temático'); return; }
+    if (autoType === 'standard' && !selectedCult) { setError('Selecione um culto na tela principal'); return; }
     setSaving(true); setError(''); setAutoResult(null);
     try {
       let payload: Record<string, any>;
       if (autoType === 'specific') {
         payload = { type: 'standard', cult_id: autoSpecificCult };
+      } else if (autoType === 'thematic') {
+        payload = { type: 'thematic', cult_id: autoThematicCult };
       } else {
-        payload = { type: autoType, cult_id: selectedCult };
+        payload = { type: 'standard', cult_id: selectedCult, department_ids: autoStandardDepts.length > 0 ? autoStandardDepts : undefined };
       }
 
       const res = await api.post<{ message?: string; created?: number; cults_count?: number; scales_count?: number }>(
@@ -753,7 +764,7 @@ export default function ScalesPage({ user }: Props) {
               </p>
               <div className="space-y-2">
                 {[
-                  { value: 'specific', label: 'Culto Específico', desc: 'Distribui voluntários em um culto específico' },
+                  { value: 'specific', label: 'Culto Específico', desc: 'Selecione qualquer culto da lista' },
                   { value: 'standard', label: 'Cultos Padrão',    desc: 'Dom Manhã/Noite, Ter EDP, Qua Milagres/4D, Qui Vitória' },
                   { value: 'thematic', label: 'Cultos Temáticos', desc: 'Cultos fora do calendário padrão (sem dia fixo)' },
                 ].map(opt => (
@@ -769,9 +780,7 @@ export default function ScalesPage({ user }: Props) {
                 ))}
               </div>
 
-
-
-              {/* Seletor de culto específico */}
+              {/* Culto Específico — lista todos */}
               {autoType === 'specific' && (
                 <div className="space-y-1">
                   <label className="text-stone-400 text-xs">Selecione o culto</label>
@@ -790,14 +799,72 @@ export default function ScalesPage({ user }: Props) {
                 </div>
               )}
 
-              {(autoType === 'standard' || autoType === 'thematic') && !selectedCult && (
-                <p className="text-amber-400 text-xs">⚠️ Selecione um culto na tela principal antes de gerar.</p>
+              {/* Cultos Temáticos — lista apenas não-padrão */}
+              {autoType === 'thematic' && (
+                <div className="space-y-1">
+                  <label className="text-stone-400 text-xs">Selecione o culto temático</label>
+                  <select
+                    value={autoThematicCult ?? ''}
+                    onChange={e => setAutoThematicCult(e.target.value ? Number(e.target.value) : null)}
+                    className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="">Selecionar culto temático...</option>
+                    {availableCults
+                      .filter(c => {
+                        const ct = (cultTypes || []).find(t => t.id === c.type_id);
+                        return !ct || ct.default_day === null || ct.default_day === undefined;
+                      })
+                      .map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.name || c.type_name || 'Culto'} — {c.date} {c.time}
+                        </option>
+                      ))}
+                  </select>
+                </div>
               )}
+
+              {/* Cultos Padrão — culto selecionado na tela + seleção de departamentos */}
+              {autoType === 'standard' && (
+                <div className="space-y-3">
+                  {!selectedCult ? (
+                    <p className="text-amber-400 text-xs">⚠️ Selecione um culto padrão na tela principal antes de gerar.</p>
+                  ) : (
+                    <>
+                      <div className="bg-stone-800/60 rounded-lg p-3 border border-stone-700">
+                        <p className="text-stone-400 text-xs mb-1">Culto selecionado</p>
+                        <p className="text-stone-200 text-sm font-medium">
+                          {availableCults.find(c => c.id === selectedCult)?.type_name || availableCults.find(c => c.id === selectedCult)?.name}
+                        </p>
+                        <p className="text-stone-500 text-xs">
+                          {availableCults.find(c => c.id === selectedCult)?.date} {availableCults.find(c => c.id === selectedCult)?.time}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-stone-400 text-xs mb-2">Departamentos <span className="text-stone-600">(todos se nenhum selecionado)</span></p>
+                        <div className="space-y-1 max-h-36 overflow-y-auto">
+                          {(deptBlocks.length > 0 ? deptBlocks.map(d => ({ id: d.department_id, name: d.department_name })) : []).map(dept => dept.id && (
+                            <label key={dept.id} className="flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-stone-800 transition-colors">
+                              <input type="checkbox"
+                                checked={autoStandardDepts.includes(dept.id!)}
+                                onChange={e => setAutoStandardDepts(prev =>
+                                  e.target.checked ? [...prev, dept.id!] : prev.filter(id => id !== dept.id)
+                                )}
+                                className="accent-amber-500 w-4 h-4" />
+                              <span className="text-stone-300 text-sm">{dept.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
               {error && <p className="text-red-400 text-xs">{error}</p>}
               <div className="flex gap-3">
                 <Button variant="outline" onClick={closeAutoModal}>Cancelar</Button>
                 <Button onClick={generateAuto} loading={saving}
-                  disabled={(autoType === 'specific' && !autoSpecificCult) || ((autoType === 'standard' || autoType === 'thematic') && !selectedCult)}>
+                  disabled={(autoType === 'specific' && !autoSpecificCult) || (autoType === 'thematic' && !autoThematicCult) || (autoType === 'standard' && !selectedCult)}>
                   Gerar
                 </Button>
               </div>
@@ -826,12 +893,18 @@ export default function ScalesPage({ user }: Props) {
           {fillMsg && (
             <p className={`text-sm font-medium ${fillMsg.startsWith('❌') ? 'text-red-400' : 'text-emerald-400'}`}>{fillMsg}</p>
           )}
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={() => { setFillModal(false); setFillMsg(''); }}>Cancelar</Button>
-            <Button onClick={fillCult} loading={fillLoading} disabled={!!fillMsg && !fillMsg.startsWith('❌')}>
-              <Zap size={15} /> Preencher
+          {fillMsg && !fillMsg.startsWith('❌') ? (
+            <Button className="w-full" onClick={() => { setFillModal(false); setFillMsg(''); setFillDone(false); }}>
+              ✓ Concluir
             </Button>
-          </div>
+          ) : (
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={() => { setFillModal(false); setFillMsg(''); }}>Cancelar</Button>
+              <Button onClick={fillCult} loading={fillLoading}>
+                <Zap size={15} /> Preencher
+              </Button>
+            </div>
+          )}
         </div>
       </Modal>
 
