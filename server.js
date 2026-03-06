@@ -542,7 +542,7 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
   );
 
   // Contagem mensal por membro: "member_id:yyyy-mm" → count
-  const monthlyCount = new Map<string, number>();
+  const monthlyCount = new Map();
   for (const s of existingScales || []) {
     const cult = cults.find(c => c.id === s.cult_id);
     if (!cult) continue;
