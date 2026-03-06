@@ -86,6 +86,7 @@ export default function ScalesPage({ user }: Props) {
   }
 
   const [printMonth, setPrintMonth] = useState<string>(new Date().toISOString().slice(0, 7));
+  const { data: cults, refetch: refetchCults } = useApi<Cult[]>('/cults?status=Agendado');
   const { data: scales, refetch: refetchScales } = useApi<Scale[]>(
     selectedCult ? `/scales?cult_id=${selectedCult}` : null, [selectedCult]
   );
