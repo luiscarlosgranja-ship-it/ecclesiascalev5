@@ -77,27 +77,27 @@ const ALL_NAV_ITEMS = [
 
 // Accent por grupo — tema light: cores mais saturadas/escuras para contraste em fundo branco
 const GROUP_ACCENT: Record<string, string> = {
-  'Geral':      '#b45309',  // amber-700
-  'Cadastros':  '#1d4ed8',  // blue-700
-  'Pastoral':   '#065f46',  // emerald-800
-  'Backup':     '#6b21a8',  // purple-800
-  'Segurança':  '#991b1b',  // red-800
+  'Geral':      '#c9a227',  // dourado
+  'Cadastros':  '#2563eb',  // azul royal
+  'Pastoral':   '#059669',  // verde esmeralda
+  'Backup':     '#7c3aed',  // violeta
+  'Segurança':  '#dc2626',  // vermelho
 };
 
 const GROUP_LIGHT: Record<string, string> = {
-  'Geral':      '#fffbeb',
+  'Geral':      '#fefce8',
   'Cadastros':  '#eff6ff',
   'Pastoral':   '#ecfdf5',
-  'Backup':     '#faf5ff',
-  'Segurança':  '#fff1f2',
+  'Backup':     '#f5f3ff',
+  'Segurança':  '#fef2f2',
 };
 
 const GROUP_BORDER: Record<string, string> = {
-  'Geral':      '#fcd34d',
-  'Cadastros':  '#93c5fd',
-  'Pastoral':   '#6ee7b7',
-  'Backup':     '#d8b4fe',
-  'Segurança':  '#fda4af',
+  'Geral':      '#f59e0b',
+  'Cadastros':  '#60a5fa',
+  'Pastoral':   '#34d399',
+  'Backup':     '#a78bfa',
+  'Segurança':  '#f87171',
 };
 
 interface LayoutProps {
@@ -300,42 +300,42 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
 
         /* ── Variáveis de tema ── */
         :root {
-          --bg-base:       #f5f3ed;
-          --bg-surface:    #faf9f6;
-          --bg-elevated:   #eeeade;
-          --bg-input:      #f0ece2;
-          --border-soft:   #ddd8cc;
-          --border-subtle: #e8e4da;
-          --text-primary:  #1a1a1a;
-          --text-secondary:#4a4540;
-          --text-muted:    #9a9088;
-          --text-faint:    #ccc8be;
-          --shadow-sm:     0 1px 4px rgba(0,0,0,.08);
-          --shadow-md:     0 4px 18px rgba(0,0,0,.10);
-          --shadow-lg:     0 12px 40px rgba(0,0,0,.13);
+          --bg-base:       #f2f0e8;
+          --bg-surface:    #faf9f5;
+          --bg-elevated:   #edeae0;
+          --bg-input:      #f5f3ec;
+          --border-soft:   #d8d4c8;
+          --border-subtle: #e5e2d8;
+          --text-primary:  #141210;
+          --text-secondary:#3d3830;
+          --text-muted:    #8c8678;
+          --text-faint:    #c8c4b8;
+          --shadow-sm:     0 1px 4px rgba(0,0,0,.07);
+          --shadow-md:     0 4px 20px rgba(0,0,0,.09);
+          --shadow-lg:     0 16px 48px rgba(0,0,0,.12);
           --accent:        #c9a227;
-          --accent-soft:   #fdf6e0;
-          --scrollbar-track: #eeeade;
-          --scrollbar-thumb: #ccc8be;
+          --accent-soft:   #fdf8e8;
+          --scrollbar-track: #edeae0;
+          --scrollbar-thumb: #c8c4b8;
         }
         .dark {
-          --bg-base:       #0f1623;
-          --bg-surface:    #1a2332;
-          --bg-elevated:   #1e2a3d;
-          --bg-input:      #1c2538;
-          --border-soft:   #2a3a52;
-          --border-subtle: #223044;
-          --text-primary:  #f0ede6;
-          --text-secondary:#b0a898;
-          --text-muted:    #6a7a8a;
-          --text-faint:    #3a4a5a;
-          --shadow-sm:     0 1px 3px rgba(0,0,0,.35);
-          --shadow-md:     0 4px 16px rgba(0,0,0,.45);
-          --shadow-lg:     0 12px 40px rgba(0,0,0,.65);
-          --accent:        #c9a227;
-          --accent-soft:   #1e1800;
-          --scrollbar-track: #1a2332;
-          --scrollbar-thumb: #2a3a52;
+          --bg-base:       #0c1220;
+          --bg-surface:    #132035;
+          --bg-elevated:   #192840;
+          --bg-input:      #162238;
+          --border-soft:   #253550;
+          --border-subtle: #1d2e47;
+          --text-primary:  #f4f0e8;
+          --text-secondary:#a8a090;
+          --text-muted:    #607080;
+          --text-faint:    #304058;
+          --shadow-sm:     0 1px 4px rgba(0,0,0,.40);
+          --shadow-md:     0 4px 20px rgba(0,0,0,.50);
+          --shadow-lg:     0 16px 48px rgba(0,0,0,.70);
+          --accent:        #d4a82a;
+          --accent-soft:   #1a1400;
+          --scrollbar-track: #132035;
+          --scrollbar-thumb: #253550;
         }
 
         @keyframes spDrop   { from { opacity:0; transform:translateY(-6px) scaleY(.96); } to { opacity:1; transform:translateY(0) scaleY(1); } }
@@ -391,7 +391,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
           style={{ display: 'flex', alignItems: 'center', gap: 9, marginRight: 20, flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
           {logoUrl
             ? <img src={logoUrl} alt="Logo" style={{ width: 30, height: 30, borderRadius: 8, objectFit: 'contain' }} />
-            : <div style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(135deg,#a07c10,#c9a227)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(180,83,9,.25)' }}>
+            : <div style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(135deg,#8a6a08,#d4a82a)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(180,83,9,.25)' }}>
                 <span style={{ color: '#fef3c7', fontWeight: 800, fontSize: 13 }}>{(churchName || 'E')[0].toUpperCase()}</span>
               </div>
           }
@@ -464,7 +464,7 @@ export default function Layout({ user, page, setPage, onLogout, children }: Layo
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border-soft)', borderRadius: 10, padding: '5px 10px', flexShrink: 0 }}>
-            <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'linear-gradient(135deg,#a07c10,#c9a227)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'linear-gradient(135deg,#8a6a08,#d4a82a)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <span style={{ color: '#fef3c7', fontSize: 10, fontWeight: 800 }}>{(user.name || user.email)[0].toUpperCase()}</span>
             </div>
             <div className="hidden sm:block">
