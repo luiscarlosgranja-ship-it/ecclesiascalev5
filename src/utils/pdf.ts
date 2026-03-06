@@ -694,10 +694,15 @@ export async function exportScalePDF(
 
   // Culto único → blocos de departamento
   if (cult) {
+    console.log('📄 PDF Culto: Usando layout em BLOCOS');
     return exportSingleCultBlocksPDF(filteredScales, cult, title);
   }
 
   // Fallback (não deve chegar aqui)
+  console.log('⚠️ PDF Fallback: cult é null, usando tabela simples');
+  console.log('scales:', scales.length);
+  console.log('cult:', cult);
+  
   const logo = await fetchLogo();
   const doc = new jsPDF({ orientation: 'portrait', format: 'a4', unit: 'mm' });
   const PW = doc.internal.pageSize.getWidth();
