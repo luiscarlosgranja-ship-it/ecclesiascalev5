@@ -80,6 +80,27 @@ export default function CultsPage({ user }: Props) {
     if (cultsToDelete.size === 0) return;
     setDeletingCults(true);
     try {
+      // Verificar se algum culto tem escalas
+      const checks = await Promise.all(
+        Array.from(cultsToDelete).map(async id => {
+          const scales = await api.get<{ id: number }[]>(`/scales?cult_id=${id}`);
+          return { id, hasScales: scales && scales.length > 0, count: scales?.length ?? 0 };
+        })
+      );
+      const withScales = checks.filter(c => c.hasScales);
+      if (withScales.length > 0) {
+        const names = withScales.map(c => {
+          const cult = (cults || []).find(x => x.id === c.id);
+          return `• ${cult ? getCultName(cult) : `Culto #${c.id}`} (${c.count} voluntário(s))`;
+        }).join('
+');
+        alert(`Os cultos abaixo possuem escalas e não podem ser excluídos.
+Remova as escalas primeiro na tela Escalas:
+
+${names}`);
+        setDeletingCults(false);
+        return;
+      }
       await Promise.all(Array.from(cultsToDelete).map(id => api.delete(`/cults/${id}`)));
       setCultsToDelete(new Set());
       setDeleteCultsModal(false);
@@ -139,8 +160,17 @@ export default function CultsPage({ user }: Props) {
 
   async function deleteCult(id: number) {
     if (!confirm('Excluir este culto permanentemente?')) return;
-    await api.delete(`/cults/${id}`);
-    refetch();
+    try {
+      const scales = await api.get<{ id: number }[]>(`/scales?cult_id=${id}`);
+      if (scales && scales.length > 0) {
+        alert(`Não é possível excluir este culto pois existem ${scales.length} voluntário(s) escalado(s). Remova a escala primeiro na tela Escalas.`);
+        return;
+      }
+      await api.delete(`/cults/${id}`);
+      refetch();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao excluir culto');
+    }
   }
 
   async function saveCult() {
