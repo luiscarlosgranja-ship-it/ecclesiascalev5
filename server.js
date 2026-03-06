@@ -687,9 +687,9 @@ app.get('/api/pastoral-cabinet/schedules', auth, async (req, res) => {
       ...s,
       is_available: !booking,
       booking_id: booking?.id || null,
-      booked_by_name: booking?.booked_name || booking?.members?.name || null,
-      booked_by_phone: booking?.booked_phone || null,
-      booking_subject: booking?.subject || null,
+      booked_by_name: booking?.booked_name || booking?.members?.name || s.booked_by_name || null,
+      booked_by_phone: booking?.booked_phone || s.booked_by_phone || null,
+      booking_subject: booking?.subject || s.booking_subject || null,
       pastoral_cabinet_bookings: undefined,
     };
   });
@@ -787,6 +787,30 @@ app.delete('/api/pastoral-cabinet/schedules/:id', auth, requireRole('SuperAdmin'
   res.json({ message: 'Excluído' });
 });
 
+// Atualizar horário de gabinete (data, hora, duração, dados do solicitante, disponibilidade)
+app.put('/api/pastoral-cabinet/schedules/:id', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
+  const { date, time, duration_minutes, is_available,
+          booked_by_name, booked_by_phone, booking_subject } = req.body;
+
+  const updateData = {};
+  if (date             !== undefined) updateData.date             = date;
+  if (time             !== undefined) updateData.time             = time;
+  if (duration_minutes !== undefined) updateData.duration_minutes = duration_minutes;
+  if (is_available     !== undefined) updateData.is_available     = is_available;
+  if (booked_by_name   !== undefined) updateData.booked_by_name   = booked_by_name;
+  if (booked_by_phone  !== undefined) updateData.booked_by_phone  = booked_by_phone;
+  if (booking_subject  !== undefined) updateData.booking_subject  = booking_subject;
+
+  const { data, error } = await db
+    .from('pastoral_cabinet_schedules')
+    .update(updateData)
+    .eq('id', req.params.id)
+    .select().single();
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.json(data);
+});
+
 // ─── Pastoral Cabinet Bookings ────────────────────────────────────────────────
 
 // Listar agendamentos de um voluntário
@@ -805,11 +829,20 @@ app.get('/api/pastoral-cabinet/bookings/volunteer/:volunteer_id', auth, async (r
   })));
 });
 
-// Criar agendamento
+// Criar agendamento (voluntário OU secretaria)
 app.post('/api/pastoral-cabinet/bookings', auth, async (req, res) => {
-  const { volunteer_id, schedule_id, date, time, notes } = req.body;
-  if (!volunteer_id || !schedule_id || !date || !time)
-    return res.status(400).json({ message: 'Dados obrigatórios incompletos' });
+  const { volunteer_id, schedule_id, date, time, notes, booked_name, booked_phone, subject } = req.body;
+
+  if (!schedule_id) return res.status(400).json({ message: 'Horário é obrigatório' });
+  if (!volunteer_id && !booked_name) return res.status(400).json({ message: 'Nome do solicitante é obrigatório' });
+
+  // Buscar dados do horário
+  const { data: schedule, error: scheduleError } = await db
+    .from('pastoral_cabinet_schedules')
+    .select('id, date, time, duration_minutes, is_available')
+    .eq('id', schedule_id)
+    .single();
+  if (scheduleError || !schedule) return res.status(404).json({ message: 'Horário não encontrado' });
 
   // Verifica se o horário ainda está disponível
   const { data: existing } = await db
@@ -820,9 +853,21 @@ app.post('/api/pastoral-cabinet/bookings', auth, async (req, res) => {
     .maybeSingle();
   if (existing) return res.status(409).json({ message: 'Este horário já foi reservado' });
 
+  const insertData = {
+    schedule_id,
+    date: date || schedule.date,
+    time: time || schedule.time,
+    notes: notes || null,
+    status: 'Agendado',
+  };
+  if (volunteer_id) insertData.volunteer_id = volunteer_id;
+  if (booked_name)  insertData.booked_name  = booked_name;
+  if (booked_phone) insertData.booked_phone = booked_phone;
+  if (subject)      insertData.subject      = subject;
+
   const { data, error } = await db
     .from('pastoral_cabinet_bookings')
-    .insert({ volunteer_id, schedule_id, date, time, notes: notes || null, status: 'Agendado' })
+    .insert(insertData)
     .select().single();
   if (error) return res.status(500).json({ message: error.message });
 
@@ -831,9 +876,10 @@ app.post('/api/pastoral-cabinet/bookings', auth, async (req, res) => {
 
   // Notifica o admin
   const { data: admins } = await db.from('users').select('id').in('role', ['SuperAdmin', 'Admin']);
-  const { data: member } = await db.from('members').select('name').eq('id', volunteer_id).maybeSingle();
+  const nomeSolicitante = booked_name || 'Voluntário';
   for (const admin of admins || []) {
-    await notify(admin.id, 'Novo Agendamento de Gabinete', `${member?.name || 'Voluntário'} agendou o gabinete para ${date} às ${time}`);
+    await notify(admin.id, 'Novo Agendamento de Gabinete',
+      `${nomeSolicitante} agendou o gabinete para ${insertData.date} às ${insertData.time}`);
   }
 
   res.json({ id: data.id });
