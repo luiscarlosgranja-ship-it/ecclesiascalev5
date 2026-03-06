@@ -42,7 +42,6 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       .then(r => r.ok ? r.json() : [])
       .then(data => setCultTypes(Array.isArray(data) ? data : []))
       .catch(() => {});
-    // ✅ Busca logo customizado
     fetch('/api/public/church-name')
       .then(r => r.ok ? r.json() : {})
       .then(data => { if (data.name) setChurchName(data.name); })
@@ -52,6 +51,20 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       .then(data => { if (data.logo) setLogoUrl(data.logo); })
       .catch(() => {});
   }, []);
+
+  // ── Favicon e título da aba (tela de login) ───────────────────────────────
+  useEffect(() => {
+    if (churchName) document.title = churchName;
+    if (logoUrl) {
+      let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      link.href = logoUrl;
+    }
+  }, [churchName, logoUrl]);
 
   async function handleChangePassword() {
     if (!newPassword || newPassword.length < 8) { setError('Senha deve ter mínimo 8 caracteres'); return; }
