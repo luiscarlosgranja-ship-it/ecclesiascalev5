@@ -632,51 +632,165 @@ function groupScalesByDepartmentForMonth(scales: Scale[]): DepartmentGroup[] {
 // ─────────────────────────────────────────────────────────────────────────────
 //  exportScalePDF  — culto único (blocos por departamento) OU mês (grade paisagem)
 // ─────────────────────────────────────────────────────────────────────────────
-export async function exportScalePDF(
+// ─────────────────────────────────────────────────────────────────────────────
+//  NOVA FUNÇÃO: PDF CULTO EM BLOCOS LANDSCAPE
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function exportCultoPDFBlocos(
   scales: Scale[],
-  cult: Cult | null,
+  cult: Cult,
   title: string,
-  allScales?: Scale[],
-  allCults?: Cult[],
-  selectedSectors?: string[],
-  selectedDepartmentIds?: number[],
 ) {
-  console.log('🚀 exportScalePDF chamado:', {
-    scales: scales.length,
-    cult: cult ? `${cult.date} ${cult.time}` : 'null',
-    allCults: allCults?.length || 0,
-    selectedDepartmentIds
+  const logo = await fetchLogo();
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    format: 'a4',
+    unit: 'mm',
   });
 
-  // Se é mês inteiro (múltiplos cultos)
-  if (allScales && allCults && allCults.length > 1) {
-    console.log('📅 Modo MÊS detectado - usando grid landscape');
-    return exportMonthGridPDF(allScales, allCults, title);
+  const pageWidth = 297;
+  const pageHeight = 210;
+  const margin = 10;
+  const contentWidth = pageWidth - margin * 2;
+
+  // ─ HEADER ─
+  doc.setFillColor(40, 40, 40);
+  doc.rect(0, 0, pageWidth, 30, 'F');
+
+  doc.setTextColor(255, 215, 0);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.text(title, pageWidth / 2, 15, { align: 'center' });
+
+  doc.setTextColor(180, 180, 180);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  doc.text(`${cult.date} · ${cult.time} · ${cult.name || cult.type_name}`, pageWidth / 2, 23, { align: 'center' });
+
+  // ─ AGRUPAR POR DEPARTAMENTO ─
+  const deptMap = new Map<string, Array<{ name: string; sector: string }>>();
+
+  for (const scale of scales) {
+    const sectorLower = (scale.sector_name || '').toLowerCase().trim();
+    
+    let dept = 'Sem Departamento';
+    
+    if (sectorLower.includes('louvor') || sectorLower.match(/^louvor\s+\d/i)) {
+      dept = 'Louvor';
+    } else if (['filmagem', 'foto', 'som', 'iluminação', 'iluminacao', 'projeção', 'projecao'].includes(sectorLower) || sectorLower.includes('transmissão')) {
+      dept = 'Mídia';
+    } else if (sectorLower.match(/^setor\s+\d/i) || ['externo', 'máquina de cartão', 'maquina de cartao'].includes(sectorLower) || sectorLower.includes('recepção') || sectorLower.includes('recepcao')) {
+      dept = 'Obreiros / Diáconos';
+    } else if (sectorLower.match(/^una\s+\d/i)) {
+      dept = 'Una';
+    } else if (sectorLower.includes('infantil') || sectorLower.includes('departamento')) {
+      dept = 'Infantil';
+    }
+
+    if (!deptMap.has(dept)) {
+      deptMap.set(dept, []);
+    }
+
+    deptMap.get(dept)!.push({
+      name: scale.member_name || '—',
+      sector: scale.sector_name || '—',
+    });
   }
 
-  // Se é culto único - SEMPRE usar blocos
-  if (cult && scales.length > 0) {
-    console.log('📄 Modo CULTO ÚNICO detectado - usando blocos');
-    return exportSingleCultBlocksPDF(scales, cult, title);
+  // ─ ORDEM DOS DEPARTAMENTOS ─
+  const deptOrder = [
+    'Obreiros / Diáconos',
+    'Louvor',
+    'Mídia',
+    'Infantil',
+    'Una',
+    'Bem-Vindos',
+  ];
+
+  // ─ CALCULAR LAYOUT ─
+  const deptsToPrint = deptOrder.filter(d => deptMap.has(d));
+  const numDepts = deptsToPrint.length;
+  const blocksPerRow = numDepts <= 2 ? numDepts : 2;
+  const blockWidth = (contentWidth - (blocksPerRow - 1) * 10) / blocksPerRow;
+  const blockHeight = pageHeight - 60;
+
+  // ─ RENDERIZAR BLOCOS ─
+  let blockIndex = 0;
+
+  for (const deptName of deptOrder) {
+    if (!deptMap.has(deptName)) continue;
+
+    const deptVoluntarios = deptMap.get(deptName)!;
+    const blockCol = blockIndex % blocksPerRow;
+    const blockRow = Math.floor(blockIndex / blocksPerRow);
+
+    const blockX = margin + blockCol * (blockWidth + 10);
+    const blockY = 35 + blockRow * (blockHeight + 10);
+
+    // ─ BORDA DO BLOCO ─
+    doc.setDrawColor(150, 150, 150);
+    doc.setLineWidth(0.5);
+    doc.rect(blockX, blockY, blockWidth, blockHeight);
+
+    // ─ HEADER DO DEPARTAMENTO ─
+    doc.setFillColor(50, 50, 50);
+    doc.rect(blockX, blockY, blockWidth, 12, 'F');
+
+    doc.setTextColor(255, 215, 0);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text(deptName.toUpperCase(), blockX + 4, blockY + 8);
+
+    // ─ VOLUNTÁRIOS ─
+    let volunteerY = blockY + 14;
+    let rowCount = 0;
+
+    for (const vol of deptVoluntarios) {
+      // Background alternado
+      if (rowCount % 2 === 1) {
+        doc.setFillColor(240, 240, 240);
+        doc.rect(blockX, volunteerY - 3, blockWidth, 5.5, 'F');
+      }
+
+      // Nome
+      doc.setTextColor(0, 0, 0);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.text(vol.name, blockX + 3, volunteerY);
+
+      // Setor
+      doc.setTextColor(100, 100, 100);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.text(vol.sector, blockX + blockWidth / 2 + 2, volunteerY);
+
+      volunteerY += 5.5;
+      rowCount++;
+
+      if (volunteerY > blockY + blockHeight - 5) break;
+    }
+
+    blockIndex++;
   }
 
-  console.error('❌ ERRO: Nenhuma condição atendida!', { cult, scales: scales.length, allCults: allCults?.length });
-  
-  // Fallback nunca deveria chegar aqui
-  const logo = await fetchLogo();
-  const doc = new jsPDF({ orientation: 'portrait', format: 'a4', unit: 'mm' });
-  const PW = doc.internal.pageSize.getWidth();
-  const MX = 14;
+  // ─ RODAPÉ ─
+  doc.setFillColor(40, 40, 40);
+  doc.rect(0, pageHeight - 8, pageWidth, 8, 'F');
 
-  const subtitle = `${scales.length} voluntário(s)`;
-  let y = drawMainHeader(doc, logo, title, subtitle, PW);
+  doc.setTextColor(150, 150, 150);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.text('EcclesiaScale', margin, pageHeight - 3);
+  doc.text(`Página 1 / 1`, pageWidth - margin, pageHeight - 3, { align: 'right' });
 
-  const bySetor = new Map<string, Scale[]>();
-  for (const s of [...scales].sort((a,b)=>(a.sector_name||'').localeCompare(b.sector_name||''))) {
-    const k = s.sector_name || 'Sem Setor';
-    if (!bySetor.has(k)) bySetor.set(k, []);
-    bySetor.get(k)!.push(s);
-  }
+  // ─ SALVAR ─
+  const filename = `escala_${cult.date.replace(/-/g, '')}_${cult.time?.replace(/:/g, '') || '0000'}.pdf`;
+  doc.save(filename);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  FUNÇÃO ORIGINAL - MANUTENIDA PARA COMPATIBILIDADE
+// ─────────────────────────────────────────────────────────────────────────────
 
   const body: any[] = [];
   for (const [sectorName, ss] of bySetor) {
