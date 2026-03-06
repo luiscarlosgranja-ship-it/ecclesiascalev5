@@ -1,7 +1,5 @@
 // ─── EcclesiaScale API Server (Supabase Edition) ─────────────────────────────
 import express from 'express';
-import cors from 'cors';
-import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { createClient } from '@supabase/supabase-js';
@@ -12,14 +10,6 @@ import nodemailer from 'nodemailer';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-
-// ─── CORS ─────────────────────────────────────────────────────────────────────
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGIN || '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
-
 app.use(express.json());
 
 // ─── Supabase Setup ───────────────────────────────────────────────────────────
@@ -95,15 +85,7 @@ app.get('/api/public/cult_types', async (req, res) => {
 });
 
 // ─── Auth Routes ──────────────────────────────────────────────────────────────
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 10,                   // máximo 10 tentativas por IP
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Muitas tentativas de login. Tente novamente em 15 minutos.' },
-});
-
-app.post('/api/login', loginLimiter, async (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ message: 'Dados incompletos' });
 
@@ -120,7 +102,7 @@ app.post('/api/login', loginLimiter, async (req, res) => {
   }
 
   const token = jwt.sign({ id: user.id, email: user.email, role: user.role, member_id: user.member_id }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ id: user.id, email: user.email, role: user.role, member_id: user.member_id, name: memberName, token, must_change_password: !!user.must_change_password });
+  res.json({ id: user.id, email: user.email, role: user.role, member_id: user.member_id, name: memberName, token });
 });
 
 app.post('/api/register', async (req, res) => {
@@ -258,42 +240,8 @@ app.post('/api/members', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), asy
   if (email) {
     const { data: existingUser } = await db.from('users').select('id').eq('email', email).maybeSingle();
     if (!existingUser) {
-      // Gera senha aleatória segura (12 chars: letras + números + símbolo)
-      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#$!';
-      const tempPassword = Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-      const hash = bcrypt.hashSync(tempPassword, 10);
-      await db.from('users').insert({ email, password: hash, role: role || 'Membro', member_id: member.id, must_change_password: true });
-
-      // Tenta enviar senha por e-mail
-      try {
-        const transporter = await getTransporter();
-        const { data: smtpCfg } = await db.from('settings').select('key,value').in('key', ['smtp_user']);
-        const fromEmail = smtpCfg?.[0]?.value || process.env.SMTP_USER || '';
-        const { data: churchRow } = await db.from('settings').select('value').eq('key', 'church_name').single();
-        const churchName = churchRow?.value || 'EcclesiaScale';
-        await transporter.sendMail({
-          from: `${churchName} <${fromEmail}>`,
-          to: email,
-          subject: `Bem-vindo(a) ao ${churchName} — Suas credenciais de acesso`,
-          html: `
-            <div style="font-family:sans-serif;max-width:480px;margin:auto;background:#1c1917;color:#e7e5e4;padding:32px;border-radius:12px">
-              <h2 style="color:#f59e0b;margin-bottom:8px">Bem-vindo(a), ${name}!</h2>
-              <p style="color:#a8a29e">Sua conta foi criada no sistema <strong style="color:#e7e5e4">${churchName}</strong>.</p>
-              <div style="background:#292524;border-radius:8px;padding:20px;margin:24px 0;border:1px solid #44403c">
-                <p style="margin:0 0 8px;color:#a8a29e;font-size:13px">LOGIN:</p>
-                <p style="margin:0 0 16px;color:#e7e5e4;font-weight:bold">${email}</p>
-                <p style="margin:0 0 8px;color:#a8a29e;font-size:13px">SENHA TEMPORÁRIA:</p>
-                <p style="margin:0;color:#f59e0b;font-size:20px;font-weight:bold;letter-spacing:2px">${tempPassword}</p>
-              </div>
-              <p style="color:#f97316;font-size:13px">⚠️ Você será solicitado a criar uma nova senha no primeiro acesso.</p>
-              <p style="color:#78716c;font-size:12px;margin-top:24px">Se não esperava este e-mail, ignore-o com segurança.</p>
-            </div>
-          `,
-        });
-      } catch (emailErr) {
-        // E-mail falhou — registra no log mas não impede o cadastro
-        console.warn('⚠️ Não foi possível enviar e-mail de boas-vindas:', emailErr.message);
-      }
+      const hash = bcrypt.hashSync('EcclesiaScale@' + member.id, 10);
+      await db.from('users').insert({ email, password: hash, role: role || 'Membro', member_id: member.id });
     }
   }
 
@@ -517,9 +465,7 @@ app.post('/api/cults/generate-month', auth, requireRole('SuperAdmin', 'Admin'), 
     const dateStr = `${year}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
     for (const ct of cultTypes) {
-      // Só gera se o dia da semana bater com o padrão do tipo de culto
-      // default_day null ou undefined = tipo sem dia fixo, não gera automaticamente
-      if (ct.default_day !== null && ct.default_day !== undefined && ct.default_day === dayOfWeek) {
+      if (ct.default_day === dayOfWeek || ct.default_day === null) {
         toInsert.push({ type_id: ct.id, date: dateStr, time: ct.default_time || '19:00', status: 'Agendado' });
       }
     }
@@ -722,12 +668,11 @@ app.delete('/api/scales/:id', auth, requireRole('SuperAdmin', 'Admin', 'Líder')
   res.json({ message: 'Removido' });
 });
 
-// ─── Generate Empty Scale Slots (one per sector per cult, no member) ────────
+// ─── Generate Empty Scale Slots ──────────────────────────────────────────────
 app.post('/api/scales/generate-empty', auth, requireRole('SuperAdmin', 'Admin', 'Líder'), async (req, res) => {
   const { month, cult_id } = req.body;
   if (!month && !cult_id) return res.status(400).json({ message: 'Informe month ou cult_id' });
 
-  // Fetch target cults
   let cultsQuery = db.from('cults').select('*').neq('status', 'Cancelado');
   if (month) cultsQuery = cultsQuery.like('date', `${month}%`);
   else       cultsQuery = cultsQuery.eq('id', cult_id);
@@ -741,13 +686,11 @@ app.post('/api/scales/generate-empty', auth, requireRole('SuperAdmin', 'Admin', 
   let totalCreated = 0;
 
   for (const cult of cults) {
-    // Find which sectors already have a slot for this cult
     const { data: existing } = await db.from('scales').select('sector_id').eq('cult_id', cult.id);
     const usedSectorIds = new Set((existing || []).map(s => s.sector_id));
     const pendingSectors = sectors.filter(s => !usedSectorIds.has(s.id));
     if (!pendingSectors.length) continue;
 
-    // Insert empty slot (member_id = null) for each missing sector
     const toInsert = pendingSectors.map(s => ({
       cult_id: cult.id,
       sector_id: s.id,
@@ -758,6 +701,7 @@ app.post('/api/scales/generate-empty', auth, requireRole('SuperAdmin', 'Admin', 
 
     const { error } = await db.from('scales').insert(toInsert);
     if (!error) totalCreated += toInsert.length;
+    else console.error('[generate-empty] insert error:', error.message);
   }
 
   res.json({
@@ -1014,112 +958,6 @@ app.post('/api/activation-codes/activate', auth, async (req, res) => {
   res.json({ message: 'Sistema ativado com sucesso!' });
 });
 
-// ─── Change Password (first login) ───────────────────────────────────────────
-app.post('/api/security/change-password', auth, async (req, res) => {
-  const { password } = req.body;
-  if (!password || password.length < 8)
-    return res.status(400).json({ message: 'Senha deve ter mínimo 8 caracteres' });
-
-  const hash = bcrypt.hashSync(password, 10);
-  await db.from('users').update({ password: hash, must_change_password: false }).eq('id', req.user.id);
-  res.json({ message: 'Senha alterada com sucesso' });
-});
-
-// ─── User Management (SuperAdmin only) ────────────────────────────────────────
-
-// GET: List all users with member info
-app.get('/api/users', auth, requireRole('SuperAdmin'), async (req, res) => {
-  const { data, error } = await db
-    .from('users')
-    .select('id, email, role, is_active, last_login, must_change_password, created_at, member_id, members(name)')
-    .order('created_at', { ascending: false });
-  if (error) return res.status(500).json({ message: error.message });
-  const result = (data || []).map(u => ({
-    id: u.id,
-    email: u.email,
-    role: u.role,
-    is_active: u.is_active,
-    last_login: u.last_login,
-    must_change_password: u.must_change_password,
-    created_at: u.created_at,
-    member_id: u.member_id,
-    member_name: u.members?.name || null,
-  }));
-  res.json(result);
-});
-
-// PUT: Update user role and/or active status
-app.put('/api/users/:id/role', auth, requireRole('SuperAdmin'), async (req, res) => {
-  const { role, is_active } = req.body;
-  const VALID_ROLES = ['SuperAdmin', 'Admin', 'Líder', 'Membro', 'Secretaria'];
-  if (role && !VALID_ROLES.includes(role))
-    return res.status(400).json({ message: 'Role inválido' });
-  // Prevent SuperAdmin from demoting themselves
-  if (req.user.id === Number(req.params.id) && role && role !== 'SuperAdmin')
-    return res.status(403).json({ message: 'Você não pode alterar seu próprio role' });
-
-  const updates = {};
-  if (role !== undefined) updates.role = role;
-  if (is_active !== undefined) updates.is_active = is_active;
-
-  const { error } = await db.from('users').update(updates).eq('id', req.params.id);
-  if (error) return res.status(500).json({ message: error.message });
-
-  // Sync role to members table if linked
-  if (role) {
-    const { data: u } = await db.from('users').select('member_id').eq('id', req.params.id).single();
-    if (u?.member_id) await db.from('members').update({ role }).eq('id', u.member_id);
-  }
-  res.json({ message: 'Usuário atualizado' });
-});
-
-// DELETE: Remove user account (keeps member record)
-app.delete('/api/users/:id', auth, requireRole('SuperAdmin'), async (req, res) => {
-  if (req.user.id === Number(req.params.id))
-    return res.status(403).json({ message: 'Você não pode excluir sua própria conta' });
-  const { error } = await db.from('users').delete().eq('id', req.params.id);
-  if (error) return res.status(500).json({ message: error.message });
-  res.json({ message: 'Conta removida' });
-});
-
-// POST: Force password reset for a user (generates temp password + sends email)
-app.post('/api/users/:id/reset-password', auth, requireRole('SuperAdmin', 'Admin'), async (req, res) => {
-  const { data: u } = await db.from('users').select('email, member_id, members(name)').eq('id', req.params.id).single();
-  if (!u) return res.status(404).json({ message: 'Usuário não encontrado' });
-
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#$!';
-  const tempPassword = Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-  const hash = bcrypt.hashSync(tempPassword, 10);
-  await db.from('users').update({ password: hash, must_change_password: true }).eq('id', req.params.id);
-
-  try {
-    const transporter = await getTransporter();
-    const { data: smtpCfg } = await db.from('settings').select('key,value').in('key', ['smtp_user']);
-    const fromEmail = smtpCfg?.[0]?.value || process.env.SMTP_USER || '';
-    const { data: churchRow } = await db.from('settings').select('value').eq('key', 'church_name').single();
-    const churchName = churchRow?.value || 'EcclesiaScale';
-    const memberName = u.members?.name || u.email;
-    await transporter.sendMail({
-      from: `${churchName} <${fromEmail}>`,
-      to: u.email,
-      subject: `${churchName} — Nova senha temporária`,
-      html: `
-        <div style="font-family:sans-serif;max-width:480px;margin:auto;background:#1c1917;color:#e7e5e4;padding:32px;border-radius:12px">
-          <h2 style="color:#f59e0b">Redefinição de Senha</h2>
-          <p style="color:#a8a29e">Olá, <strong style="color:#e7e5e4">${memberName}</strong>. Sua senha foi redefinida por um administrador.</p>
-          <div style="background:#292524;border-radius:8px;padding:20px;margin:24px 0;border:1px solid #44403c">
-            <p style="margin:0 0 8px;color:#a8a29e;font-size:13px">NOVA SENHA TEMPORÁRIA:</p>
-            <p style="margin:0;color:#f59e0b;font-size:20px;font-weight:bold;letter-spacing:2px">${tempPassword}</p>
-          </div>
-          <p style="color:#f97316;font-size:13px">⚠️ Você será solicitado a criar uma nova senha no próximo acesso.</p>
-        </div>`,
-    });
-  } catch (e) {
-    console.warn('Email de reset não enviado:', e.message);
-  }
-  res.json({ message: 'Senha redefinida e e-mail enviado' });
-});
-
 // ─── Church Settings ──────────────────────────────────────────────────────────
 const CHURCH_FIELDS = ['church_name','church_cnpj','church_address','church_neighborhood','church_city','church_zip','church_phone','church_pastor_dirigente','church_pastor_presidente'];
 
@@ -1186,52 +1024,19 @@ app.delete('/api/settings/logo', auth, requireRole('SuperAdmin'), async (req, re
 });
 
 // ─── Pastoral Appointments ────────────────────────────────────────────────────
-app.get('/api/pastoral', auth, async (req, res) => {
-  // Busca agendamentos da secretaria
-  const { data: appointments, error: apptError } = await db
+app.get('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
+  const { data, error } = await db
     .from('pastoral_appointments')
-    .select('*, users(email, member_id, members(name))')
+    .select('*, users(email)')
     .order('date', { ascending: true })
     .order('time', { ascending: true });
-  if (apptError) return res.status(500).json({ message: apptError.message });
-
-  // Busca agendamentos do gabinete (feitos por voluntários)
-  const { data: cabinetBookings, error: cabError } = await db
-    .from('pastoral_cabinet_bookings')
-    .select('*, members(name)')
-    .order('date', { ascending: true })
-    .order('time', { ascending: true });
-  if (cabError) return res.status(500).json({ message: cabError.message });
-
-  // Normaliza agendamentos da secretaria
-  const apptResult = (appointments || []).map(a => ({
-    id: a.id,
-    name: a.name,
-    date: a.date,
-    time: a.time,
-    status: a.status,
-    notes: a.notes,
-    source: 'secretaria',
-    created_by_name: a.users?.members?.name || a.users?.email || null,
+  if (error) return res.status(500).json({ message: error.message });
+  const result = (data || []).map(a => ({
+    ...a,
+    created_by_name: a.users?.email || null,
+    users: undefined,
   }));
-
-  // Normaliza agendamentos do gabinete
-  const cabResult = (cabinetBookings || []).map(b => ({
-    id: `cab_${b.id}`,
-    name: b.members?.name || 'Voluntário',
-    date: b.date,
-    time: b.time,
-    status: b.status || 'Agendado',
-    notes: b.notes,
-    source: 'gabinete',
-    created_by_name: b.members?.name || null,
-  }));
-
-  // Combina e ordena por data/hora
-  const combined = [...apptResult, ...cabResult]
-    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-
-  res.json(combined);
+  res.json(result);
 });
 
 app.post('/api/pastoral', auth, requireRole('SuperAdmin', 'Admin', 'Secretaria'), async (req, res) => {
@@ -1416,417 +1221,6 @@ app.post('/api/backup/send-email', auth, requireRole('SuperAdmin', 'Admin'), asy
     res.status(500).json({ message: 'Erro ao enviar e-mail. Verifique as configurações SMTP na aba Config. E-mail.' });
   }
 });
-
-
-// ─── Pastoral Cabinet ────────────────────────────────────────────────────────
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ROTAS: Gerenciar Disponibilidade (Admin/Secretaria)
-// ─────────────────────────────────────────────────────────────────────────────
-
-// POST: Criar novo horário disponível
-app.post('/api/pastoral-cabinet/schedules', async (req, res) => {
-  try {
-    const { date, time, duration_minutes, is_available } = req.body;
-
-    // Validação
-    if (!date || !time || !duration_minutes) {
-      return res.status(400).json({
-        error: 'Data, hora e duração são obrigatórios'
-      });
-    }
-
-    // Verificar se já existe horário neste dia e hora
-    const { data: existing } = await db
-      .from('pastoral_cabinet_schedules')
-      .select('id')
-      .eq('date', date)
-      .eq('time', time)
-      .limit(1);
-
-    if (existing && existing.length > 0) {
-      return res.status(409).json({
-        error: 'Já existe um horário cadastrado nesta data e hora.'
-      });
-    }
-
-    // Inserir no Supabase
-    const { data, error } = await db
-      .from('pastoral_cabinet_schedules')
-      .insert([
-        {
-          date,
-          time,
-          duration_minutes,
-          is_available: is_available !== false
-        }
-      ])
-      .select();
-
-    if (error) {
-      console.error('Erro ao inserir:', error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    res.status(201).json(data[0]);
-  } catch (err) {
-    console.error('Erro:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET: Listar todos os horários
-app.get('/api/pastoral-cabinet/schedules', async (req, res) => {
-  try {
-    const { data, error } = await db
-      .from('pastoral_cabinet_schedules')
-      .select('*, pastoral_cabinet_bookings(volunteer_id, members(name))')
-      .order('date', { ascending: true })
-      .order('time', { ascending: true });
-
-    if (error) {
-      console.error('Erro ao buscar:', error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    const result = (data || []).map(s => ({
-      ...s,
-      booked_by_name: s.pastoral_cabinet_bookings?.[0]?.members?.name || null,
-      pastoral_cabinet_bookings: undefined,
-    }));
-
-    res.json(result);
-  } catch (err) {
-    console.error('Erro:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// DELETE: Deletar um horário
-app.delete('/api/pastoral-cabinet/schedules/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Verificar se existe agendamento neste horário
-    const { data: bookings, error: checkError } = await db
-      .from('pastoral_cabinet_bookings')
-      .select('id')
-      .eq('schedule_id', id)
-      .limit(1);
-
-    if (checkError) {
-      console.error('Erro ao verificar:', checkError);
-      return res.status(500).json({ error: checkError.message });
-    }
-
-    if (bookings && bookings.length > 0) {
-      return res.status(400).json({
-        error: 'Não é possível deletar este horário pois já tem agendamento'
-      });
-    }
-
-    // Deletar horário
-    const { error } = await db
-      .from('pastoral_cabinet_schedules')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('Erro ao deletar:', error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    res.json({ message: 'Horário deletado com sucesso' });
-  } catch (err) {
-    console.error('Erro:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ROTAS: Visualizar Disponibilidade (Voluntário)
-// ─────────────────────────────────────────────────────────────────────────────
-
-// GET: Disponibilidade por mês (para calendário)
-app.get('/api/pastoral-cabinet/availability/:month', async (req, res) => {
-  try {
-    const { month } = req.params; // Formato: "2024-03"
-    const [year, monthNum] = month.split('-');
-
-    // Buscar todos os horários do mês
-    const { data: schedules, error } = await db
-      .from('pastoral_cabinet_schedules')
-      .select('date, is_available')
-      .gte('date', `${year}-${monthNum}-01`)
-      .lt('date', `${year}-${parseInt(monthNum) + 1}-01`)
-      .order('date', { ascending: true });
-
-    if (error) {
-      console.error('Erro ao buscar:', error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    // Agrupar por data e verificar se tem disponibilidade
-    const availability = {};
-    const daysInMonth = new Date(year, monthNum, 0).getDate();
-
-    // Inicializar todos os dias do mês
-    for (let day = 1; day <= daysInMonth; day++) {
-      const dateStr = `${year}-${monthNum}-${String(day).padStart(2, '0')}`;
-      availability[dateStr] = { hasAvailable: false };
-    }
-
-    // Marcar dias com disponibilidade
-    schedules.forEach(schedule => {
-      if (schedule.is_available) {
-        availability[schedule.date].hasAvailable = true;
-      }
-    });
-
-    // Converter para array
-    const result = Object.entries(availability).map(([date, info]) => ({
-      date,
-      hasAvailable: info.hasAvailable
-    }));
-
-    res.json(result);
-  } catch (err) {
-    console.error('Erro:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET: Horários disponíveis para uma data específica
-app.get('/api/pastoral-cabinet/available-slots/:date', async (req, res) => {
-  try {
-    const { date } = req.params;
-
-    // Buscar horários disponíveis deste dia
-    const { data: slots, error } = await db
-      .from('pastoral_cabinet_schedules')
-      .select('id, date, time, duration_minutes')
-      .eq('date', date)
-      .eq('is_available', true)
-      .order('time', { ascending: true });
-
-    if (error) {
-      console.error('Erro ao buscar:', error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    // Formatar resposta
-    const result = slots.map(slot => ({
-      schedule_id: slot.id,
-      date: slot.date,
-      time: slot.time,
-      duration_minutes: slot.duration_minutes
-    }));
-
-    res.json(result);
-  } catch (err) {
-    console.error('Erro:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ROTAS: Agendamentos (Voluntário)
-// ─────────────────────────────────────────────────────────────────────────────
-
-// POST: Agendar gabinete
-app.post('/api/pastoral-cabinet/bookings', async (req, res) => {
-  try {
-    const { volunteer_id, schedule_id, date, time, duration_minutes, status, notes } = req.body;
-
-    // Validação
-    if (!volunteer_id || !schedule_id || !date || !time) {
-      return res.status(400).json({
-        error: 'Voluntário, horário, data e hora são obrigatórios'
-      });
-    }
-
-    // Verificar se o horário ainda está disponível
-    const { data: schedule, error: scheduleError } = await db
-      .from('pastoral_cabinet_schedules')
-      .select('is_available')
-      .eq('id', schedule_id)
-      .single();
-
-    if (scheduleError || !schedule || !schedule.is_available) {
-      return res.status(400).json({
-        error: 'Este horário não está mais disponível'
-      });
-    }
-
-    // Verificar se o voluntário já tem agendamento neste horário
-    const { data: existing, error: existError } = await db
-      .from('pastoral_cabinet_bookings')
-      .select('id')
-      .eq('volunteer_id', volunteer_id)
-      .eq('schedule_id', schedule_id)
-      .limit(1);
-
-    if (existError) {
-      console.error('Erro ao verificar:', existError);
-      return res.status(500).json({ error: existError.message });
-    }
-
-    if (existing && existing.length > 0) {
-      return res.status(400).json({
-        error: 'Você já tem um agendamento neste horário'
-      });
-    }
-
-    // Criar agendamento
-    const { data: booking, error: bookingError } = await db
-      .from('pastoral_cabinet_bookings')
-      .insert([
-        {
-          volunteer_id,
-          schedule_id,
-          date,
-          time,
-          duration_minutes,
-          status: status || 'Agendado',
-          notes
-        }
-      ])
-      .select();
-
-    if (bookingError) {
-      console.error('Erro ao criar agendamento:', bookingError);
-      return res.status(500).json({ error: bookingError.message });
-    }
-
-    // Marcar horário como não disponível
-    await db
-      .from('pastoral_cabinet_schedules')
-      .update({ is_available: false })
-      .eq('id', schedule_id);
-
-    res.status(201).json(booking[0]);
-  } catch (err) {
-    console.error('Erro:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET: Agendamentos de um voluntário
-app.get('/api/pastoral-cabinet/bookings/volunteer/:volunteerId', async (req, res) => {
-  try {
-    const { volunteerId } = req.params;
-
-    const { data, error } = await db
-      .from('pastoral_cabinet_bookings')
-      .select('*')
-      .eq('volunteer_id', volunteerId)
-      .order('date', { ascending: false })
-      .order('time', { ascending: false });
-
-    if (error) {
-      console.error('Erro ao buscar:', error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    res.json(data);
-  } catch (err) {
-    console.error('Erro:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// PUT: Atualizar status do agendamento
-app.put('/api/pastoral-cabinet/bookings/:id', auth, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status, notes } = req.body;
-
-    // Busca booking atual para notificar voluntário
-    const { data: existing } = await db
-      .from('pastoral_cabinet_bookings')
-      .select('*, members(name, id)')
-      .eq('id', id)
-      .single();
-
-    const { data, error } = await db
-      .from('pastoral_cabinet_bookings')
-      .update({ status, notes, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .select();
-
-    if (error) {
-      console.error('Erro ao atualizar:', error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    // Notifica o voluntário se status mudou
-    if (existing && status && status !== existing.status) {
-      const { data: userRow } = await db
-        .from('users')
-        .select('id')
-        .eq('member_id', existing.volunteer_id)
-        .single();
-
-      if (userRow) {
-        const dateFormatted = existing.date?.split('-').reverse().join('/') || '';
-        const msgs = {
-          'Confirmado': `Seu agendamento de gabinete em ${dateFormatted} às ${existing.time} foi confirmado! ✅`,
-          'Cancelado':  `Seu agendamento de gabinete em ${dateFormatted} às ${existing.time} foi cancelado.`,
-          'Realizado':  `Seu atendimento pastoral em ${dateFormatted} foi marcado como realizado.`,
-        };
-        const msg = msgs[status];
-        if (msg) await notify(userRow.id, 'Gabinete Pastoral', msg);
-      }
-    }
-
-    res.json(data[0]);
-  } catch (err) {
-    console.error('Erro:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// DELETE: Cancelar agendamento
-app.delete('/api/pastoral-cabinet/bookings/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Buscar agendamento para obter schedule_id
-    const { data: booking, error: getError } = await db
-      .from('pastoral_cabinet_bookings')
-      .select('schedule_id')
-      .eq('id', id)
-      .single();
-
-    if (getError || !booking) {
-      return res.status(404).json({ error: 'Agendamento não encontrado' });
-    }
-
-    // Deletar agendamento
-    const { error: deleteError } = await db
-      .from('pastoral_cabinet_bookings')
-      .delete()
-      .eq('id', id);
-
-    if (deleteError) {
-      console.error('Erro ao deletar:', deleteError);
-      return res.status(500).json({ error: deleteError.message });
-    }
-
-    // Liberar horário (marcar como disponível)
-    await db
-      .from('pastoral_cabinet_schedules')
-      .update({ is_available: true })
-      .eq('id', booking.schedule_id);
-
-    res.json({ message: 'Agendamento cancelado com sucesso' });
-  } catch (err) {
-    console.error('Erro:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 
 // ─── Static (production) ──────────────────────────────────────────────────────
 if (process.env.NODE_ENV === 'production') {
