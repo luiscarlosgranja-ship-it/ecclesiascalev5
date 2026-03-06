@@ -227,52 +227,71 @@ export default function PastoralCabinetBooking({ volunteerId, volunteerName, onB
                   <Loader2 size={20} className="animate-spin text-amber-500" />
                 </div>
               ) : (
-                <div className="grid grid-cols-7 gap-2">
-                  {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'].map(day => (
-                    <div
-                      key={day}
-                      className="text-center text-xs font-semibold text-stone-500 py-2"
-                    >
+                <div className="grid grid-cols-7 gap-1">
+                  {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(day => (
+                    <div key={day} className="text-center text-xs font-semibold text-stone-500 py-2">
                       {day}
                     </div>
                   ))}
 
-                  {monthDays.length === 0 ? (
-                    <div className="col-span-7 text-center py-4 text-stone-500 text-sm">
-                      Nenhuma disponibilidade neste mês
-                    </div>
-                  ) : (
-                    monthDays.map(dayInfo => {
-                      const dayNum = parseInt(dayInfo.date.split('-')[2]);
-                      const isSelected = dayInfo.date === selectedDate;
-                      const hasAvailable = dayInfo.hasAvailable;
+                  {/* Células vazias antes do dia 1 */}
+                  {Array.from({ length: new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay() }).map((_, i) => (
+                    <div key={`empty-${i}`} />
+                  ))}
 
-                      return (
-                        <button
-                          key={dayInfo.date}
-                          onClick={() => {
-                            if (hasAvailable) {
-                              setSelectedDate(dayInfo.date);
-                              setSelectedTime('');
-                              setSelectedScheduleId(null);
-                            }
-                          }}
-                          disabled={!hasAvailable}
-                          className={`
-                            aspect-square rounded-lg text-sm font-medium transition-all
-                            ${isSelected
-                              ? 'bg-amber-500 text-stone-900 shadow-lg'
-                              : hasAvailable
-                              ? 'bg-stone-700 text-stone-200 hover:bg-amber-500/30 cursor-pointer'
-                              : 'bg-stone-900 text-stone-600 cursor-not-allowed'
-                            }
-                          `}
-                        >
-                          {dayNum}
-                        </button>
-                      );
-                    })
-                  )}
+                  {/* Todos os dias do mês */}
+                  {Array.from({ length: new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate() }, (_, i) => {
+                    const day = i + 1;
+                    const yr = currentMonth.getFullYear();
+                    const mo = String(currentMonth.getMonth() + 1).padStart(2, '0');
+                    const dateStr = `${yr}-${mo}-${String(day).padStart(2, '0')}`;
+                    const todayStr = new Date().toISOString().slice(0, 10);
+                    const isPast = dateStr < todayStr;
+                    const dayInfo = monthDays.find(d => d.date === dateStr);
+                    const hasAvailable = dayInfo?.hasAvailable || false;
+                    const isSelected = dateStr === selectedDate;
+
+                    return (
+                      <button
+                        key={dateStr}
+                        onClick={() => {
+                          if (!isPast && hasAvailable) {
+                            setSelectedDate(dateStr);
+                            setSelectedTime('');
+                            setSelectedScheduleId(null);
+                          }
+                        }}
+                        disabled={isPast || !hasAvailable}
+                        title={hasAvailable ? 'Horários disponíveis' : isPast ? 'Data passada' : 'Sem disponibilidade'}
+                        className={`
+                          relative aspect-square rounded-lg text-sm font-medium transition-all
+                          flex flex-col items-center justify-center
+                          ${isSelected
+                            ? 'bg-amber-500 text-stone-900 shadow-lg'
+                            : hasAvailable && !isPast
+                            ? 'bg-stone-700 text-stone-200 hover:bg-amber-500/30 cursor-pointer'
+                            : isPast
+                            ? 'opacity-25 cursor-default text-stone-500'
+                            : 'text-stone-600 cursor-not-allowed'}
+                        `}
+                      >
+                        <span>{day}</span>
+                        {hasAvailable && !isSelected && !isPast && (
+                          <span className="w-1 h-1 rounded-full bg-emerald-400 mt-0.5" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Legenda */}
+                <div className="flex items-center gap-4 mt-2 pt-2 border-t border-stone-700">
+                  <span className="flex items-center gap-1.5 text-xs text-stone-500">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /> Com disponibilidade
+                  </span>
+                  <span className="flex items-center gap-1.5 text-xs text-stone-500">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> Selecionado
+                  </span>
                 </div>
               )}
             </div>

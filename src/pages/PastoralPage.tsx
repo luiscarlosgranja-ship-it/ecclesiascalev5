@@ -297,7 +297,13 @@ export default function PastoralPage({ user }: Props) {
           ? <PastoralCabinetSchedules ref={cabinetRef} title="Disponibilidade do Gabinete" />
           : (
             <div className="space-y-5">
-              <PastoralCabinetBooking user={user} onBookingSuccess={() => {}} />
+              {user.member_id && (
+                <PastoralCabinetBooking
+                  volunteerId={user.member_id}
+                  volunteerName={user.name || user.email}
+                  onBookingSuccess={() => {}}
+                />
+              )}
               {user.member_id && (
                 <VolunteerCabinetBookings volunteerId={user.member_id} />
               )}
