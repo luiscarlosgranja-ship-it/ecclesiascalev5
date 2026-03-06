@@ -761,6 +761,13 @@ app.post('/api/pastoral-cabinet/schedules', auth, requireRole('SuperAdmin', 'Adm
   const { date, time, duration_minutes, is_available } = req.body;
   if (!date || !time) return res.status(400).json({ message: 'Data e hora são obrigatórios' });
 
+  // Validar dia da semana (seg-sex apenas)
+  const [y, m, d] = date.split('-').map(Number);
+  const dow = new Date(y, m - 1, d).getDay();
+  if (dow === 0 || dow === 6) {
+    return res.status(400).json({ message: 'Gabinete só pode ser agendado de segunda a sexta-feira' });
+  }
+
   const { data, error } = await db
     .from('pastoral_cabinet_schedules')
     .insert({ date, time, duration_minutes: duration_minutes || 60, is_available: is_available ?? true })
@@ -792,14 +799,29 @@ app.put('/api/pastoral-cabinet/schedules/:id', auth, requireRole('SuperAdmin', '
   const { date, time, duration_minutes, is_available,
           booked_by_name, booked_by_phone, booking_subject } = req.body;
 
+  // Validar dia da semana (seg-sex apenas) se data foi fornecida
+  if (date) {
+    const [y, m, d] = date.split('-').map(Number);
+    const dow = new Date(y, m - 1, d).getDay(); // 0=Dom, 6=Sáb
+    if (dow === 0 || dow === 6) {
+      return res.status(400).json({ message: 'Gabinete só pode ser agendado de segunda a sexta-feira' });
+    }
+  }
+
   const updateData = {};
   if (date             !== undefined) updateData.date             = date;
   if (time             !== undefined) updateData.time             = time;
   if (duration_minutes !== undefined) updateData.duration_minutes = duration_minutes;
-  if (is_available     !== undefined) updateData.is_available     = is_available;
   if (booked_by_name   !== undefined) updateData.booked_by_name   = booked_by_name;
   if (booked_by_phone  !== undefined) updateData.booked_by_phone  = booked_by_phone;
   if (booking_subject  !== undefined) updateData.booking_subject  = booking_subject;
+
+  // Se está recebendo dados de solicitante, marcar como ocupado automaticamente
+  if (booked_by_name) {
+    updateData.is_available = false;
+  } else if (is_available !== undefined) {
+    updateData.is_available = is_available;
+  }
 
   const { data, error } = await db
     .from('pastoral_cabinet_schedules')
@@ -835,6 +857,15 @@ app.post('/api/pastoral-cabinet/bookings', auth, async (req, res) => {
 
   if (!schedule_id) return res.status(400).json({ message: 'Horário é obrigatório' });
   if (!volunteer_id && !booked_name) return res.status(400).json({ message: 'Nome do solicitante é obrigatório' });
+
+  // Validar dia da semana no date fornecido (se houver)
+  if (date) {
+    const [y, m, d] = date.split('-').map(Number);
+    const dow = new Date(y, m - 1, d).getDay();
+    if (dow === 0 || dow === 6) {
+      return res.status(400).json({ message: 'Gabinete só pode ser agendado de segunda a sexta-feira' });
+    }
+  }
 
   // Buscar dados do horário
   const { data: schedule, error: scheduleError } = await db

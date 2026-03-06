@@ -269,13 +269,15 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
                 const isToday = ds === todayStr;
                 const isSel = selectedDay === ds;
                 const isPast = ds < todayStr;
+                const [dy, dm, dd] = ds.split('-').map(Number);
+                const isWeekend = new Date(dy, dm - 1, dd).getDay() === 0 || new Date(dy, dm - 1, dd).getDay() === 6;
 
                 return (
-                  <button key={ds} onClick={() => !isPast && setSelectedDay(isSel ? null : ds)}
-                    disabled={isPast}
+                  <button key={ds} onClick={() => !isPast && !isWeekend && setSelectedDay(isSel ? null : ds)}
+                    disabled={isPast || isWeekend}
                     title={av || oc ? `${av} livre(s), ${oc} ocupado(s)` : 'Sem horários'}
                     className={`relative aspect-square rounded-lg flex flex-col items-center justify-center text-xs font-medium transition-all
-                      ${isPast ? 'opacity-25 cursor-default' : 'cursor-pointer'}
+                      ${isPast || isWeekend ? 'opacity-20 cursor-not-allowed' : 'cursor-pointer'}
                       ${isSel ? 'bg-amber-500 text-stone-900 shadow-md' :
                         isToday ? 'ring-1 ring-amber-500 text-amber-300' :
                         (av||oc) ? 'hover:bg-stone-700' : 'text-stone-500 hover:bg-stone-800'}
@@ -432,7 +434,13 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
             <div>
               <label className="text-xs text-stone-400 uppercase tracking-wide mb-1.5 block">Data *</label>
               <input type="date" value={formData.date} min={todayStr}
-                onChange={e => setFormData(p => ({ ...p, date: e.target.value }))}
+                onChange={e => {
+                  const [y,m,d] = e.target.value.split('-').map(Number);
+                  const dow = new Date(y, m-1, d).getDay();
+                  if (dow === 0 || dow === 6) { setError('Gabinete só pode ser agendado de segunda a sexta-feira'); return; }
+                  setError('');
+                  setFormData(p => ({ ...p, date: e.target.value }));
+                }}
                 className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500" />
             </div>
             <div>
@@ -542,7 +550,13 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
                     type="date"
                     value={bookingForm.date}
                     min={todayStr}
-                    onChange={e => setBookingForm(f => ({ ...f, date: e.target.value }))}
+                    onChange={e => {
+                      const [y,m,d] = e.target.value.split('-').map(Number);
+                      const dow = new Date(y, m-1, d).getDay();
+                      if (dow === 0 || dow === 6) { setBookingError('Gabinete só pode ser agendado de segunda a sexta-feira'); return; }
+                      setBookingError('');
+                      setBookingForm(f => ({ ...f, date: e.target.value }));
+                    }}
                     className="w-full bg-stone-800 border border-stone-600 rounded-lg px-3 py-2.5 text-stone-100 text-sm focus:outline-none focus:border-amber-500"
                   />
                 </div>
