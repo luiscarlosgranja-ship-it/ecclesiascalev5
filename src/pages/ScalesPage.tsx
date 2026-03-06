@@ -355,24 +355,51 @@ export default function ScalesPage({ user }: Props) {
       const scaleMap = new Map<number, { scale_id: number; member_id: number }>();
       (currentScales || []).forEach(s => scaleMap.set(s.sector_id, { scale_id: s.id, member_id: s.member_id }));
 
+      // Conta escalas no mês para cada voluntário novo/alterado
+      const month = selectedCultData?.date.slice(0, 7) || '';
+      const monthCults = availableCults.filter(c => month && c.date.startsWith(month) && c.id !== selectedCult);
+      const monthScaleResults = await Promise.all(
+        monthCults.map(c => api.get<Scale[]>(`/scales?cult_id=${c.id}`).catch(() => [] as Scale[]))
+      );
+      const monthScalesFlat = monthScaleResults.flat();
+      const monthCountMap = new Map<number, number>();
+      monthScalesFlat.forEach(s => {
+        monthCountMap.set(s.member_id, (monthCountMap.get(s.member_id) || 0) + 1);
+      });
+
+      const warnings: string[] = [];
       const ops: Promise<any>[] = [];
       for (const slot of fillSlots) {
         const existing = scaleMap.get(slot.sector_id);
         if (slot.member_id && !existing) {
-          // Novo: criar escala
-          ops.push(api.post('/scales', { cult_id: selectedCult, member_id: slot.member_id, sector_id: slot.sector_id }));
+          // Novo: verificar regra 3x antes
+          const monthCount = monthCountMap.get(slot.member_id) || 0;
+          if (monthCount >= 3) {
+            const m = (members || []).find(m => m.id === slot.member_id);
+            warnings.push(`${m?.name || 'Voluntário'} já tem ${monthCount} escala(s) no mês — setor ${slot.sector_name} ignorado.`);
+          } else {
+            ops.push(api.post('/scales', { cult_id: selectedCult, member_id: slot.member_id, sector_id: slot.sector_id }));
+          }
         } else if (slot.member_id && existing && existing.member_id !== slot.member_id) {
-          // Alterado: remover antigo e criar novo
-          ops.push(api.delete(`/scales/${existing.scale_id}`).then(() =>
-            api.post('/scales', { cult_id: selectedCult, member_id: slot.member_id, sector_id: slot.sector_id })
-          ));
+          // Alterado: verifica novo voluntário (remove o antigo sem verificar — já estava)
+          const monthCount = monthCountMap.get(slot.member_id) || 0;
+          if (monthCount >= 3) {
+            const m = (members || []).find(m => m.id === slot.member_id);
+            warnings.push(`${m?.name || 'Voluntário'} já tem ${monthCount} escala(s) no mês — setor ${slot.sector_name} mantido.`);
+          } else {
+            ops.push(api.delete(`/scales/${existing.scale_id}`).then(() =>
+              api.post('/scales', { cult_id: selectedCult, member_id: slot.member_id, sector_id: slot.sector_id })
+            ));
+          }
         } else if (!slot.member_id && existing) {
           // Limpo: remover escala
           ops.push(api.delete(`/scales/${existing.scale_id}`));
         }
       }
       await Promise.all(ops);
-      setFillMsg('✅ Alterações salvas com sucesso!');
+      const warnText = warnings.length > 0 ? `
+⚠️ ${warnings.join(' ')}` : '';
+      setFillMsg('✅ Alterações salvas com sucesso!' + warnText);
       await refetchScales();
       await fetchDeptBlocks();
     } catch (e) {
@@ -402,6 +429,22 @@ export default function ScalesPage({ user }: Props) {
     } finally { setSavingCult(false); }
   }
 
+  // ── contagem de escalas do voluntário no mês do culto selecionado ──────────
+  async function countMemberMonthScales(memberId: number): Promise<number> {
+    if (!selectedCultData) return 0;
+    const month = selectedCultData.date.slice(0, 7);
+    // Usa os cultos já carregados + outros que possam existir
+    const monthCults = availableCults.filter(c => c.date.startsWith(month));
+    const cultIds = [...new Set([...monthCults.map(c => c.id)])];
+    if (!cultIds.length) return 0;
+    try {
+      const results = await Promise.all(
+        cultIds.map(id => api.get<Scale[]>(`/scales?cult_id=${id}`).catch(() => [] as Scale[]))
+      );
+      return results.flat().filter(s => s.member_id === memberId).length;
+    } catch { return 0; }
+  }
+
   // ── adicionar voluntário ───────────────────────────────────────────────────
   async function addToScale() {
     if (!selectedCult || !newScale.member_id || !newScale.sector_id) {
@@ -411,6 +454,13 @@ export default function ScalesPage({ user }: Props) {
     setAddLoading(true);
     setAddError('');
     try {
+      // Verifica regra 3x/mês
+      const count = await countMemberMonthScales(Number(newScale.member_id));
+      if (count >= 3) {
+        const m = (members || []).find(m => m.id === Number(newScale.member_id));
+        setAddError(`${m?.name || 'Este voluntário'} já está em ${count} escala(s) neste mês (máx. 3).`);
+        return;
+      }
       await api.post('/scales', {
         cult_id:   selectedCult,
         member_id: Number(newScale.member_id),
@@ -494,9 +544,8 @@ export default function ScalesPage({ user }: Props) {
   }
 
   async function openPrintModal(mode: 'cult' | 'month') {
-    if (mode === 'cult' && (!scales || !selectedCultData)) return;
-    if (mode === 'month' && availableCults.filter(c => c.date.startsWith(printMonth)).length === 0) {
-      alert(`Nenhum culto agendado em ${printMonth}.`);
+    if (mode === 'cult' && (!scales || scales.length === 0 || !selectedCultData)) {
+      alert('Selecione um culto com voluntários escalados antes de imprimir.');
       return;
     }
     const depts = await fetchDeptsForPrint();
@@ -509,26 +558,60 @@ export default function ScalesPage({ user }: Props) {
   async function executePrint() {
     setPrintLoading(true);
     try {
+      // Nomes dos departamentos selecionados (filtro por nome, não por ID hardcoded)
+      const selectedDeptNames = selectedDepts.length > 0
+        ? availableDepts.filter(d => selectedDepts.includes(d.id)).map(d => d.name)
+        : null;
+
+      // Filtra escala por nome de departamento
+      function filterByDept(scaleList: Scale[]): Scale[] {
+        if (!selectedDeptNames || selectedDeptNames.length === 0) return scaleList;
+        return scaleList.filter(s => {
+          const deptName = s.department_name?.trim() || s.sector_name || '';
+          return selectedDeptNames.some(n => deptName.toLowerCase().includes(n.toLowerCase()) || n.toLowerCase().includes(deptName.toLowerCase()));
+        });
+      }
+
       if (printMode === 'cult') {
         if (!scales || !selectedCultData) return;
-        await exportScalePDF(scales, selectedCultData,
-          `Escala — ${selectedCultData.type_name || selectedCultData.name || 'Culto'}`,
-          undefined, undefined, undefined, selectedDepts);
+        const filtered = filterByDept(scales);
+        if (filtered.length === 0) {
+          alert('Nenhuma escala encontrada para os departamentos selecionados.');
+          return;
+        }
+        await exportScalePDF(
+          filtered,
+          selectedCultData,
+          `${selectedCultData.name || selectedCultData.type_name || 'Culto'} — ${selectedCultData.date}`,
+          undefined, undefined, undefined, undefined,
+        );
       } else {
         const monthCults = availableCults
           .filter(c => c.date.startsWith(printMonth))
           .sort((a, b) => a.date.localeCompare(b.date));
-        if (monthCults.length === 0) return;
+        if (monthCults.length === 0) {
+          alert(`Nenhum culto agendado em ${printMonth}.`);
+          return;
+        }
         const token = getAuthToken();
         const results = await Promise.all(
           monthCults.map(c =>
             fetch(`/api/scales?cult_id=${c.id}`, { headers: { Authorization: `Bearer ${token}` } })
-              .then(r => r.json()).then((s: Scale[]) => s).catch(() => [] as Scale[])
+              .then(r => r.ok ? r.json() : [])
+              .then((s: Scale[]) => s)
+              .catch(() => [] as Scale[])
           )
         );
-        const allScales = results.flat();
-        await exportScalePDF(allScales, null, `Escalas — ${printMonth}`,
-          allScales, monthCults, undefined, selectedDepts);
+        const allScales = filterByDept(results.flat());
+        if (allScales.length === 0) {
+          alert('Nenhuma escala encontrada para o período/departamentos selecionados.');
+          return;
+        }
+        await exportScalePDF(
+          allScales, null,
+          `Escalas — ${printMonth}`,
+          allScales, monthCults, undefined, undefined,
+        );
       }
       setPrintModal(false);
     } catch (e) {
@@ -563,9 +646,6 @@ export default function ScalesPage({ user }: Props) {
         <div className="flex gap-2 flex-wrap">
           {canManage && (
             <>
-              <Button variant="secondary" size="sm" onClick={() => { setAutoModal(true); setAutoSuccess(null); setAutoError(''); }}>
-                <Zap size={16} /> Gerar Automático
-              </Button>
               <Button variant="secondary" size="sm" onClick={() => { setNewCultModal(true); setCultError(''); }}>
                 <Calendar size={16} /> Nova Escala
               </Button>
@@ -650,7 +730,7 @@ export default function ScalesPage({ user }: Props) {
             <Card className="py-12 text-center">
               <p className="text-stone-500 text-sm">Nenhuma escala cadastrada para este culto</p>
               <p className="text-stone-600 text-xs mt-1">
-                {canManage ? 'Clique em "Adicionar Voluntário" ou "Gerar Automático"' : 'Aguardando os líderes montarem as escalas'}
+                {canManage ? 'Clique em "Adicionar Voluntário" ou "Preencher Automático"' : 'Aguardando os líderes montarem as escalas'}
               </p>
             </Card>
           ) : (
@@ -684,9 +764,9 @@ export default function ScalesPage({ user }: Props) {
                             <div className="flex items-center gap-1 flex-shrink-0 ml-2">
                               <Badge label={s.status}
                                 color={s.status === 'Confirmado' ? 'green' : s.status === 'Pendente' ? 'yellow' : s.status === 'Troca' ? 'blue' : 'red'} />
-                              {isAdmin(user.role) && (
+                              {canManage && (
                                 <>
-                                  {s.status === 'Pendente' && (
+                                  {s.status === 'Pendente' && isAdmin(user.role) && (
                                     <button onClick={() => confirmScale(s.id)} title="Confirmar"
                                       className="text-emerald-400 hover:text-emerald-300 p-1 transition-colors">
                                       <CheckCircle size={14} />
