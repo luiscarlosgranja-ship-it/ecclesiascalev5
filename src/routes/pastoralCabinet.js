@@ -1,5 +1,5 @@
 import express from 'express';
-import { supabase } from '../utils/supabaseServer.js'; // Seu cliente Supabase
+import { supabase } from '../utils/supabaseServer.js';
 
 const router = express.Router();
 
@@ -12,24 +12,13 @@ router.post('/schedules', async (req, res) => {
   try {
     const { date, time, duration_minutes, is_available } = req.body;
 
-    // Validação
     if (!date || !time || !duration_minutes) {
-      return res.status(400).json({
-        error: 'Data, hora e duração são obrigatórios'
-      });
+      return res.status(400).json({ error: 'Data, hora e duração são obrigatórios' });
     }
 
-    // Inserir no Supabase
     const { data, error } = await supabase
       .from('pastoral_cabinet_schedules')
-      .insert([
-        {
-          date,
-          time,
-          duration_minutes,
-          is_available: is_available !== false
-        }
-      ])
+      .insert([{ date, time, duration_minutes, is_available: is_available !== false }])
       .select();
 
     if (error) {
@@ -72,13 +61,48 @@ router.get('/schedules', async (req, res) => {
       return {
         ...s,
         booking_id:      b?.id || null,
-        booked_by_name:  b?.booked_name || null,
-        booked_by_phone: b?.booked_phone || null,
-        booking_subject: b?.subject || null,
+        // Prefer booking table, fallback to fields stored directly on schedule
+        booked_by_name:  b?.booked_name  || s.booked_by_name  || null,
+        booked_by_phone: b?.booked_phone || s.booked_by_phone || null,
+        booking_subject: b?.subject      || s.booking_subject || null,
       };
     });
 
     res.json(enriched);
+  } catch (err) {
+    console.error('Erro:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT: Atualizar dados de um horário (data, hora, duração, solicitante, disponibilidade)
+router.put('/schedules/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { date, time, duration_minutes, is_available,
+            booked_by_name, booked_by_phone, booking_subject } = req.body;
+
+    const updateData = {};
+    if (date              !== undefined) updateData.date              = date;
+    if (time              !== undefined) updateData.time              = time;
+    if (duration_minutes  !== undefined) updateData.duration_minutes  = duration_minutes;
+    if (is_available      !== undefined) updateData.is_available      = is_available;
+    if (booked_by_name    !== undefined) updateData.booked_by_name    = booked_by_name;
+    if (booked_by_phone   !== undefined) updateData.booked_by_phone   = booked_by_phone;
+    if (booking_subject   !== undefined) updateData.booking_subject   = booking_subject;
+
+    const { data, error } = await supabase
+      .from('pastoral_cabinet_schedules')
+      .update(updateData)
+      .eq('id', id)
+      .select();
+
+    if (error) {
+      console.error('Erro ao atualizar horário:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json(data[0]);
   } catch (err) {
     console.error('Erro:', err);
     res.status(500).json({ error: err.message });
@@ -90,7 +114,6 @@ router.delete('/schedules/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Verificar se existe agendamento neste horário
     const { data: bookings, error: checkError } = await supabase
       .from('pastoral_cabinet_bookings')
       .select('id')
@@ -103,12 +126,9 @@ router.delete('/schedules/:id', async (req, res) => {
     }
 
     if (bookings && bookings.length > 0) {
-      return res.status(400).json({
-        error: 'Não é possível deletar este horário pois já tem agendamento'
-      });
+      return res.status(400).json({ error: 'Não é possível deletar este horário pois já tem agendamento' });
     }
 
-    // Deletar horário
     const { error } = await supabase
       .from('pastoral_cabinet_schedules')
       .delete()
@@ -133,10 +153,9 @@ router.delete('/schedules/:id', async (req, res) => {
 // GET: Disponibilidade por mês (para calendário)
 router.get('/availability/:month', async (req, res) => {
   try {
-    const { month } = req.params; // Formato: "2024-03"
+    const { month } = req.params;
     const [year, monthNum] = month.split('-');
 
-    // Buscar todos os horários do mês
     const { data: schedules, error } = await supabase
       .from('pastoral_cabinet_schedules')
       .select('date, is_available')
@@ -149,24 +168,20 @@ router.get('/availability/:month', async (req, res) => {
       return res.status(500).json({ error: error.message });
     }
 
-    // Agrupar por data e verificar se tem disponibilidade
     const availability = {};
     const daysInMonth = new Date(year, monthNum, 0).getDate();
 
-    // Inicializar todos os dias do mês
     for (let day = 1; day <= daysInMonth; day++) {
       const dateStr = `${year}-${monthNum}-${String(day).padStart(2, '0')}`;
       availability[dateStr] = { hasAvailable: false };
     }
 
-    // Marcar dias com disponibilidade
     schedules.forEach(schedule => {
       if (schedule.is_available) {
         availability[schedule.date].hasAvailable = true;
       }
     });
 
-    // Converter para array
     const result = Object.entries(availability).map(([date, info]) => ({
       date,
       hasAvailable: info.hasAvailable
@@ -184,7 +199,6 @@ router.get('/available-slots/:date', async (req, res) => {
   try {
     const { date } = req.params;
 
-    // Buscar horários disponíveis deste dia
     const { data: slots, error } = await supabase
       .from('pastoral_cabinet_schedules')
       .select('id, date, time, duration_minutes')
@@ -197,7 +211,6 @@ router.get('/available-slots/:date', async (req, res) => {
       return res.status(500).json({ error: error.message });
     }
 
-    // Formatar resposta
     const result = slots.map(slot => ({
       schedule_id: slot.id,
       date: slot.date,
@@ -213,84 +226,26 @@ router.get('/available-slots/:date', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ROTAS: Agendamentos (Voluntário)
+// ROTAS: Agendamentos
 // ─────────────────────────────────────────────────────────────────────────────
 
-
-// POST: Agendar pela secretaria (sem volunteer_id obrigatório)
-router.post('/bookings/secretary', async (req, res) => {
-  try {
-    const { schedule_id, booked_name, booked_phone, subject } = req.body;
-
-    if (!schedule_id || !booked_name) {
-      return res.status(400).json({ error: 'Horário e nome são obrigatórios' });
-    }
-
-    // Verificar se o horário ainda está disponível
-    const { data: schedule, error: scheduleError } = await supabase
-      .from('pastoral_cabinet_schedules')
-      .select('id, date, time, duration_minutes, is_available')
-      .eq('id', schedule_id)
-      .single();
-
-    if (scheduleError || !schedule) {
-      return res.status(404).json({ error: 'Horário não encontrado' });
-    }
-
-    if (!schedule.is_available) {
-      return res.status(400).json({ error: 'Este horário não está mais disponível' });
-    }
-
-    // Criar agendamento sem volunteer_id
-    const { data: booking, error: bookingError } = await supabase
-      .from('pastoral_cabinet_bookings')
-      .insert([{
-        schedule_id,
-        date: schedule.date,
-        time: schedule.time,
-        duration_minutes: schedule.duration_minutes,
-        booked_name,
-        booked_phone: booked_phone || null,
-        subject: subject || null,
-        status: 'Agendado',
-      }])
-      .select();
-
-    if (bookingError) {
-      console.error('Erro ao criar agendamento secretaria:', bookingError);
-      return res.status(500).json({ error: bookingError.message });
-    }
-
-    // Marcar horário como ocupado
-    await supabase
-      .from('pastoral_cabinet_schedules')
-      .update({ is_available: false })
-      .eq('id', schedule_id);
-
-    res.status(201).json(booking[0]);
-  } catch (err) {
-    console.error('Erro:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST: Agendar gabinete (voluntário OU secretaria)
+// POST: Criar agendamento (voluntário OU secretaria)
 router.post('/bookings', async (req, res) => {
   try {
-    const { volunteer_id, schedule_id, date, time, duration_minutes, status, notes,
-            booked_name, booked_phone, subject } = req.body;
+    const {
+      volunteer_id, schedule_id, date, time, duration_minutes, status, notes,
+      booked_name, booked_phone, subject
+    } = req.body;
 
-    // Validação mínima: precisa de schedule_id
-    // Se vier da secretaria: precisa de booked_name
-    // Se vier do voluntário: precisa de volunteer_id + date + time
     if (!schedule_id) {
       return res.status(400).json({ error: 'Horário é obrigatório' });
     }
+
     if (!volunteer_id && !booked_name) {
       return res.status(400).json({ error: 'Nome do solicitante é obrigatório' });
     }
 
-    // Buscar dados do horário
+    // Buscar dados completos do horário
     const { data: schedule, error: scheduleError } = await supabase
       .from('pastoral_cabinet_schedules')
       .select('id, date, time, duration_minutes, is_available')
@@ -319,7 +274,7 @@ router.post('/bookings', async (req, res) => {
       }
     }
 
-    // Criar agendamento
+    // Montar objeto de insert
     const insertData = {
       schedule_id,
       date: date || schedule.date,
@@ -329,9 +284,9 @@ router.post('/bookings', async (req, res) => {
       notes: notes || null,
     };
     if (volunteer_id) insertData.volunteer_id = volunteer_id;
-    if (booked_name)  insertData.booked_name = booked_name;
+    if (booked_name)  insertData.booked_name  = booked_name;
     if (booked_phone) insertData.booked_phone = booked_phone;
-    if (subject)      insertData.subject = subject;
+    if (subject)      insertData.subject      = subject;
 
     const { data: booking, error: bookingError } = await supabase
       .from('pastoral_cabinet_bookings')
@@ -387,11 +342,11 @@ router.put('/bookings/:id', async (req, res) => {
     const { status, notes, booked_name, booked_phone, subject } = req.body;
 
     const updateData = { updated_at: new Date().toISOString() };
-    if (status !== undefined)      updateData.status = status;
-    if (notes !== undefined)       updateData.notes = notes;
-    if (booked_name !== undefined) updateData.booked_name = booked_name;
+    if (status       !== undefined) updateData.status       = status;
+    if (notes        !== undefined) updateData.notes        = notes;
+    if (booked_name  !== undefined) updateData.booked_name  = booked_name;
     if (booked_phone !== undefined) updateData.booked_phone = booked_phone;
-    if (subject !== undefined)     updateData.subject = subject;
+    if (subject      !== undefined) updateData.subject      = subject;
 
     const { data, error } = await supabase
       .from('pastoral_cabinet_bookings')
@@ -411,12 +366,11 @@ router.put('/bookings/:id', async (req, res) => {
   }
 });
 
-// DELETE: Cancelar agendamento
+// DELETE: Cancelar agendamento (libera o horário)
 router.delete('/bookings/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Buscar agendamento para obter schedule_id
     const { data: booking, error: getError } = await supabase
       .from('pastoral_cabinet_bookings')
       .select('schedule_id')
@@ -427,7 +381,6 @@ router.delete('/bookings/:id', async (req, res) => {
       return res.status(404).json({ error: 'Agendamento não encontrado' });
     }
 
-    // Deletar agendamento
     const { error: deleteError } = await supabase
       .from('pastoral_cabinet_bookings')
       .delete()
@@ -438,7 +391,7 @@ router.delete('/bookings/:id', async (req, res) => {
       return res.status(500).json({ error: deleteError.message });
     }
 
-    // Liberar horário (marcar como disponível)
+    // Liberar horário
     await supabase
       .from('pastoral_cabinet_schedules')
       .update({ is_available: true })

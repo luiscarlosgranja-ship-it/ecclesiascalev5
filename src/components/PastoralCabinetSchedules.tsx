@@ -125,36 +125,17 @@ const PastoralCabinetSchedules = forwardRef<CabinetSchedulesRef, Props>(
     if (!bookingForm.name.trim()) { setBookingError('Nome é obrigatório'); return; }
     setBookingSaving(true); setBookingError('');
     try {
-      if (bookingTarget.is_available) {
-        // Horário livre: usa rota da secretaria (sem volunteer_id)
-        await api.post('/pastoral-cabinet/bookings', {
-          schedule_id: bookingTarget.id,
-          booked_name: bookingForm.name,
-          booked_phone: bookingForm.phone,
-          subject: bookingForm.subject,
-        });
-      } else {
-        // Horário ocupado: atualiza booking existente
-        if ((bookingTarget as any).booking_id) {
-          await api.put(`/pastoral-cabinet/bookings/${(bookingTarget as any).booking_id}`, {
-            booked_name: bookingForm.name,
-            booked_phone: bookingForm.phone,
-            subject: bookingForm.subject,
-          });
-        }
-      }
-
-      // Atualiza data/hora/duração se mudou (para ambos os casos)
-      const dateChanged = bookingForm.date !== bookingTarget.date;
-      const timeChanged = bookingForm.time !== bookingTarget.time;
-      const durChanged  = bookingForm.duration_minutes !== bookingTarget.duration_minutes;
-      if (dateChanged || timeChanged || durChanged) {
-        await api.put(`/pastoral-cabinet/schedules/${bookingTarget.id}`, {
-          date: bookingForm.date,
-          time: bookingForm.time,
-          duration_minutes: bookingForm.duration_minutes,
-        });
-      }
+      // Salva tudo direto no schedule: dados do solicitante + horário + marca como ocupado
+      // Assim não depende da rota /bookings ter sido atualizada no servidor
+      await api.put(`/pastoral-cabinet/schedules/${bookingTarget.id}`, {
+        date: bookingForm.date,
+        time: bookingForm.time,
+        duration_minutes: bookingForm.duration_minutes,
+        is_available: false,
+        booked_by_name: bookingForm.name,
+        booked_by_phone: bookingForm.phone,
+        booking_subject: bookingForm.subject,
+      });
 
       setBookingModal(false);
       loadSchedules();
