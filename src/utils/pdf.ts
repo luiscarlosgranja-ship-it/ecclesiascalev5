@@ -2,116 +2,14 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Scale, Cult } from '../types';
 
-// ─── Tipo DeptBlock (espelho do que vem da API /scales/by-department) ─────────
-export interface DeptBlock {
-  department_id: number | null;
-  department_name: string;
-  scales: {
-    id: number;
-    status: string;
-    member_name: string;
-    member_id: number;
-    sector_name: string;
-    department_id: number | null;
-    department_name: string;
-  }[];
-}
-
-// ─── Paleta ───────────────────────────────────────────────────────────────────
-const C_HEADER_BG:  [number,number,number] = [28,  25,  23 ];  // stone-900
-const C_HEADER_FG:  [number,number,number] = [251, 191, 36 ];  // amber-400
-const C_BLOCK_HDR:  [number,number,number] = [55,  48,  44 ];  // stone-700  (cabeçalho do bloco)
-const C_BLOCK_FG:   [number,number,number] = [245, 245, 244];  // stone-50
-const C_ROW_ODD:    [number,number,number] = [255, 255, 255];  // white
-const C_ROW_EVEN:   [number,number,number] = [229, 229, 229];  // neutral-200
-const C_BORDER:     [number,number,number] = [120, 113, 108];  // stone-500
-
-function statusColor(status: any): [number, number, number] {
-  const s = typeof status === 'string' ? status.toLowerCase() : '';
-  if (s.includes('confirmado') || s.includes('ok')) return [19, 161, 14];
-  if (s.includes('pendente')) return [220, 38, 38];
-  if (s.includes('troca')) return [59, 130, 246];
-  return [107, 114, 128];
-}
-
 async function fetchLogo(): Promise<string | null> {
   try {
     const r = await fetch('/api/settings/logo');
     const d = await r.json();
     return d?.value || null;
-  } catch { return null; }
-}
-
-// ─── Cabeçalho global da página ───────────────────────────────────────────────
-function drawMainHeader(
-  doc: jsPDF,
-  logo: string | null,
-  title: string,
-  subtitle: string,
-  pw: number,
-): number {
-  const MX = 10;
-  const y0 = 8;
-  const hh = 16;
-
-  doc.setFillColor(...C_HEADER_BG);
-  doc.rect(MX, y0, pw - MX * 2, hh, 'F');
-
-  // Logo
-  let textX = MX + 4;
-  if (logo && !logo.startsWith('data:image/svg')) {
-    try {
-      const fmt = logo.includes('jpeg') || logo.includes('jpg') ? 'JPEG' : 'PNG';
-      doc.addImage(logo, fmt, MX + 2, y0 + 2, 12, 12);
-      textX = MX + 17;
-    } catch { /* ignora */ }
+  } catch {
+    return null;
   }
-
-  // Título centralizado
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.setTextColor(...C_HEADER_FG);
-  doc.text(title, pw / 2, y0 + 7, { align: 'center' });
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(180, 170, 155);
-  doc.text(subtitle, pw / 2, y0 + 13, { align: 'center' });
-
-  // Data emissão — direita
-  const now = new Date();
-  doc.setFontSize(7);
-  doc.setTextColor(130, 120, 110);
-  doc.text(
-    'Emitido ' + now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}),
-    pw - MX - 2, y0 + 13, { align: 'right' }
-  );
-
-  return y0 + hh + 4;
-}
-
-// ─── Rodapé ───────────────────────────────────────────────────────────────────
-function drawFooter(doc: jsPDF, page: number, total: number, pw: number, ph: number) {
-  const y = ph - 6;
-  doc.setDrawColor(...C_BORDER);
-  doc.setLineWidth(0.2);
-  doc.line(10, y, pw - 10, y);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.5);
-  doc.setTextColor(150, 140, 130);
-  doc.text('EcclesiaScale', 10, y + 2);
-  doc.text('Página ' + page + ' / ' + total, pw - 10, y + 2, { align: 'right' });
-}
-
-function fmtDate(d: string): string {
-  try {
-    const [y, m, da] = d.split('-');
-    return da + '/' + m + '/' + y;
-  } catch { return d; }
-}
-
-function fmtTime(t: string): string {
-  return t || '--:--';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -132,26 +30,23 @@ export async function exportCultoPDFBlocos(
 
   const pageWidth = 297;
   const pageHeight = 210;
-  const margin = 10;
+  const margin = 8;
+  const blockGap = 5;
 
   // ─ HEADER ─
   doc.setFillColor(40, 40, 40);
-  doc.rect(0, 0, pageWidth, 30, 'F');
+  doc.rect(0, 0, pageWidth, 25, 'F');
 
   doc.setTextColor(255, 215, 0);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
-  doc.text(title, pageWidth / 2, 15, { align: 'center' });
+  doc.setFontSize(16);
+  doc.text(title, pageWidth / 2, 13, { align: 'center' });
 
   doc.setTextColor(180, 180, 180);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.text(
-    cult.date + ' · ' + cult.time + ' · ' + (cult.name || cult.type_name),
-    pageWidth / 2,
-    23,
-    { align: 'center' }
-  );
+  doc.setFontSize(9);
+  const cultInfo = cult.date + ' · ' + cult.time + ' · ' + (cult.name || cult.type_name || 'Culto');
+  doc.text(cultInfo, pageWidth / 2, 21, { align: 'center' });
 
   // ─ AGRUPAR ESCALAS POR DEPARTAMENTO ─
   const deptMap = new Map<string, Array<{ name: string; sector: string }>>();
@@ -162,18 +57,9 @@ export async function exportCultoPDFBlocos(
 
     if (sectorLower.match(/^louvor/i)) {
       dept = 'Louvor';
-    } else if (
-      ['filmagem', 'foto', 'som', 'iluminação', 'iluminacao', 'projeção', 'projecao'].includes(
-        sectorLower
-      )
-    ) {
+    } else if (['filmagem', 'foto', 'som', 'iluminação', 'iluminacao', 'projeção', 'projecao'].includes(sectorLower)) {
       dept = 'Mídia';
-    } else if (
-      sectorLower.match(/^setor/i) ||
-      ['externo', 'máquina de cartão', 'maquina de cartao'].includes(sectorLower) ||
-      sectorLower.includes('recepção') ||
-      sectorLower.includes('recepcao')
-    ) {
+    } else if (sectorLower.match(/^setor/i) || ['externo', 'máquina de cartão', 'maquina de cartao'].includes(sectorLower) || sectorLower.includes('recepção') || sectorLower.includes('recepcao')) {
       dept = 'Obreiros / Diáconos';
     } else if (sectorLower.match(/^una/i)) {
       dept = 'Una';
@@ -201,63 +87,86 @@ export async function exportCultoPDFBlocos(
     'Bem-Vindos',
   ];
 
-  // ─ CALCULAR LAYOUT EM GRID ─
+  // ─ CALCULAR BLOCOS DINÂMICOS ─
   const deptsToPrint = deptOrder.filter(d => deptMap.has(d));
   const blocksPerRow = 2;
-  const blockWidth = (pageWidth - margin * 2 - 10) / blocksPerRow;
-  const blockHeight = (pageHeight - 50) / 2;
+  const maxBlockWidth = (pageWidth - margin * 2 - blockGap) / blocksPerRow;
+  const lineHeight = 4.5;
+  const headerHeight = 10;
+  const contentStartY = 30;
 
   // ─ RENDERIZAR BLOCOS DE DEPARTAMENTOS ─
   let blockIndex = 0;
+  let currentX = margin;
+  let currentY = contentStartY;
 
   for (const deptName of deptOrder) {
-    if (!deptMap.has(deptName)) continue;
+    if (!deptMap.has(deptName)) {
+      continue;
+    }
 
     const deptVoluntarios = deptMap.get(deptName)!;
-    const blockCol = blockIndex % blocksPerRow;
-    const blockRow = Math.floor(blockIndex / blocksPerRow);
 
-    const blockX = margin + blockCol * (blockWidth + 10);
-    const blockY = 35 + blockRow * (blockHeight + 5);
+    // Calcular altura do bloco baseado no conteúdo
+    const blockHeight = headerHeight + (deptVoluntarios.length * lineHeight) + 4;
+
+    // Verificar se precisa quebra de linha
+    const blockCol = blockIndex % blocksPerRow;
+    if (blockCol === 1) {
+      // Segunda coluna - posicionar ao lado
+      currentX = margin + maxBlockWidth + blockGap;
+    } else if (blockCol === 0 && blockIndex > 0) {
+      // Próxima linha
+      currentY += blockHeight + blockGap + 2;
+      currentX = margin;
+    } else {
+      // Primeira coluna
+      currentX = margin;
+    }
+
+    const blockX = currentX;
+    const blockY = currentY;
+    const blockWidth = maxBlockWidth;
 
     // ─ BORDA DO BLOCO ─
     doc.setDrawColor(100, 100, 100);
-    doc.setLineWidth(0.7);
+    doc.setLineWidth(0.6);
     doc.rect(blockX, blockY, blockWidth, blockHeight);
 
     // ─ HEADER DO DEPARTAMENTO ─
     doc.setFillColor(50, 50, 50);
-    doc.rect(blockX, blockY, blockWidth, 12, 'F');
+    doc.rect(blockX, blockY, blockWidth, headerHeight, 'F');
 
     doc.setTextColor(255, 215, 0);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
-    doc.text(deptName.toUpperCase(), blockX + 4, blockY + 8);
+    doc.setFontSize(10);
+    doc.text(deptName.toUpperCase(), blockX + 3, blockY + 6.5);
 
     // ─ VOLUNTÁRIOS COM SETORES ─
-    let volunteerY = blockY + 14;
+    let volunteerY = blockY + headerHeight + 2;
     let rowCount = 0;
 
     for (const vol of deptVoluntarios) {
+      // Background alternado
       if (rowCount % 2 === 1) {
         doc.setFillColor(240, 240, 240);
-        doc.rect(blockX, volunteerY - 3, blockWidth, 5, 'F');
+        doc.rect(blockX, volunteerY - 2.5, blockWidth, lineHeight - 0.5, 'F');
       }
 
+      // Nome do voluntário
       doc.setTextColor(0, 0, 0);
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.text(vol.name, blockX + 3, volunteerY);
+      doc.setFontSize(7.5);
+      doc.text(vol.name, blockX + 2, volunteerY);
 
-      doc.setTextColor(100, 100, 100);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7);
-      doc.text(vol.sector, blockX + blockWidth / 2 + 2, volunteerY);
+      // Setor do voluntário
+      doc.setTextColor(80, 80, 80);
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(6.5);
+      doc.text(vol.sector, blockX + blockWidth / 2, volunteerY);
 
-      volunteerY += 5;
+      volunteerY += lineHeight;
       rowCount++;
-
-      if (volunteerY > blockY + blockHeight - 2) break;
     }
 
     blockIndex++;
@@ -265,20 +174,20 @@ export async function exportCultoPDFBlocos(
 
   // ─ RODAPÉ ─
   doc.setFillColor(40, 40, 40);
-  doc.rect(0, pageHeight - 8, pageWidth, 8, 'F');
+  doc.rect(0, pageHeight - 7, pageWidth, 7, 'F');
 
   doc.setTextColor(150, 150, 150);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.text('EcclesiaScale', margin, pageHeight - 3);
-  doc.text('Página 1 / 1', pageWidth - margin, pageHeight - 3, { align: 'right' });
+  doc.setFontSize(6);
+  doc.text('EcclesiaScale', margin, pageHeight - 2.5);
+  doc.text('Página 1 / 1', pageWidth - margin, pageHeight - 2.5, { align: 'right' });
 
-  const filename = 'escala_' + (cult.date || 'culto').replace(/-/g, '') + '.pdf';
+  const filename = 'escala_' + (cult.date ? cult.date.replace(/-/g, '') : 'culto') + '.pdf';
   doc.save(filename);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PDF MÊS - GRID LANDSCAPE COM BLOCOS PEQUENOS
+// PDF MÊS - GRID LANDSCAPE COM BLOCOS PEQUENOS AJUSTADOS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export async function exportMesGridPDFBlocos(
@@ -296,23 +205,23 @@ export async function exportMesGridPDFBlocos(
   const pageWidth = 297;
   const pageHeight = 210;
   const margin = 8;
+  const blockGap = 4;
 
   // ─ HEADER ─
   doc.setFillColor(40, 40, 40);
-  doc.rect(0, 0, pageWidth, 25, 'F');
+  doc.rect(0, 0, pageWidth, 22, 'F');
 
   doc.setTextColor(255, 215, 0);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
+  doc.setFontSize(15);
   doc.text(title, pageWidth / 2, 12, { align: 'center' });
 
   doc.setTextColor(180, 180, 180);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   const totalVols = allScales.length;
-  doc.text(allCults.length + ' culto(s) · ' + totalVols + ' voluntário(s)', pageWidth / 2, 20, {
-    align: 'center',
-  });
+  const cultCount = allCults.length;
+  doc.text(cultCount + ' culto(s) · ' + totalVols + ' voluntário(s)', pageWidth / 2, 18.5, { align: 'center' });
 
   // ─ ORDENAR CULTOS POR DATA ─
   const sortedCults = [...allCults].sort((a, b) => a.date.localeCompare(b.date));
@@ -326,14 +235,15 @@ export async function exportMesGridPDFBlocos(
     cultMap.get(scale.cult_id)!.push(scale);
   }
 
-  // ─ LAYOUT GRID ─
+  // ─ LAYOUT DINÂMICO ─
   const colsPerPage = 4;
-  const rowsPerPage = 2;
-  const blockW = (pageWidth - margin * 2) / colsPerPage - 5;
-  const blockH = (pageHeight - 35) / rowsPerPage - 5;
+  const maxBlockWidth = (pageWidth - margin * 2 - blockGap * (colsPerPage - 1)) / colsPerPage;
+  const maxBlockHeight = (pageHeight - 30) / 2 - blockGap;
+  const minLineHeight = 2.8;
 
   let blockIndex = 0;
-  let curY = 30;
+  let currentY = 28;
+  let maxRowHeight = 0;
 
   // ─ RENDERIZAR CULTOS EM GRID ─
   for (const cult of sortedCults) {
@@ -346,18 +256,9 @@ export async function exportMesGridPDFBlocos(
 
       if (sectorLower.match(/^louvor/i)) {
         dept = 'Louvor';
-      } else if (
-        ['filmagem', 'foto', 'som', 'iluminação', 'iluminacao', 'projeção', 'projecao'].includes(
-          sectorLower
-        )
-      ) {
+      } else if (['filmagem', 'foto', 'som', 'iluminação', 'iluminacao', 'projeção', 'projecao'].includes(sectorLower)) {
         dept = 'Mídia';
-      } else if (
-        sectorLower.match(/^setor/i) ||
-        ['externo', 'máquina de cartão', 'maquina de cartao'].includes(sectorLower) ||
-        sectorLower.includes('recepção') ||
-        sectorLower.includes('recepcao')
-      ) {
+      } else if (sectorLower.match(/^setor/i) || ['externo', 'máquina de cartão', 'maquina de cartao'].includes(sectorLower) || sectorLower.includes('recepção') || sectorLower.includes('recepcao')) {
         dept = 'Obreiros';
       } else if (sectorLower.match(/^una/i)) {
         dept = 'Una';
@@ -368,42 +269,60 @@ export async function exportMesGridPDFBlocos(
       deptMap.set(dept, (deptMap.get(dept) || 0) + 1);
     }
 
+    // Calcular altura do bloco baseado no conteúdo
+    const deptCount = deptMap.size;
+    const blockHeight = 8 + (deptCount * minLineHeight) + 2;
+
     const blockCol = blockIndex % colsPerPage;
     const blockRow = Math.floor(blockIndex / colsPerPage);
 
-    if (blockRow > 0 && blockCol === 0) {
-      curY += blockH + 5;
+    // Verificar quebra de linha
+    if (blockCol === 0 && blockIndex > 0) {
+      currentY += maxRowHeight + blockGap;
+      maxRowHeight = 0;
     }
 
-    const blockX = margin + blockCol * (blockW + 5);
-    const blockY = curY;
+    maxRowHeight = Math.max(maxRowHeight, blockHeight);
 
-    doc.setDrawColor(150, 150, 150);
+    const blockX = margin + blockCol * (maxBlockWidth + blockGap);
+    const blockY = currentY;
+    const blockWidth = maxBlockWidth;
+
+    // ─ BLOCO DO CULTO ─
+    doc.setDrawColor(120, 120, 120);
     doc.setLineWidth(0.4);
-    doc.rect(blockX, blockY, blockW, blockH);
+    doc.rect(blockX, blockY, blockWidth, blockHeight);
 
+    // ─ HEADER (DATA/HORA) ─
     doc.setFillColor(50, 50, 50);
-    doc.rect(blockX, blockY, blockW, 8, 'F');
+    doc.rect(blockX, blockY, blockWidth, 8, 'F');
 
     doc.setTextColor(255, 215, 0);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7);
-    doc.text(cult.date + ' ' + cult.time, blockX + 2, blockY + 6);
+    doc.setFontSize(6.5);
+    const cultDateTime = cult.date + ' ' + cult.time;
+    doc.text(cultDateTime, blockX + 2, blockY + 5.5);
 
+    // ─ NOME DO CULTO ─
     doc.setTextColor(100, 100, 100);
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6);
-    doc.text(cult.name || cult.type_name || 'Culto', blockX + 2, blockY + 12);
+    doc.setFontSize(5);
+    const cultName = cult.name || cult.type_name || 'Culto';
+    doc.text(cultName, blockX + 2, blockY + 6.8);
 
-    let deptY = blockY + 14;
+    // ─ MINI-BLOCOS DE DEPARTAMENTOS ─
+    let deptY = blockY + 9;
     for (const [deptName, count] of deptMap) {
       doc.setTextColor(0, 0, 0);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(5);
-      doc.text(deptName + ' (' + count + ')', blockX + 2, deptY);
-      deptY += 3;
+      const deptText = deptName + ' (' + count + ')';
+      doc.text(deptText, blockX + 2, deptY);
+      deptY += minLineHeight;
 
-      if (deptY > blockY + blockH - 2) break;
+      if (deptY > blockY + blockHeight - 1) {
+        break;
+      }
     }
 
     blockIndex++;
@@ -415,15 +334,13 @@ export async function exportMesGridPDFBlocos(
 
   doc.setTextColor(150, 150, 150);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6);
+  doc.setFontSize(5.5);
   doc.text('EcclesiaScale', margin, pageHeight - 2);
   doc.text('Página 1 / 1', pageWidth - margin, pageHeight - 2, { align: 'right' });
 
   const filename = 'escalas_' + new Date().toISOString().slice(0, 7) + '.pdf';
   doc.save(filename);
 }
-
-// ─── Exports ──────────────────────────────────────────────────────────────────
 
 export async function exportScalePDF(
   scales: Scale[],
@@ -443,7 +360,6 @@ export async function exportScalePDF(
 
 export async function exportMemberScalePDF(scales: Scale[], memberName: string) {
   const doc = new jsPDF();
-  const PW = doc.internal.pageSize.getWidth();
   doc.text(memberName, 10, 10);
   doc.save('membro_' + memberName + '.pdf');
 }
