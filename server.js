@@ -557,7 +557,7 @@ app.post('/api/scales/auto-generate', auth, requireRole('SuperAdmin', 'Admin', '
   const shuffled = [...members].sort(() => Math.random() - 0.5);
 
   // ── 4. Gera escalas em memória ───────────────────────────────────────────────
-  const toInsert: { cult_id: number; member_id: number; sector_id: number }[] = [];
+  const toInsert = [];
 
   for (const cult of cults) {
     const monthStr = cult.date.slice(0, 7);
